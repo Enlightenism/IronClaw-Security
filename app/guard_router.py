@@ -13,7 +13,7 @@ from app.dependencies.rate_limit import limit_guard_routes
 router = APIRouter(prefix="/claude-guard-router", tags=["claude-guard-router"])
 
 GuardMode = Literal["assist", "enforce"]
-VerdictType = Literal["allow", "warn", "quarantine", "block"]
+VerdictType = Literal["allow", "block"]
 
 
 class GuardedStreamConfig(BaseModel):
@@ -71,6 +71,10 @@ class _GuardHttpClient:
 _guard_http_client = _GuardHttpClient()
 
 
+def _normalize_guard_verdict(value: Any) -> VerdictType:
+    return "allow" if isinstance(value, str) and value.strip().lower() == "allow" else "block"
+
+
 @router.on_event("startup")
 async def _startup_guard_http_client() -> None:
     await _guard_http_client.startup()
@@ -97,13 +101,21 @@ async def scan_with_policy_guard(
         raise HTTPException(status_code=502, detail=f"Guard service returned {response.status_code}")
 
     data = response.json()
-    verdict = str(data.get("verdict", "allow"))
-    reason = str(data.get("reason", ""))
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="Guard service returned an invalid response")
+    raw_verdict = data.get("verdict")
+    verdict = _normalize_guard_verdict(raw_verdict)
+    reason = data.get("reason")
+    if not isinstance(reason, str):
+        reason = ""
+    if verdict == "block" and not reason:
+        reason = "Guard service blocked the request." if isinstance(raw_verdict, str) and raw_verdict.strip().lower() == "block" else "Guard service verdict missing or invalid; request blocked."
     truncated = bool(data.get("truncated", False))
-    metadata = dict(data.get("metadata") or {})
+    raw_metadata = data.get("metadata")
+    metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
 
     return GuardBundleVerdict(
-        verdict=verdict,  # type: ignore[arg-type]
+        verdict=verdict,
         reason=reason,
         truncated=truncated,
         metadata=metadata,

@@ -78,7 +78,7 @@ def test_command_supervisor_allows_safe_python_command() -> None:
     assert len(policy_engine.calls) == 1
 
 
-def test_command_supervisor_reviews_network_shell_usage() -> None:
+def test_command_supervisor_blocks_network_shell_usage() -> None:
     policy_engine = _PolicyEngineStub(
         _Decision(
             verdict="review",
@@ -99,10 +99,10 @@ def test_command_supervisor_reviews_network_shell_usage() -> None:
         metadata={"network": True},
     )
 
-    assert result.verdict == "review"
-    assert result.allowed is True
+    assert result.verdict == "block"
+    assert result.allowed is False
     assert result.should_review is True
-    assert result.should_block is False
+    assert result.should_block is True
 
 
 def test_command_supervisor_blocks_destructive_command() -> None:
@@ -130,7 +130,7 @@ def test_command_supervisor_blocks_destructive_command() -> None:
     assert result.should_block is True
 
 
-def test_command_supervisor_quarantines_exfiltration_attempt() -> None:
+def test_command_supervisor_blocks_exfiltration_attempt() -> None:
     policy_engine = _PolicyEngineStub(
         _Decision(
             verdict="quarantine",
@@ -152,10 +152,10 @@ def test_command_supervisor_quarantines_exfiltration_attempt() -> None:
         metadata={"contains_sensitive_files": True},
     )
 
-    assert result.verdict == "quarantine"
+    assert result.verdict == "block"
     assert result.allowed is False
     assert result.should_block is True
-    assert result.should_quarantine is True
+    assert result.should_quarantine is False
 
 
 def test_command_supervisor_passes_context_to_policy_engine() -> None:
@@ -202,7 +202,9 @@ def test_command_supervisor_handles_missing_command() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 
@@ -226,7 +228,9 @@ def test_command_supervisor_handles_blank_command() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 
@@ -250,7 +254,9 @@ def test_command_supervisor_handles_missing_tool_name() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 

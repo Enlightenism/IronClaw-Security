@@ -85,7 +85,7 @@ def _make_triage_dict(
             "team": "soc",
         },
         "decision": {
-            "decision": "quarantine",
+            "decision": "block",
             "confidence": "high",
             "rationale": "Tool call targeted external exfiltration endpoint.",
         },
@@ -560,7 +560,7 @@ class TestBuildIncidentTriage:
     def test_decision_is_populated_from_payload(self):
         data = _make_triage_dict()
         triage = build_incident_triage(data)
-        assert triage.decision.decision == "quarantine"
+        assert triage.decision.decision == "block"
         assert triage.decision.confidence == "high"
         assert "exfiltration" in triage.decision.rationale
 

@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from orchestrator.remediationgate import (
     GateDecision,
     RemediationAction,
@@ -104,25 +105,33 @@ class Supervisor:
         request_id = str(request.get("request_id") or f"req-{uuid4().hex}")
 
         gate_decision = self.gate.evaluate(request)
+        gate_verdict = str(gate_decision.metadata.get("verdict", "allow")).strip().lower()
+        blocked = not gate_decision.allowed or gate_decision.action != RemediationAction.NONE or gate_verdict != "allow" or gate_decision.review_required or gate_decision.quarantine_required
+        gate_payload = gate_decision.to_dict()
+        gate_payload["allowed"] = not blocked
+        gate_payload["action"] = "block" if blocked else "allow"
+        gate_metadata = dict(gate_payload.get("metadata") or {})
+        gate_metadata["verdict"] = "block" if blocked else "allow"
+        gate_payload["metadata"] = gate_metadata
         decision = SupervisorDecision(
             supervisor_id=f"sup-{uuid4().hex}",
             request_id=request_id,
             status=SupervisorStatus.READY,
-            allowed=True,
-            action=gate_decision.action.value,
-            gate=gate_decision.to_dict(),
-            quarantine_required=gate_decision.quarantine_required,
+            allowed=not blocked,
+            action="block" if blocked else "allow",
+            gate=gate_payload,
+            quarantine_required=gate_decision.quarantine_required or gate_decision.action == RemediationAction.QUARANTINE,
             sandbox_required=gate_decision.sandbox_required,
             redaction_required=gate_decision.redaction_required,
             metadata={
                 "risk_score": gate_decision.metadata.get("risk_score"),
-                "verdict": gate_decision.metadata.get("verdict"),
+                "verdict": "block" if blocked else "allow",
             },
         )
         decision.add_event(
             "gate_evaluated",
             "Remediation gate evaluated request.",
-            {"gate_status": gate_decision.status.value, "action": gate_decision.action.value},
+            {"gate_status": gate_decision.status.value, "action": decision.action},
         )
 
         self._apply_gate_outcome(decision, gate_decision, request)
@@ -138,27 +147,23 @@ class Supervisor:
         gate_decision: GateDecision,
         request: Mapping[str, Any],
     ) -> None:
-        if gate_decision.action == RemediationAction.BLOCK:
-            decision.status = SupervisorStatus.BLOCKED
-            decision.allowed = False
+        gate_verdict = str(gate_decision.metadata.get("verdict", "allow")).strip().lower()
+        blocked = not gate_decision.allowed or gate_decision.action != RemediationAction.NONE or gate_verdict != "allow" or gate_decision.review_required or gate_decision.quarantine_required
+        if not blocked:
+            decision.status = SupervisorStatus.APPROVED
+            decision.allowed = True
+            decision.action = "allow"
             decision.add_event(
-                "blocked",
-                "Supervisor blocked the request.",
+                "approved",
+                "Supervisor approved the request without additional intervention.",
                 {"reasons": gate_decision.reasons},
             )
             return
 
-        if gate_decision.action == RemediationAction.QUARANTINE:
-            decision.status = SupervisorStatus.QUARANTINED
-            decision.allowed = False
-            decision.quarantine_required = True
-            decision.add_event(
-                "quarantined",
-                "Supervisor quarantined the request.",
-                {"reasons": gate_decision.reasons},
-            )
-            return
-
+        decision.status = SupervisorStatus.BLOCKED
+        decision.allowed = False
+        decision.action = "block"
+        decision.quarantine_required = decision.quarantine_required or (gate_decision.action == RemediationAction.QUARANTINE)
         if gate_decision.action == RemediationAction.REQUIRE_REVIEW or gate_decision.review_required:
             review_item = self.review_queue.create(
                 request_id=decision.request_id,
@@ -173,7 +178,7 @@ class Supervisor:
                 tags=request.get("tags") or [],
                 metadata={
                     "source": "supervisor",
-                    "gate_action": gate_decision.action.value,
+                    "gate_action": "block",
                     "gate_status": gate_decision.status.value,
                 },
             )
@@ -185,41 +190,19 @@ class Supervisor:
                 "Supervisor created a human review item.",
                 {"review_id": review_item.review_id, "queue": review_item.queue},
             )
-            return
-
-        if gate_decision.action == RemediationAction.APPLY_REDACTION:
-            decision.status = SupervisorStatus.CONDITIONAL
-            decision.allowed = True
-            decision.redaction_required = True
-            if gate_decision.sandbox_required:
-                decision.sandbox_required = True
+        if decision.quarantine_required:
             decision.add_event(
-                "conditional_redaction",
-                "Request allowed with mandatory redaction safeguards.",
-                {
-                    "sandbox_required": decision.sandbox_required,
-                    "reasons": gate_decision.reasons,
-                },
+                "quarantined",
+                "Containment is required while the request remains blocked.",
+                {"verdict": "block"},
             )
-            return
-
-        if gate_decision.action == RemediationAction.SANDBOX_ONLY:
-            decision.status = SupervisorStatus.CONDITIONAL
-            decision.allowed = True
-            decision.sandbox_required = True
-            decision.add_event(
-                "conditional_sandbox",
-                "Request allowed only within sandbox boundaries.",
-                {"reasons": gate_decision.reasons},
-            )
-            return
-
-        decision.status = SupervisorStatus.APPROVED
-        decision.allowed = True
         decision.add_event(
-            "approved",
-            "Supervisor approved the request without additional intervention.",
-            {"reasons": gate_decision.reasons},
+            "blocked",
+            "Supervisor blocked the request.",
+            {
+                "reasons": gate_decision.reasons,
+                "quarantine_required": decision.quarantine_required,
+            },
         )
 
     def _review_priority_from_request(
@@ -231,12 +214,15 @@ class Supervisor:
         if explicit:
             return ReviewPriority(str(explicit).lower())
 
-        risk_score = int(gate_decision.metadata.get("risk_score", 0) or 0)
-        if gate_decision.quarantine_required or risk_score >= 90:
+        try:
+            risk_score = int(gate_decision.metadata.get("risk_score", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            risk_score = RISK_THRESHOLD_BLOCK_MIN
+        if gate_decision.quarantine_required:
             return ReviewPriority.CRITICAL
-        if risk_score >= 70:
+        if risk_score >= RISK_THRESHOLD_BLOCK_MIN:
             return ReviewPriority.HIGH
-        if risk_score >= 40:
+        if risk_score > RISK_THRESHOLD_ALLOW_MAX:
             return ReviewPriority.MEDIUM
         return ReviewPriority.LOW
 

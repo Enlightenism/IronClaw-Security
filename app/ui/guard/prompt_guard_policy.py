@@ -7,6 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.services.guard_security_brain import GuardMode
 
 router = APIRouter(
@@ -25,7 +26,7 @@ PromptGuardCategory = Literal[
     "policy_bypass",
     "unsafe_execution",
 ]
-PromptGuardAction = Literal["allow", "warn", "block", "quarantine"]
+PromptGuardAction = Literal["allow", "block"]
 
 # Maps every GuardMode value to the closest PolicyMode equivalent.
 # "strict" has no direct PolicyMode counterpart — "enforce" is the correct semantic mapping.
@@ -192,7 +193,7 @@ def _build_default_rules() -> list[PromptGuardRule]:
             description="Detects attempts to extract data, logs, memory, or confidential context.",
             enabled=True,
             severity_weight=92,
-            default_action="quarantine",
+            default_action="block",
             match_patterns=[
                 "export all data",
                 "send secrets externally",
@@ -208,7 +209,7 @@ def _build_default_rules() -> list[PromptGuardRule]:
             description="Detects requests for keys, tokens, credentials, or internal secrets.",
             enabled=True,
             severity_weight=90,
-            default_action="quarantine",
+            default_action="block",
             match_patterns=[
                 "show api key",
                 "print token",
@@ -256,7 +257,7 @@ def _build_default_rules() -> list[PromptGuardRule]:
             description="Detects prompts that try to trigger dangerous execution paths or destructive actions.",
             enabled=True,
             severity_weight=88,
-            default_action="quarantine",
+            default_action="block",
             match_patterns=[
                 "delete all files",
                 "disable protection",
@@ -276,11 +277,12 @@ def build_prompt_guard_policy_view(
     rules = _build_default_rules()
 
     thresholds = PromptGuardThresholds(
-        warn_score=35,
-        block_score=70,
-        quarantine_score=85,
+        warn_score=RISK_THRESHOLD_BLOCK_MIN,
+        block_score=RISK_THRESHOLD_BLOCK_MIN,
+        quarantine_score=RISK_THRESHOLD_BLOCK_MIN,
         metadata={
             "scoring_model": "guard-prompt-guard-v1",
+            "legacy_outcome_thresholds": ("warn_score and quarantine_score mirror block_score; only allow/block verdicts are emitted."),
         },
     )
 

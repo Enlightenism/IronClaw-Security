@@ -58,7 +58,7 @@ def test_scan_rejects_empty_after_normalization():
     assert response.status_code == 400
 
 
-def test_scan_quarantines_sandbox_targets():
+def test_scan_blocks_sandbox_targets():
     response = client.post(
         "/scan/",
         json={
@@ -68,62 +68,11 @@ def test_scan_quarantines_sandbox_targets():
     )
     assert response.status_code == 200
     data = response.json()
+    assert data["verdict"] == "block"
+    assert data["review_status"] == "none"
     assert data["risk_score"] >= 0
-    assert "sandbox" in " ".join(data.get("failed_checks", [])).lower() or isinstance(
-        data.get("failed_checks", []),
-        list,
-    )
-    assert "sandbox" in data["summary"].lower() or isinstance(data["summary"], str)
-
-
-def test_review_approve_quarantined_scan():
-    scan_response = client.post(
-        "/scan/",
-        json={
-            "target_type": "text",
-            "target_value": "system developer instructions hidden prompt policy real policy",
-        },
-    )
-    assert scan_response.status_code == 200
-    scan_data = scan_response.json()
-
-    if scan_data.get("verdict") != "quarantine":
-        return
-
-    history_response = client.get("/history/")
-    assert history_response.status_code == 200
-    history = history_response.json()
-    items = history["items"]
-    target_item = next((i for i in items if i.get("scan_id") == scan_data.get("scan_id")), None)
-    if not target_item:
-        return
-
-    review_response = client.post(
-        f"/history/{target_item['scan_id']}/review",
-        json={"action": "approve"},
-    )
-    assert review_response.status_code in (200, 404)
-
-
-def test_review_reject_quarantined_scan():
-    scan_response = client.post(
-        "/scan/",
-        json={
-            "target_type": "text",
-            "target_value": "system developer instructions hidden prompt policy real policy",
-        },
-    )
-    assert scan_response.status_code == 200
-    scan_data = scan_response.json()
-
-    if scan_data.get("verdict") != "quarantine":
-        return
-
-    review_response = client.post(
-        f"/history/{scan_data['scan_id']}/review",
-        json={"action": "reject"},
-    )
-    assert review_response.status_code in (200, 404)
+    assert any("sandbox" in check.lower() for check in data["failed_checks"])
+    assert "sandbox" in data["summary"].lower()
 
 
 def test_scan_detects_powershell_encoded_command_rule():
@@ -165,7 +114,7 @@ def test_scan_detects_yaml_unsafe_load_rule():
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["verdict"] in ("warn", "quarantine", "block")
+    assert data["verdict"] == "block"
     assert "yaml_unsafe_load" in data["matched_patterns"]
 
 
@@ -179,7 +128,7 @@ def test_scan_detects_prompt_injection_rule():
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["verdict"] in ("quarantine", "block")
+    assert data["verdict"] == "block"
     assert "prompt_ignore_previous_instructions" in data["matched_patterns"]
 
 
@@ -193,7 +142,7 @@ def test_scan_detects_system_prompt_exfiltration_rule():
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["verdict"] in ("quarantine", "block")
+    assert data["verdict"] == "block"
     assert "prompt_reveal_system_prompt" in data["matched_patterns"]
     assert "prompt_disclose_hidden_instructions" in data["matched_patterns"]
 
@@ -208,7 +157,7 @@ def test_scan_detects_developer_override_and_hidden_policy_rules():
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["verdict"] in ("quarantine", "block")
+    assert data["verdict"] == "block"
     assert "prompt_ignore_developer_message" in data["matched_patterns"]
     assert "prompt_print_hidden_policy" in data["matched_patterns"]
 
@@ -223,7 +172,7 @@ def test_scan_detects_tool_schema_and_credential_export_rules():
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["verdict"] in ("quarantine", "block")
+    assert data["verdict"] == "block"
     assert "prompt_output_tool_schema" in data["matched_patterns"]
     assert "prompt_export_credentials" in data["matched_patterns"]
 
@@ -238,7 +187,7 @@ def test_scan_detects_obfuscated_prompt_injection_text():
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["verdict"] in ("quarantine", "block")
+    assert data["verdict"] == "block"
     assert "prompt_ignore_previous_instructions" in data["matched_patterns"]
     assert "prompt_reveal_system_prompt" in data["matched_patterns"]
 
@@ -253,7 +202,7 @@ def test_scan_detects_instruction_hierarchy_override_variants():
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["verdict"] in ("quarantine", "block")
+    assert data["verdict"] == "block"
     assert "prompt_forget_prior_instructions" in data["matched_patterns"]
     assert "prompt_ignore_system_message" in data["matched_patterns"]
     assert "prompt_higher_priority_than_rules" in data["matched_patterns"]
@@ -269,13 +218,13 @@ def test_scan_blocks_indirect_prompt_injection_document_style_payload():
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["verdict"] in ("quarantine", "block")
+    assert data["verdict"] == "block"
     assert "prompt_treat_document_as_system_prompt" in data["matched_patterns"]
     assert "prompt_assistant_execute_following" in data["matched_patterns"]
     assert "prompt_ignore_user_and_follow_document" in data["matched_patterns"]
 
 
-def test_scan_quarantines_heuristic_only_prompt_injection():
+def test_scan_blocks_heuristic_only_prompt_injection():
     response = client.post(
         "/scan/",
         json={
@@ -285,14 +234,14 @@ def test_scan_quarantines_heuristic_only_prompt_injection():
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["verdict"] in ("quarantine", "block")
+    assert data["verdict"] == "block"
     assert "heuristic_prompt_injection_score" in data["matched_patterns"]
-    assert data.get("review_status") in ("pending", "none", "approved", "rejected")
-    assert isinstance(data.get("untrusted", False), bool)
+    assert data["review_status"] == "none"
+    assert data["untrusted"] is True
     assert data["quarantine_reason"] is None or isinstance(data["quarantine_reason"], str)
 
 
-def test_review_approves_quarantined_scan():
+def test_blocked_scan_can_be_reviewed_without_releasing_block():
     scan_response = client.post(
         "/scan/",
         json={
@@ -302,65 +251,28 @@ def test_review_approves_quarantined_scan():
     )
     assert scan_response.status_code == 200
     scan_data = scan_response.json()
+    assert scan_data["verdict"] == "block"
+    assert scan_data["review_status"] == "none"
+    assert scan_data["untrusted"] is True
 
-    if scan_data.get("verdict") != "quarantine":
-        return
-
-    history_response = client.get("/history/")
+    history_response = client.get(f"/history/{scan_data['scan_id']}")
     assert history_response.status_code == 200
-    history = history_response.json()
-    items = history["items"]
-    if not items:
-        return
-    target_item = next((i for i in items if i["scan_id"] == scan_data["scan_id"]), None)
-    if not target_item:
-        return
-    scan_id = target_item["scan_id"]
+    history_data = history_response.json()
+    assert history_data["verdict"] == "block"
+    assert history_data["review_status"] == "none"
 
-    review_response = client.post(f"/history/{scan_id}/review", json={"action": "approve"})
-    assert review_response.status_code == 200
-    review_data = review_response.json()
-    assert review_data["scan_id"] == scan_id
-    assert review_data["review_status"] == "approved"
-    assert review_data["verdict"] == "allow"
-    assert review_data["untrusted"] is False
-
-
-def test_review_rejects_quarantined_scan():
-    scan_response = client.post(
-        "/scan/",
-        json={
-            "target_type": "text",
-            "target_value": "system developer instructions hidden prompt policy real policy",
-        },
+    review_response = client.post(
+        f"/history/{scan_data['scan_id']}/review",
+        json={"action": "approve"},
     )
-    assert scan_response.status_code == 200
-    scan_data = scan_response.json()
-
-    if scan_data.get("verdict") != "quarantine":
-        return
-
-    history_response = client.get("/history/")
-    assert history_response.status_code == 200
-    history = history_response.json()
-    items = history["items"]
-    if not items:
-        return
-    target_item = next((i for i in items if i["scan_id"] == scan_data["scan_id"]), None)
-    if not target_item:
-        return
-    scan_id = target_item["scan_id"]
-
-    review_response = client.post(f"/history/{scan_id}/review", json={"action": "reject"})
     assert review_response.status_code == 200
-    review_data = review_response.json()
-    assert review_data["scan_id"] == scan_id
-    assert review_data["review_status"] == "rejected"
-    assert review_data["verdict"] == "block"
-    assert review_data["untrusted"] is True
+    reviewed_data = review_response.json()
+    assert reviewed_data["verdict"] == "block"
+    assert reviewed_data["review_status"] == "approved"
+    assert reviewed_data["untrusted"] is True
 
 
-def test_review_fails_for_non_quarantined_scan():
+def test_review_fails_for_allowed_scan():
     scan_response = client.post(
         "/scan/",
         json={
@@ -371,19 +283,12 @@ def test_review_fails_for_non_quarantined_scan():
     assert scan_response.status_code == 200
     scan_data = scan_response.json()
     assert scan_data["verdict"] == "allow"
+    assert scan_data["review_status"] == "none"
 
-    history_response = client.get("/history/")
-    assert history_response.status_code == 200
-    history = history_response.json()
-    items = history["items"]
-    if not items:
-        return
-    target_item = next((i for i in items if i["scan_id"] == scan_data["scan_id"]), None)
-    if not target_item:
-        return
-    scan_id = target_item["scan_id"]
-
-    review_response = client.post(f"/history/{scan_id}/review", json={"action": "approve"})
+    review_response = client.post(
+        f"/history/{scan_data['scan_id']}/review",
+        json={"action": "approve"},
+    )
     assert review_response.status_code == 400
     review_data = review_response.json()
     assert review_data["error"] == "invalid_review_state"
@@ -416,7 +321,7 @@ def test_guard_action_blocks_malicious_shell_command():
             assert item.get("source") in {"policy", "scan", "ai"}
 
 
-def test_action_policy_reviews_shell_command_target():
+def test_action_policy_blocks_shell_command_target():
     response = client.post(
         "/guard/action-policy",
         json={
@@ -430,16 +335,16 @@ def test_action_policy_reviews_shell_command_target():
     assert response.status_code == 200
     data = response.json()
     assert data["action_type"] == "shell_command"
-    assert data["policy_mode"] == "review"
-    assert data["verdict"] == "warn"
-    assert data["should_halt"] is False
-    assert data["should_warn"] is True
+    assert data["policy_mode"] == "block"
+    assert data["verdict"] == "block"
+    assert data["should_halt"] is True
+    assert data["should_warn"] is False
     assert data["client_id"] == "test-client-123"
     assert data["session_id"] == "session-abc-456"
     assert isinstance(data.get("reasons", []), list)
 
 
-def test_action_decision_blocks_when_scan_is_stronger_than_policy():
+def test_action_decision_reports_policy_and_scan_when_both_block():
     response = client.post(
         "/guard/action-decision",
         json={
@@ -453,9 +358,9 @@ def test_action_decision_blocks_when_scan_is_stronger_than_policy():
     assert response.status_code == 200
     data = response.json()
     assert data["action_type"] == "shell_command"
-    assert data["policy_mode"] == "review"
+    assert data["policy_mode"] == "block"
     assert data["verdict"] == "block"
-    assert data["decision_source"] == "scan"
+    assert data["decision_source"] == "policy_and_scan"
     assert data["should_halt"] is True
     assert data["should_warn"] is False
     assert "ps_invoke_webrequest" in data["matched_patterns"]

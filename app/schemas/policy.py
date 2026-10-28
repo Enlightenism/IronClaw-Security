@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,13 +12,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class PolicyEnforcementMode(StrEnum):
-    """How the policy engine handles a matched rule."""
+    """Configuration for how a matched rule is handled."""
 
     block = "block"
     warn = "warn"
     quarantine = "quarantine"
     allow = "allow"
     audit = "audit"
+
+
+FinalPolicyVerdict = Literal["allow", "block"]
 
 
 class PolicyScope(StrEnum):
@@ -177,7 +180,7 @@ class PolicyVerdict(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    verdict: PolicyEnforcementMode
+    verdict: FinalPolicyVerdict
     matched_rules: list[PolicyRuleMatch] = Field(default_factory=list)
     severity: PolicySeverity = PolicySeverity.info
     risk_score: int = Field(0, ge=0, le=100)
@@ -195,7 +198,7 @@ class PolicyEvaluationResult(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    verdict: PolicyEnforcementMode
+    verdict: FinalPolicyVerdict
     matched_rules: list[str] = Field(default_factory=list, description="rule_ids that matched")
     severity: PolicySeverity = PolicySeverity.info
     risk_score: int = Field(0, ge=0, le=100)

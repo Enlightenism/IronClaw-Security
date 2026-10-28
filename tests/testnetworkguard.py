@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.runtime.networkguard import DEFAULT_ALLOWED_HOSTS, build_network_guard
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+from app.runtime.networkguard import DEFAULT_ALLOWED_HOSTS, NetworkReason, build_network_guard
 
 
 @pytest.fixture
@@ -16,7 +17,7 @@ def test_groq_api_host_is_not_default_allowlisted() -> None:
 
 def test_allow_safe_https_request(guard):
     policy = guard.evaluate(
-        url="https://api.example.com/v1/status",
+        url="https://api.openai.com/v1/status",
         method="GET",
         metadata={"direction": "egress"},
     )
@@ -24,7 +25,7 @@ def test_allow_safe_https_request(guard):
     assert policy.allowed is True
     assert policy.verdict == "allow"
     assert policy.scheme == "https"
-    assert policy.host == "api.example.com"
+    assert policy.host == "api.openai.com"
     assert policy.port == 443
     assert policy.should_block is False
     assert policy.should_quarantine is False
@@ -32,7 +33,7 @@ def test_allow_safe_https_request(guard):
 
 def test_allow_defaults_method_to_get(guard):
     policy = guard.evaluate(
-        url="https://api.example.com/v1/health",
+        url="https://api.openai.com/v1/health",
         method="",
     )
 
@@ -41,29 +42,29 @@ def test_allow_defaults_method_to_get(guard):
     assert policy.method == "GET"
 
 
-def test_quarantine_missing_url(guard):
+def test_missing_url_blocks(guard):
     policy = guard.evaluate(url="", method="GET")
 
     assert policy.allowed is False
-    assert policy.verdict == "quarantine"
-    assert policy.should_quarantine is True
+    assert policy.verdict == "block"
+    assert policy.should_quarantine is False
     assert "missing_url" in policy.matched_rules
 
 
-def test_quarantine_invalid_url_format(guard):
+def test_invalid_url_format_blocks(guard):
     policy = guard.evaluate(url="not-a-url", method="GET")
 
     assert policy.allowed is False
-    assert policy.verdict == "quarantine"
-    assert policy.should_quarantine is True
+    assert policy.verdict == "block"
+    assert policy.should_quarantine is False
     assert "invalid_url" in policy.matched_rules
 
 
-def test_quarantine_missing_hostname(guard):
+def test_missing_hostname_blocks(guard):
     policy = guard.evaluate(url="https:///v1/test", method="GET")
 
     assert policy.allowed is False
-    assert policy.verdict == "quarantine"
+    assert policy.verdict == "block"
     assert "missing_host" in policy.matched_rules
 
 
@@ -81,41 +82,42 @@ def test_quarantine_missing_hostname(guard):
         "http://[fd00::1]/",
     ],
 )
-def test_quarantine_private_loopback_and_link_local_targets(guard, url):
+def test_private_loopback_and_link_local_targets_block(guard, url):
     policy = guard.evaluate(url=url, method="GET")
 
     assert policy.allowed is False
-    assert policy.verdict == "quarantine"
-    assert policy.should_quarantine is True
+    assert policy.verdict == "block"
+    assert policy.should_quarantine is False
 
 
-def test_quarantine_blocked_scheme_file(guard):
+def test_blocked_scheme_file_blocks(guard):
     policy = guard.evaluate(url="file:///etc/passwd", method="GET")
 
     assert policy.allowed is False
-    assert policy.verdict == "quarantine"
+    assert policy.verdict == "block"
     assert "blocked_scheme:file" in policy.matched_rules
 
 
-def test_quarantine_blocked_scheme_ftp(guard):
+def test_blocked_scheme_ftp_blocks(guard):
     policy = guard.evaluate(url="ftp://example.com/file.txt", method="GET")
 
     assert policy.allowed is False
-    assert policy.verdict == "quarantine"
+    assert policy.verdict == "block"
     assert "blocked_scheme:ftp" in policy.matched_rules
 
 
-def test_review_plain_http_when_not_explicitly_blocked(guard):
+def test_plain_http_blocks(guard):
     policy = guard.evaluate(url="http://example.com/resource", method="GET")
 
-    assert policy.verdict in {"review", "block", "quarantine"}
-    assert any(rule.startswith("insecure_scheme:http") or rule == "insecure_scheme:http" for rule in policy.matched_rules)
+    assert policy.verdict == "block"
+    assert policy.risk_delta >= RISK_THRESHOLD_BLOCK_MIN
+    assert "insecure_scheme:http" in policy.matched_rules
 
 
-def test_review_suspicious_port(guard):
+def test_suspicious_port_blocks(guard):
     policy = guard.evaluate(url="https://example.com:25/mail", method="GET")
 
-    assert policy.verdict in {"review", "block", "quarantine"}
+    assert policy.verdict == "block"
     assert any("port" in rule for rule in policy.matched_rules)
 
 
@@ -127,7 +129,7 @@ def test_block_or_quarantine_disallowed_http_methods(guard, method):
     policy = guard.evaluate(url="https://example.com/resource", method=method)
 
     assert policy.allowed is False
-    assert policy.verdict in {"block", "quarantine"}
+    assert policy.verdict == "block"
 
 
 @pytest.mark.parametrize(
@@ -137,46 +139,46 @@ def test_block_or_quarantine_disallowed_http_methods(guard, method):
         "169.254.169.254.nip.io",
     ],
 )
-def test_quarantine_ssrf_style_targets(guard, host):
+def test_ssrf_style_targets_block(guard, host):
     policy = guard.evaluate(url=f"https://{host}/computeMetadata/v1/", method="GET")
 
     assert policy.allowed is False
-    assert policy.verdict in {"block", "quarantine"}
+    assert policy.verdict == "block"
 
 
-def test_review_suspicious_path_patterns(guard):
+def test_suspicious_path_patterns_block(guard):
     policy = guard.evaluate(
         url="https://example.com/.aws/credentials",
         method="GET",
     )
 
-    assert policy.verdict in {"review", "block", "quarantine"}
+    assert policy.verdict == "block"
     assert len(policy.reasons) > 0
 
 
-def test_review_suspicious_query_patterns(guard):
+def test_suspicious_query_patterns_block(guard):
     policy = guard.evaluate(
         url="https://example.com/download?token=secret-token-value",
         method="GET",
     )
 
-    assert policy.verdict in {"review", "block", "quarantine"}
+    assert policy.verdict == "block"
     assert len(policy.reasons) > 0
 
 
-def test_review_sensitive_metadata_direction_ingress_override(guard):
+def test_sensitive_metadata_direction_ingress_override_blocks(guard):
     policy = guard.evaluate(
-        url="https://api.example.com/webhook",
+        url="https://api.openai.com/webhook",
         method="POST",
         metadata={"direction": "ingress"},
     )
 
-    assert policy.verdict in {"allow", "review", "block", "quarantine"}
+    assert policy.verdict == "allow"
 
 
 def test_allow_safe_post_to_public_api(guard):
     policy = guard.evaluate(
-        url="https://hooks.example.com/v1/events",
+        url="https://api.openai.com/v1/events",
         method="POST",
         metadata={"direction": "egress", "tool_name": "api"},
     )
@@ -187,7 +189,7 @@ def test_allow_safe_post_to_public_api(guard):
 
 def test_policy_dict_contains_expected_shapes(guard):
     policy = guard.evaluate(
-        url="https://api.example.com/v1/status",
+        url="https://api.openai.com/v1/status",
         method="GET",
     )
     body = policy.as_dict()
@@ -202,31 +204,31 @@ def test_policy_dict_contains_expected_shapes(guard):
 
 
 def test_allow_helper_matches_policy_allowed(guard):
-    policy = guard.evaluate(url="https://api.example.com/v1/status", method="GET")
-    decision = guard.allow(url="https://api.example.com/v1/status", method="GET")
+    policy = guard.evaluate(url="https://api.openai.com/v1/status", method="GET")
+    decision = guard.allow(url="https://api.openai.com/v1/status", method="GET")
 
     assert decision is policy.allowed
 
 
 def test_reasons_and_rules_are_deduplicated_when_detectors_repeat(monkeypatch, guard):
-    repeated_reason = {
-        "source": "networkguard",
-        "label": "Repeated",
-        "details": "Same reason",
-        "score": 15,
-    }
+    repeated_reason = NetworkReason(
+        source="networkguard",
+        label="Repeated",
+        details="Same reason",
+        score=15,
+    )
 
     monkeypatch.setattr(
         guard,
-        "_analyze_url",
-        lambda *args, **kwargs: (
+        "_evaluate_path",
+        lambda path: (
             15,
             [repeated_reason, repeated_reason],
             ["repeat_rule", "repeat_rule"],
         ),
     )
 
-    policy = guard.evaluate(url="https://api.example.com/v1/status", method="GET")
+    policy = guard.evaluate(url="https://api.openai.com/v1/status", method="GET")
 
     repeated = [item for item in policy.reasons if item["label"] == "Repeated" and item["details"] == "Same reason"]
     assert len(repeated) == 1

@@ -7,6 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.services.guard_security_brain import (
     GuardMode,
     GuardSecurityDecision,
@@ -37,9 +38,9 @@ def _health_from_mode_and_risk(
 ) -> HealthState:
     if mode == "disabled":
         return "disabled"
-    if last_verdict in {"block", "quarantine"} or last_risk_score >= 80:
+    if last_verdict == "block" or last_risk_score >= RISK_THRESHOLD_BLOCK_MIN:
         return "critical"
-    if last_verdict == "warn" or last_risk_score >= 40:
+    if last_risk_score > RISK_THRESHOLD_ALLOW_MAX:
         return "warning"
     return "healthy"
 
@@ -146,8 +147,8 @@ def _aggregate_decisions(
 ) -> GuardBrainStatusItem:
     total = len(decisions)
     blocked = sum(1 for d in decisions if d.verdict == "block")
-    quarantined = sum(1 for d in decisions if d.verdict == "quarantine")
-    warned = sum(1 for d in decisions if d.verdict == "warn")
+    quarantined = 0
+    warned = 0
     allowed = sum(1 for d in decisions if d.verdict == "allow")
 
     last_decision: GuardSecurityDecision | None = decisions[-1] if decisions else None

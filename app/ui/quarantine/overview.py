@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+
 router = APIRouter(
     prefix="/ui/quarantine",
     tags=["quarantine-overview"],
@@ -95,8 +97,8 @@ def _sample_quarantine_records() -> list[dict[str, object]]:
             "actiontype": "toolcall",
             "severity": "high",
             "status": "active",
-            "policyverdict": "quarantine",
-            "riskscore": 88,
+            "policyverdict": "block",
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 88),
             "isolatedat": _utc_iso(2026, 4, 18, 13, 0),
             "updatedat": _utc_iso(2026, 4, 18, 13, 12),
             "reason": "Repeated risky shell-oriented pattern triggered quarantine containment.",
@@ -113,8 +115,8 @@ def _sample_quarantine_records() -> list[dict[str, object]]:
             "actiontype": "toolcall",
             "severity": "high",
             "status": "pendingrelease",
-            "policyverdict": "review",
-            "riskscore": 67,
+            "policyverdict": "block",
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 67),
             "isolatedat": _utc_iso(2026, 4, 18, 12, 10),
             "updatedat": _utc_iso(2026, 4, 18, 12, 55),
             "reason": "Sensitive file-oriented action isolated while analyst review remains pending.",
@@ -132,7 +134,7 @@ def _sample_quarantine_records() -> list[dict[str, object]]:
             "severity": "critical",
             "status": "active",
             "policyverdict": "block",
-            "riskscore": 91,
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 91),
             "isolatedat": _utc_iso(2026, 4, 18, 9, 5),
             "updatedat": _utc_iso(2026, 4, 18, 11, 40),
             "reason": "Blocked shell-style request remained isolated for investigation and evidence retention.",
@@ -149,8 +151,8 @@ def _sample_quarantine_records() -> list[dict[str, object]]:
             "actiontype": "httpfetch",
             "severity": "medium",
             "status": "released",
-            "policyverdict": "warn",
-            "riskscore": 49,
+            "policyverdict": "block",
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 49),
             "isolatedat": _utc_iso(2026, 4, 18, 7, 45),
             "updatedat": _utc_iso(2026, 4, 18, 8, 30),
             "reason": "Fetch was temporarily isolated and later released after manual review.",

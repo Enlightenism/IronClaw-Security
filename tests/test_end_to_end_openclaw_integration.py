@@ -186,6 +186,8 @@ def test_openclaw_route_contract_handshake_manifest_and_secret_scan_gate():
     manifest_payload = manifest.json()
     assert manifest_payload["platform"] == "openclaw"
     assert manifest_payload["adapter_name"] == "ironclaw-openclaw"
+    assert manifest_payload["policy_bindings"]["verdicts"]["warn"] == []
+    assert manifest_payload["policy_bindings"]["verdicts"]["quarantine"] == []
     assert "workflow_step" in manifest_payload["supported_action_types"]
     assert any(cap["name"] == "audit-trail" for cap in manifest_payload["capabilities"])
 
@@ -208,6 +210,8 @@ def test_openclaw_route_contract_handshake_manifest_and_secret_scan_gate():
     evaluate_payload = evaluate.json()
     assert evaluate_payload["verdict"] == "block"
     assert evaluate_payload["should_block"] is True
+    assert evaluate_payload["should_warn"] is False
+    assert evaluate_payload["should_quarantine"] is False
     assert evaluate_payload["should_hold"] is True
     assert evaluate_payload["secret_scan"]["scanned"] is True
     assert evaluate_payload["secret_scan"]["findings"]

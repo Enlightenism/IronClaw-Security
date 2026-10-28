@@ -12,6 +12,7 @@ from app.api.routes.onboarding import router as onboarding_router
 from app.api.routes.organizations import router as organizations_router
 from app.api.routes.policy import router as policy_router
 from app.api.routes.quarantine import router as quarantine_router
+from app.services.policy_store import reset_policy_store
 from routes import incidents as incidents_routes
 
 
@@ -40,6 +41,24 @@ def _build_test_app() -> FastAPI:
 
 def _headers() -> dict[str, str]:
     return {"X-API-Key": "test-key"}
+
+
+def _policy_settings_payload(default_decision: str) -> dict[str, object]:
+    return {
+        "mode": "lockdown",
+        "default_decision": default_decision,
+        "require_human_review_for_quarantine": True,
+        "sandbox_all_untrusted_content": True,
+        "block_high_risk_tool_calls": True,
+        "strict_prompt_ingress": True,
+        "thresholds": {
+            "prompt_injection_score": 0.9,
+            "malware_score": 0.8,
+            "exfiltration_score": 0.7,
+            "tool_abuse_score": 0.85,
+        },
+        "metadata": {"updated_by": "test-suite"},
+    }
 
 
 def test_incidents_route_uses_canonical_review_queue_service() -> None:
@@ -115,27 +134,38 @@ def test_policy_settings_can_be_updated() -> None:
     response = client.put(
         "/policy/settings",
         headers=_headers(),
-        json={
-            "mode": "lockdown",
-            "default_decision": "block",
-            "require_human_review_for_quarantine": True,
-            "sandbox_all_untrusted_content": True,
-            "block_high_risk_tool_calls": True,
-            "strict_prompt_ingress": True,
-            "thresholds": {
-                "prompt_injection_score": 0.9,
-                "malware_score": 0.8,
-                "exfiltration_score": 0.7,
-                "tool_abuse_score": 0.85,
-            },
-            "metadata": {"updated_by": "test-suite"},
-        },
+        json=_policy_settings_payload("block"),
     )
 
     assert response.status_code == 200
     settings = response.json()["settings"]
     assert settings["mode"] == "lockdown"
     assert settings["default_decision"] == "block"
+
+
+def test_policy_settings_default_to_block() -> None:
+    reset_policy_store()
+    try:
+        client = TestClient(_build_test_app(), raise_server_exceptions=False)
+        response = client.get("/policy/settings", headers=_headers())
+
+        assert response.status_code == 200
+        assert response.json()["settings"]["default_decision"] == "block"
+    finally:
+        reset_policy_store()
+
+
+def test_policy_settings_reject_nonbinary_default_decisions() -> None:
+    client = TestClient(_build_test_app(), raise_server_exceptions=False)
+
+    for default_decision in ("warn", "quarantine"):
+        response = client.put(
+            "/policy/settings",
+            headers=_headers(),
+            json=_policy_settings_payload(default_decision),
+        )
+
+        assert response.status_code == 422
 
 
 def test_organizations_flow_creates_org_and_member() -> None:
@@ -243,6 +273,7 @@ def test_onboarding_quickstart_returns_steps_and_integrations() -> None:
     guide = response.json()["guide"]
     assert len(guide["steps"]) >= 1
     assert len(guide["integrations"]) >= 1
+    assert guide["metadata"]["default_decision"] == "block"
 
 
 def test_deployment_readiness_returns_checks() -> None:

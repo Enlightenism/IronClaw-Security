@@ -6,6 +6,8 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+
 router = APIRouter(
     prefix="/ui/reviews",
     tags=["review-queue"],
@@ -99,16 +101,9 @@ def _normalize_responsestatus(value: Any, executionstate: str) -> str:
 
 def _normalize_policyverdict(value: Any, executionstate: str) -> str:
     verdict = _coerce_str(value, "").lower()
-    if verdict:
-        return verdict
-
-    if executionstate in {"denied", "blocked"}:
-        return "block"
-    if executionstate in {"quarantined"}:
-        return "quarantine"
-    if executionstate in {"dryrun", "queued", "queuedforreview", "review"}:
-        return "review"
-    return "allow"
+    if verdict == "allow" and executionstate not in {"denied", "blocked", "quarantined", "failed", "held"}:
+        return "allow"
+    return "block"
 
 
 def _build_placeholder_items() -> list[ReviewQueueItem]:
@@ -122,13 +117,13 @@ def _build_placeholder_items() -> list[ReviewQueueItem]:
             "sessionid": "demo-session-003",
             "actiontype": "httpfetch",
             "target": "https://example.com/docs",
-            "riskscore": 55,
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 55),
             "executionstate": "dryrun",
             "responsestatus": "queuedforreview",
-            "policyverdict": "review",
-            "shouldexecute": True,
-            "haltedbyboundary": False,
-            "reason": "Mid-risk request queued for human review.",
+            "policyverdict": "block",
+            "shouldexecute": False,
+            "haltedbyboundary": True,
+            "reason": "Suspicious request was blocked and queued for human review.",
             "executorname": "dryrunexecutor",
             "traceid": "trace-demo-003",
             "requestid": "request-demo-003",
@@ -146,7 +141,7 @@ def _build_placeholder_items() -> list[ReviewQueueItem]:
             "riskscore": 74,
             "executionstate": "dryrun",
             "responsestatus": "queuedforreview",
-            "policyverdict": "review",
+            "policyverdict": "block",
             "shouldexecute": False,
             "haltedbyboundary": True,
             "reason": "Sensitive shell-adjacent request requires analyst approval.",

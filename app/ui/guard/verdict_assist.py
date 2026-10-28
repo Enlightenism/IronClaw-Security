@@ -7,6 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.services.guard_security_brain import (
     GuardMode,
     GuardSecurityDecision,
@@ -173,9 +174,9 @@ class VerdictAssistResponse(BaseModel):
 
 
 def _risk_level_from_score(score: int) -> Literal["low", "medium", "high"]:
-    if score >= 80:
+    if score >= RISK_THRESHOLD_BLOCK_MIN:
         return "high"
-    if score >= 40:
+    if score > RISK_THRESHOLD_ALLOW_MAX:
         return "medium"
     return "low"
 
@@ -188,12 +189,9 @@ def _base_mitigation_tips(
     tips: list[str] = []
 
     # Generic by verdict
-    if verdict in {"block", "quarantine"}:
+    if verdict == "block":
         tips.append("Review and tighten the security policy for this action type.")
         tips.append("Verify that this action is actually needed in production before allowing.")
-    elif verdict == "warn":
-        tips.append("Monitor this action for repeated occurrences from the same client or session.")
-        tips.append("Consider upgrading to block or quarantine if this becomes frequent.")
     else:
         tips.append("Keep monitoring outcomes to ensure this action stays safe over time.")
 
@@ -224,29 +222,22 @@ def _build_verdict_assist_insight(
 ) -> VerdictAssistInsight:
     risk_level = _risk_level_from_score(decision.risk_score)
 
-    base_title = "Decision explanation"
-    if decision.verdict == "block":
-        base_title = "Action blocked by local security brain"
-    elif decision.verdict == "quarantine":
-        base_title = "Action quarantined for review"
-    elif decision.verdict == "warn":
-        base_title = "Action allowed with warning"
-    elif decision.verdict == "allow":
-        base_title = "Action allowed"
-
     explanation = summarize_guard_security_decision(decision)
 
     suggested_mode: GuardMode = context.mode
     suggested_verdict: GuardSecurityVerdict = decision.verdict
 
-    # Very small “assist” logic: nudge mode / verdict if obviously mismatched.
-    if decision.verdict in {"block", "quarantine"} and context.mode == "assist":
+    if decision.risk_score > RISK_THRESHOLD_ALLOW_MAX:
+        suggested_verdict = "block"
+    if suggested_verdict == "block" and context.mode == "assist":
         suggested_mode = "enforce"
-    if decision.verdict == "allow" and decision.risk_score >= 60:
-        suggested_verdict = "warn"
+    if suggested_verdict == "block":
+        base_title = "Action blocked by local security brain" if decision.verdict == "block" else "Action should be blocked by local security brain"
+    else:
+        base_title = "Action allowed"
 
     mitigation_tips = _base_mitigation_tips(
-        verdict=decision.verdict,
+        verdict=suggested_verdict,
         action_type=context.action_type,
     )
 

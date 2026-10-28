@@ -25,10 +25,7 @@ class ToolCallVerdict(StrEnum):
     """Enforcement decision returned after inspecting a tool call."""
 
     allow = "allow"
-    warn = "warn"
-    quarantine = "quarantine"
     block = "block"
-    audit = "audit"
 
 
 # ---------------------------------------------------------------------------

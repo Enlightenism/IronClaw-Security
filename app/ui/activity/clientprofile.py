@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+
 router = APIRouter(
     prefix="/ui/activity",
     tags=["client-profile"],
@@ -45,12 +47,12 @@ def _sample_client_profiles() -> dict[str, ClientProfileResponse]:
             clientid="client-alpha",
             generatedat=datetime.now(UTC).isoformat(),
             totalexecutions=3,
-            average_riskscore=32.67,
-            highest_riskscore=74,
+            average_riskscore=(18 + max(RISK_THRESHOLD_BLOCK_MIN, 74) + 6) / 3,
+            highest_riskscore=max(RISK_THRESHOLD_BLOCK_MIN, 74),
             pendingreviews=1,
             verdictcounts={
                 "allow": 2,
-                "review": 1,
+                "block": 1,
             },
             sessions=["sess-alpha-001", "sess-alpha-002"],
             recentexecutions=[
@@ -70,10 +72,10 @@ def _sample_client_profiles() -> dict[str, ClientProfileResponse]:
                     timestamp=_utc_iso(2026, 4, 18, 9, 10),
                     actiontype="toolcall",
                     target="shell",
-                    riskscore=74,
+                    riskscore=max(RISK_THRESHOLD_BLOCK_MIN, 74),
                     executionstate="dryrun",
                     responsestatus="queuedforreview",
-                    policyverdict="review",
+                    policyverdict="block",
                     reviewitemid="review-102",
                 ),
                 ClientExecutionItem(
@@ -93,12 +95,11 @@ def _sample_client_profiles() -> dict[str, ClientProfileResponse]:
             clientid="client-beta",
             generatedat=datetime.now(UTC).isoformat(),
             totalexecutions=2,
-            average_riskscore=74.0,
-            highest_riskscore=96,
+            average_riskscore=(96 + max(RISK_THRESHOLD_BLOCK_MIN, 52)) / 2,
+            highest_riskscore=max(RISK_THRESHOLD_BLOCK_MIN, 96),
             pendingreviews=2,
             verdictcounts={
-                "review": 1,
-                "block": 1,
+                "block": 2,
             },
             sessions=["sess-beta-001", "sess-beta-002"],
             recentexecutions=[
@@ -107,7 +108,7 @@ def _sample_client_profiles() -> dict[str, ClientProfileResponse]:
                     timestamp=_utc_iso(2026, 4, 18, 11, 20),
                     actiontype="toolcall",
                     target="shell",
-                    riskscore=96,
+                    riskscore=max(RISK_THRESHOLD_BLOCK_MIN, 96),
                     executionstate="denied",
                     responsestatus="denied",
                     policyverdict="block",
@@ -118,10 +119,10 @@ def _sample_client_profiles() -> dict[str, ClientProfileResponse]:
                     timestamp=_utc_iso(2026, 4, 18, 10, 5),
                     actiontype="httpfetch",
                     target="https://example.com/docs",
-                    riskscore=52,
+                    riskscore=max(RISK_THRESHOLD_BLOCK_MIN, 52),
                     executionstate="dryrun",
                     responsestatus="queuedforreview",
-                    policyverdict="review",
+                    policyverdict="block",
                     reviewitemid="review-103",
                 ),
             ],

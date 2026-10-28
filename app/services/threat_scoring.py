@@ -12,6 +12,7 @@ This file has been updated to:
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from app.schemas.threat_detection import (
@@ -70,14 +71,6 @@ _TAG_RISK_BONUS: dict[str, float] = {
     "custom-ioc": 0.0,
     "cve": 0.05,
 }
-
-# Verdict thresholds — score ranges mapped to DetectionVerdict
-_VERDICT_THRESHOLDS: list[tuple[float, DetectionVerdict]] = [
-    (0.75, DetectionVerdict.BLOCK),
-    (0.50, DetectionVerdict.REVIEW),
-    (0.25, DetectionVerdict.MONITOR),
-    (0.00, DetectionVerdict.ALLOW),
-]
 
 # Severity thresholds — composite score ranges mapped to ThreatSeverityLevel
 _SEVERITY_THRESHOLDS: list[tuple[float, ThreatSeverityLevel]] = [
@@ -207,18 +200,9 @@ def compute_composite_score(
 
 def score_to_verdict(score: float) -> DetectionVerdict:
     """
-    Map a composite 0.0–1.0 score to a DetectionVerdict.
-
-    Thresholds (inclusive lower bound):
-        >= 0.75 → BLOCK
-        >= 0.50 → REVIEW
-        >= 0.25 → MONITOR
-         < 0.25 → ALLOW
+    Map a composite score to the binary DetectionVerdict contract.
     """
-    for threshold, verdict in _VERDICT_THRESHOLDS:
-        if score >= threshold:
-            return verdict
-    return DetectionVerdict.ALLOW
+    return DetectionVerdict.ALLOW if math.isfinite(score) and score == 0 else DetectionVerdict.BLOCK
 
 
 def score_to_severity(score: float) -> ThreatSeverityLevel:
@@ -414,7 +398,7 @@ class ThreatScoringEngine:
             correlation_signals,
             base_score_override=base_score_override,
         )
-        verdict = score_to_verdict(composite)
+        verdict = DetectionVerdict.BLOCK if ioc_matches or correlation_signals else score_to_verdict(composite)
         severity = score_to_severity(composite)
         risk_families = derive_risk_families(ioc_matches)
         # Use canonical aggregator that considers both ioc_matches and correlation_signals

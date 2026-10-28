@@ -9,6 +9,7 @@ import pytest
 from app.api.scan import (
     _build_explanation,
     _client_rate_limit_key,
+    _coerce_result_scalars,
     _enforce_scan_rate_limit,
     _max_severity,
     _primary_category,
@@ -16,6 +17,8 @@ from app.api.scan import (
 )
 from app.core.auth import AuthContext, require_auth_context
 from app.main import app
+from app.services import sandbox_service, scanner
+from app.services.prompt_guard import PromptGuardResult
 from ironclaw_sdk.models import ScanRequest, ScanResponse
 
 # ---------------------------------------------------------------------------
@@ -52,6 +55,21 @@ def clear_rate_limit_buckets():
     _rate_limit_buckets.clear()
     yield
     _rate_limit_buckets.clear()
+
+
+@pytest.fixture(autouse=True)
+def mock_prompt_guard(monkeypatch):
+    classifier = MagicMock(
+        return_value=PromptGuardResult(
+            label="BENIGN",
+            malicious_score=0.0,
+            model_name="test-prompt-guard",
+        )
+    )
+    monkeypatch.setattr(scanner, "classify_prompt_guard", classifier)
+    monkeypatch.setattr(scanner, "append_telemetry_event", MagicMock())
+    monkeypatch.setattr(scanner, "GUARD_ENABLED", False)
+    return classifier
 
 
 client = TestClient(app)
@@ -113,8 +131,8 @@ def test_single_scan_scan_id_present_and_non_empty():
 
 
 def test_single_scan_verdict_is_string():
-    resp = client.post("/scan/", json=SAFE_PAYLOAD)
-    assert isinstance(resp.json()["verdict"], str)
+    verdict = client.post("/scan/", json=SAFE_PAYLOAD).json()["verdict"]
+    assert verdict in {"allow", "block"}
 
 
 def test_single_scan_risk_score_is_numeric():
@@ -162,7 +180,7 @@ def test_injection_scan_returns_200():
 
 def test_injection_scan_verdict_not_allow():
     resp = client.post("/scan/", json=INJECTION_PAYLOAD)
-    assert resp.json()["verdict"] != "allow"
+    assert resp.json()["verdict"] == "block"
 
 
 def test_injection_scan_risk_score_elevated():
@@ -200,6 +218,119 @@ def test_injection_scan_id_present_and_non_empty():
     assert str(scan_id).strip() != ""
 
 
+def test_scanner_benign_prompt_returns_allow(monkeypatch, mock_prompt_guard):
+    threshold = 0.5
+    monkeypatch.setattr(scanner, "GUARD_ENABLED", True)
+    monkeypatch.setattr(scanner, "GUARD_THRESHOLD", threshold)
+
+    result = scanner.perform_scan("prompt", SAFE_PAYLOAD["target_value"])
+
+    assert result["verdict"] == "allow"
+    mock_prompt_guard.assert_called_once_with(
+        SAFE_PAYLOAD["target_value"],
+        model_path=scanner.GUARD_MODEL_PATH,
+        threshold=threshold,
+    )
+
+
+def test_scanner_known_injection_returns_block(monkeypatch):
+    monkeypatch.setattr(scanner, "GUARD_ENABLED", False)
+
+    result = scanner.perform_scan("prompt", INJECTION_PAYLOAD["target_value"])
+
+    assert result["verdict"] == "block"
+    assert result["matched_patterns"]
+    assert result["risk_score"] >= scanner.RISK_THRESHOLD_BLOCK_MIN
+    assert result["review_status"] == "none"
+
+
+def test_scanner_low_severity_match_returns_block(monkeypatch):
+    monkeypatch.setattr(scanner, "GUARD_ENABLED", False)
+    monkeypatch.setattr(
+        scanner,
+        "RULE_INDEX",
+        {
+            "test_low_severity": {
+                "severity": "low",
+                "category": "test",
+                "pattern": "low severity marker",
+            }
+        },
+    )
+    monkeypatch.setattr(scanner, "scan_text", lambda _text: ["test_low_severity"])
+
+    result = scanner.perform_scan("text", "low severity marker")
+
+    assert result["verdict"] == "block"
+    assert result["matched_patterns"] == ["test_low_severity"]
+    assert result["risk_score"] >= scanner.RISK_THRESHOLD_BLOCK_MIN
+    assert result["review_status"] == "none"
+
+
+def test_scanner_prompt_guard_malicious_at_threshold_returns_block(
+    monkeypatch,
+    mock_prompt_guard,
+):
+    threshold = 0.75
+    monkeypatch.setattr(scanner, "GUARD_ENABLED", True)
+    monkeypatch.setattr(scanner, "GUARD_THRESHOLD", threshold)
+    mock_prompt_guard.return_value = PromptGuardResult(
+        label="MALICIOUS",
+        malicious_score=threshold,
+        model_name="test-prompt-guard",
+    )
+
+    result = scanner.perform_scan("prompt", "A benign-looking prompt")
+
+    assert result["verdict"] == "block"
+    assert "prompt_guard_malicious" in result["matched_patterns"]
+    assert result["risk_score"] >= scanner.RISK_THRESHOLD_BLOCK_MIN
+    assert result["review_status"] == "none"
+
+
+def test_scanner_prompt_guard_failure_returns_block(
+    monkeypatch,
+    mock_prompt_guard,
+):
+    monkeypatch.setattr(scanner, "GUARD_ENABLED", True)
+    mock_prompt_guard.side_effect = OSError("model unavailable")
+
+    result = scanner.perform_scan("prompt", "A benign-looking prompt")
+
+    assert result["verdict"] == "block"
+    assert "prompt_guard_unavailable" in result["failed_checks"]
+    assert result["quarantine_reason"] == "prompt_guard_unavailable"
+    assert result["risk_score"] >= scanner.RISK_THRESHOLD_BLOCK_MIN
+    assert result["review_status"] == "none"
+
+
+def test_scanner_disabled_prompt_guard_allows_clean_prompt(
+    monkeypatch,
+    mock_prompt_guard,
+):
+    monkeypatch.setattr(scanner, "GUARD_ENABLED", False)
+
+    result = scanner.perform_scan("prompt", SAFE_PAYLOAD["target_value"])
+
+    assert result["verdict"] == "allow"
+    mock_prompt_guard.assert_not_called()
+
+
+def test_scanner_text_scan_failure_returns_block(monkeypatch):
+    monkeypatch.setattr(scanner, "GUARD_ENABLED", False)
+    monkeypatch.setattr(
+        scanner,
+        "scan_text",
+        MagicMock(side_effect=RuntimeError("scanner failed")),
+    )
+
+    result = scanner.perform_scan("prompt", SAFE_PAYLOAD["target_value"])
+
+    assert result["verdict"] == "block"
+    assert "scan_failed" in result["failed_checks"]
+    assert result["risk_score"] >= scanner.RISK_THRESHOLD_BLOCK_MIN
+
+
 # ---------------------------------------------------------------------------
 # Input validation
 # ---------------------------------------------------------------------------
@@ -232,7 +363,7 @@ def test_invalid_json_returns_422():
 def test_oversized_payload_returns_block_or_422():
     resp = client.post("/scan/", json=OVERSIZED_PAYLOAD)
     if resp.status_code == 200:
-        assert resp.json()["verdict"] in ("block", "warn", "quarantine")
+        assert resp.json()["verdict"] in {"allow", "block"}
     else:
         assert resp.status_code == 422
 
@@ -287,7 +418,7 @@ def test_batch_scan_count_matches_items():
 def test_batch_scan_each_item_has_verdict():
     resp = client.post("/scan/batch", json=BATCH_PAYLOAD)
     for item in resp.json()["items"]:
-        assert "verdict" in item
+        assert item["verdict"] in {"allow", "block"}
 
 
 def test_batch_scan_each_item_has_scan_id():
@@ -417,8 +548,27 @@ def test_build_explanation_with_patterns():
 
 def test_build_explanation_verdict_always_present():
     with patch("app.api.scan.get_rule_severities", return_value=["low"]):
-        result = _build_explanation({"matched_patterns": ["x"], "verdict": "review"})
-    assert "review" in result
+        result = _build_explanation({"matched_patterns": ["x"], "verdict": "block"})
+    assert "block" in result
+
+
+@pytest.mark.parametrize("invalid_verdict", ["warn", "quarantine"])
+def test_scan_api_invalid_verdict_fails_closed(invalid_verdict):
+    result = _coerce_result_scalars(
+        {
+            "verdict": invalid_verdict,
+            "risk_score": 5,
+            "review_status": "pending",
+            "untrusted": False,
+            "failed_checks": [],
+        }
+    )
+
+    assert result["verdict"] == "block"
+    assert "invalid_scan_verdict" in result["failed_checks"]
+    assert result["risk_score"] >= scanner.RISK_THRESHOLD_BLOCK_MIN
+    assert result["review_status"] == "none"
+    assert result["untrusted"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -561,6 +711,46 @@ def test_scan_evaluates_sandbox():
     mock_eval.assert_called_once()
 
 
+def test_sandbox_required_blocks_and_floors_risk():
+    decision = sandbox_service.evaluate_sandbox("skill", "sandbox", True)
+    scan_result = {
+        "verdict": "allow",
+        "summary": "No risky patterns detected.",
+        "risk_score": 0,
+        "failed_checks": [],
+        "quarantine_reason": None,
+        "review_status": "none",
+        "untrusted": False,
+    }
+
+    result = sandbox_service.apply_sandbox_policy(scan_result, decision)
+
+    assert decision.verdict_override == "block"
+    assert result["verdict"] == "block"
+    assert result["risk_score"] >= scanner.RISK_THRESHOLD_BLOCK_MIN
+    assert result["review_status"] == "none"
+    assert result["untrusted"] is True
+    assert result["quarantine_reason"] == "skill requires sandbox handling"
+
+
+@pytest.mark.parametrize("legacy_verdict", ["warn", "quarantine"])
+def test_sandbox_invalid_verdicts_fail_closed(legacy_verdict):
+    decision = sandbox_service.evaluate_sandbox("prompt", "normal", False)
+    result = sandbox_service.apply_sandbox_policy(
+        {
+            "verdict": legacy_verdict,
+            "summary": "Legacy verdict.",
+            "risk_score": 5,
+        },
+        decision,
+    )
+
+    assert result["verdict"] == "block"
+    assert result["risk_score"] >= scanner.RISK_THRESHOLD_BLOCK_MIN
+    assert result["review_status"] == "none"
+    assert result["untrusted"] is True
+
+
 # ---------------------------------------------------------------------------
 # Integration: history appended
 # ---------------------------------------------------------------------------
@@ -657,7 +847,7 @@ def test_sdk_injection_payload_verdict_block(sdk_client):
     )
     result = sdk_client.scan(req)
     assert isinstance(result, ScanResponse)
-    assert result.verdict != "allow"
+    assert result.verdict == "block"
 
 
 @pytest.mark.sdk
@@ -682,7 +872,7 @@ def test_sdk_injection_risk_score_elevated(sdk_client):
 
 
 # ---------------------------------------------------------------------------
-# SDK round-trip: oversized payload (within SDK model limit, expects block/warn)
+# SDK round-trip: oversized payload (within SDK model limit)
 # ---------------------------------------------------------------------------
 
 
@@ -693,7 +883,7 @@ def test_sdk_oversized_payload_blocked_or_422(sdk_client):
     req = ScanRequest(target_type="prompt", target_value="A" * 4999)
     try:
         result = sdk_client.scan(req)
-        assert result.verdict in ("block", "warn", "quarantine", "allow")
+        assert result.verdict in {"allow", "block"}
     except IronclawAPIError as exc:
         assert exc.status_code in (422, 400)
 

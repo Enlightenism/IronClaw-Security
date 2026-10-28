@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
+from app.config import (
+    RISK_THRESHOLD_ALLOW_MAX,
+    RISK_THRESHOLD_BLOCK_MIN,
+    RISK_THRESHOLD_QUARANTINE_MIN,
+)
 from app.runtime.commandsupervisor import CommandPolicy, build_command_supervisor
 from app.runtime.filereturnguard import FileReturnPolicy, build_file_return_guard
 from app.runtime.networkguard import NetworkPolicy, build_network_guard
@@ -48,6 +53,18 @@ DEFAULT_HIGH_RISK_TOOLS = {
 }
 
 
+def _has_suspicious_matches(policy: Any) -> bool:
+    matched_rules = getattr(policy, "matched_rules", None)
+    if matched_rules is None and hasattr(policy, "as_dict"):
+        policy_dict = policy.as_dict()
+        matched_rules = policy_dict.get("matched_rules", policy_dict.get("matchedrules", []))
+    if isinstance(matched_rules, str):
+        matched_rules = [matched_rules]
+
+    normalized_rules = [str(rule).strip().lower() for rule in matched_rules or []]
+    return any(rule and rule != "execution_boundary" and not rule.startswith("allowed_host:") and not rule.endswith(":allow") and ":allow:" not in rule for rule in normalized_rules)
+
+
 @dataclass(slots=True)
 class ToolCallRequest:
     tool_name: str
@@ -79,7 +96,7 @@ class ToolCallRequest:
 
 @dataclass(slots=True)
 class ToolCallDecision:
-    verdict: str
+    verdict: Literal["allow", "block"]
     allowed: bool
     should_review: bool
     should_block: bool
@@ -119,9 +136,9 @@ class ToolCallGuard:
     network_guard: Any = field(default_factory=build_network_guard)
     file_return_guard: Any = field(default_factory=build_file_return_guard)
     high_risk_tools: set[str] = field(default_factory=lambda: set(DEFAULT_HIGH_RISK_TOOLS))
-    review_threshold: int = 20
-    block_threshold: int = 50
-    quarantine_threshold: int = 80
+    review_threshold: int = RISK_THRESHOLD_QUARANTINE_MIN
+    block_threshold: int = RISK_THRESHOLD_BLOCK_MIN
+    quarantine_threshold: int = RISK_THRESHOLD_BLOCK_MIN
 
     def evaluate(self, *, request: ToolCallRequest) -> ToolCallDecision:
         normalized = self._normalize_request(request)
@@ -154,30 +171,31 @@ class ToolCallGuard:
 
         normalized_risk = max(0, min(100, int(risk_delta)))
 
-        verdict = "allow"
-        allowed = True
-        should_review = False
-        should_block = False
-        should_quarantine = False
-
         policies = [policy for policy in (command_policy, network_policy, *artifact_policies) if policy is not None]
 
-        if any(getattr(policy, "should_quarantine", False) for policy in policies) or normalized_risk >= self.quarantine_threshold:
-            verdict = "quarantine"
-            allowed = False
-            should_block = True
-            should_quarantine = True
-            should_review = False
-            matched_rules.append("toolcallguard:quarantine")
-        elif any(getattr(policy, "should_block", False) for policy in policies) or normalized_risk >= self.block_threshold:
-            verdict = "block"
-            allowed = False
-            should_block = True
-            matched_rules.append("toolcallguard:block")
-        elif any(getattr(policy, "should_review", False) for policy in policies) or normalized_risk >= self.review_threshold:
-            verdict = "review"
-            should_review = True
-            matched_rules.append("toolcallguard:review")
+        should_review = any(bool(getattr(policy, "should_review", False)) or str(getattr(policy, "verdict", "allow")).strip().lower() in {"warn", "review", "needs_review", "quarantine"} for policy in policies) or normalized_risk >= min(
+            self.review_threshold,
+            self.block_threshold,
+            self.quarantine_threshold,
+        )
+        should_block = (
+            bool(tool_rules)
+            or normalized_risk > RISK_THRESHOLD_ALLOW_MAX
+            or any(
+                getattr(policy, "allowed", False) is not True
+                or str(getattr(policy, "verdict", "allow")).strip().lower() != "allow"
+                or bool(getattr(policy, "should_block", False))
+                or bool(getattr(policy, "should_quarantine", False))
+                or bool(getattr(policy, "should_review", False))
+                or bool(getattr(policy, "should_warn", False))
+                or _has_suspicious_matches(policy)
+                for policy in policies
+            )
+            or normalized_risk >= self.block_threshold
+        )
+        allowed = not should_block
+        verdict: Literal["allow", "block"] = "block" if should_block else "allow"
+        should_quarantine = False
 
         reasons.insert(
             0,
@@ -191,6 +209,7 @@ class ToolCallGuard:
 
         materialized_reasons = self._dedupe_reasons(reasons)
         deduped_rules = list(dict.fromkeys(rule for rule in matched_rules if rule))
+        final_risk = max(normalized_risk, RISK_THRESHOLD_BLOCK_MIN) if should_block else normalized_risk
 
         return ToolCallDecision(
             verdict=verdict,
@@ -198,7 +217,7 @@ class ToolCallGuard:
             should_review=should_review,
             should_block=should_block,
             should_quarantine=should_quarantine,
-            risk_delta=normalized_risk,
+            risk_delta=final_risk,
             tool_name=normalized.tool_name,
             actiontype=normalized.actiontype,
             target=normalized.target,
@@ -384,9 +403,9 @@ def initialize_toolcallguard(
     network_guard: Any | None = None,
     file_return_guard: Any | None = None,
     high_risk_tools: Iterable[str] | None = None,
-    review_threshold: int = 20,
-    block_threshold: int = 50,
-    quarantine_threshold: int = 80,
+    review_threshold: int = RISK_THRESHOLD_QUARANTINE_MIN,
+    block_threshold: int = RISK_THRESHOLD_BLOCK_MIN,
+    quarantine_threshold: int = RISK_THRESHOLD_BLOCK_MIN,
 ) -> ToolCallGuard:
     return ToolCallGuard(
         command_supervisor=command_supervisor or build_command_supervisor(),

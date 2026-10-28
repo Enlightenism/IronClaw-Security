@@ -4,10 +4,11 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.services.action_decision import evaluate_action_execution
 from app.services.action_guard import ActionType
 
-PolicyVerdict = Literal["allow", "warn", "quarantine", "block"]
+PolicyVerdict = Literal["allow", "block"]
 PolicyMode = Literal["enforce", "monitor"]
 RiskLevel = Literal["low", "medium", "high", "critical"]
 
@@ -22,6 +23,14 @@ TOOL_GUARDED_ACTIONS = {
 }
 
 
+def _normalize_verdict(value: Any) -> PolicyVerdict:
+    return "allow" if value == "allow" else "block"
+
+
+def _is_valid_risk_score(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100
+
+
 @dataclass(frozen=True)
 class PolicyRule:
     rule_id: str
@@ -31,9 +40,12 @@ class PolicyRule:
     target_prefixes: tuple[str, ...] = ()
     content_patterns: tuple[str, ...] = ()
     min_risk_score: int = 0
-    verdict: PolicyVerdict = "warn"
+    verdict: PolicyVerdict = "block"
     risk_level: RiskLevel = "medium"
     tags: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "verdict", _normalize_verdict(self.verdict))
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -61,6 +73,9 @@ class PolicyMatch:
     risk_level: RiskLevel
     reason: str
     tags: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "verdict", _normalize_verdict(self.verdict))
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -114,9 +129,7 @@ class PolicyEngine:
 
 VERDICT_ORDER: dict[PolicyVerdict, int] = {
     "allow": 0,
-    "warn": 1,
-    "quarantine": 2,
-    "block": 3,
+    "block": 1,
 }
 
 RISK_LEVEL_ORDER: dict[RiskLevel, int] = {
@@ -212,7 +225,7 @@ def default_policy_rules() -> list[PolicyRule]:
         PolicyRule(
             rule_id="untrusted-external-write",
             name="Untrusted External Write",
-            description="Quarantines writes outside approved application paths.",
+            description="Blocks writes outside approved application paths.",
             action_types=("file_write", "tool_call"),
             target_prefixes=(
                 "/etc/",
@@ -221,14 +234,14 @@ def default_policy_rules() -> list[PolicyRule]:
                 "C:\\Users\\Public\\",
             ),
             min_risk_score=70,
-            verdict="quarantine",
+            verdict="block",
             risk_level="high",
             tags=("filesystem", "boundary"),
         ),
         PolicyRule(
             rule_id="network-high-risk-destination",
             name="High-Risk Network Destination",
-            description="Warns or quarantines outbound activity toward suspicious destinations.",
+            description="Blocks outbound activity toward suspicious destinations.",
             action_types=("network_call", "tool_call", "http_request", "network_request"),
             content_patterns=(
                 "pastebin.com",
@@ -237,14 +250,14 @@ def default_policy_rules() -> list[PolicyRule]:
                 "discord webhook",
             ),
             min_risk_score=65,
-            verdict="quarantine",
+            verdict="block",
             risk_level="high",
             tags=("network", "exfiltration"),
         ),
         PolicyRule(
             rule_id="unreviewed-agent-escalation",
             name="Unreviewed Agent Escalation",
-            description="Flags attempts to escalate privileges or bypass human approval.",
+            description="Blocks attempts to escalate privileges or bypass human approval.",
             action_types=("approval", "tool_call", "message"),
             content_patterns=(
                 "approve this automatically",
@@ -253,7 +266,7 @@ def default_policy_rules() -> list[PolicyRule]:
                 "grant admin",
             ),
             min_risk_score=60,
-            verdict="warn",
+            verdict="block",
             risk_level="high",
             tags=("approval", "privilege"),
         ),
@@ -289,34 +302,54 @@ def evaluate_policy(
     risk_score: int = 0,
 ) -> PolicyDecision:
     matched_rules: list[PolicyMatch] = []
+    risk_score_is_valid = _is_valid_risk_score(risk_score)
+    normalized_risk_score = risk_score if risk_score_is_valid else RISK_THRESHOLD_BLOCK_MIN
 
     normalized_action = (policy_input.action_type or "").strip().lower()
     normalized_target = (policy_input.target or "").strip().lower()
     normalized_content = (policy_input.content or "").strip().lower()
 
     for rule in engine.rules:
-        if not _rule_matches(rule, normalized_action, normalized_target, normalized_content, risk_score):
+        if not _rule_matches(
+            rule,
+            normalized_action,
+            normalized_target,
+            normalized_content,
+            normalized_risk_score,
+        ):
             continue
 
         matched_rules.append(
             PolicyMatch(
                 rule_id=rule.rule_id,
                 name=rule.name,
-                verdict=rule.verdict,
+                verdict="block",
                 risk_level=rule.risk_level,
-                reason=_build_match_reason(rule, normalized_action, normalized_target, normalized_content, risk_score),
+                reason=_build_match_reason(
+                    rule,
+                    normalized_action,
+                    normalized_target,
+                    normalized_content,
+                    normalized_risk_score,
+                ),
                 tags=rule.tags,
             ),
         )
 
     static_verdict = _derive_final_verdict(matched_rules)
-    static_risk_score = _derive_final_risk_score(matched_rules, risk_score)
+    if not risk_score_is_valid or normalized_risk_score > RISK_THRESHOLD_ALLOW_MAX:
+        static_verdict = "block"
+    static_risk_score = _derive_final_risk_score(matched_rules, normalized_risk_score)
     reasons = [match.reason for match in matched_rules] or ["No policy violations detected."]
+    if not risk_score_is_valid:
+        reasons.append("Invalid risk score; request blocked.")
+    elif normalized_risk_score > RISK_THRESHOLD_ALLOW_MAX:
+        reasons.append("Risk score exceeds the configured allow maximum; request blocked.")
 
     final_verdict = static_verdict
     final_risk_score = static_risk_score
 
-    if _should_apply_tool_guard_overlay(normalized_action, static_verdict, risk_score):
+    if _should_apply_tool_guard_overlay(normalized_action, static_verdict, normalized_risk_score):
         tool_decision = evaluate_action_execution(
             action_type=cast("ActionType", normalized_action),
             target=policy_input.target,
@@ -325,24 +358,41 @@ def evaluate_policy(
             session_id=(policy_input.metadata or {}).get("session_id"),
         )
 
-        if tool_decision["verdict"] in {"quarantine", "block"}:
-            final_verdict = tool_decision["verdict"]
-            final_risk_score = max(static_risk_score, tool_decision["risk_score"])
+        tool_patterns = tool_decision.get("matched_patterns")
+        raw_tool_risk_score = tool_decision.get("risk_score")
+        tool_risk_score_is_valid = _is_valid_risk_score(raw_tool_risk_score)
+        tool_risk_score = raw_tool_risk_score if tool_risk_score_is_valid else RISK_THRESHOLD_BLOCK_MIN
+        tool_verdict = _normalize_verdict(tool_decision.get("verdict"))
+        if tool_verdict != "allow" or not tool_risk_score_is_valid or tool_risk_score > RISK_THRESHOLD_ALLOW_MAX or not isinstance(tool_patterns, list) or bool(tool_patterns):
+            tool_verdict = "block"
+
+        normalized_tool_decision = {
+            **tool_decision,
+            "verdict": tool_verdict,
+            "risk_score": tool_risk_score,
+            "matched_patterns": tool_patterns if isinstance(tool_patterns, list) else [],
+        }
+        if tool_verdict == "block":
+            final_verdict = "block"
+            final_risk_score = max(static_risk_score, tool_risk_score)
             matched_rules.extend(
                 _build_tool_guard_matches(
-                    tool_decision=tool_decision,
+                    tool_decision=normalized_tool_decision,
                     static_verdict=static_verdict,
                 ),
             )
             reasons = [
                 *reasons,
-                f"Tool guard verdict={tool_decision['verdict']} source={tool_decision['decision_source']}.",
+                f"Tool guard verdict=block source={tool_decision.get('decision_source', 'unknown')}.",
             ]
-            if tool_decision["summary"]:
-                reasons.append(tool_decision["summary"])
+            if tool_decision.get("summary"):
+                reasons.append(str(tool_decision["summary"]))
 
     final_risk_level = _derive_risk_level(matched_rules, final_risk_score)
-    requires_review = final_verdict in {"warn", "quarantine"}
+    if final_verdict == "block":
+        final_risk_score = max(final_risk_score, RISK_THRESHOLD_BLOCK_MIN)
+        final_risk_level = _derive_risk_level(matched_rules, final_risk_score)
+    requires_review = any(match.risk_level == "high" for match in matched_rules)
     allow_execution = _allow_execution(engine.mode, final_verdict)
     summary = _build_summary(final_verdict, matched_rules, reasons)
 
@@ -394,9 +444,6 @@ def _rule_matches(
     normalized_content: str,
     risk_score: int,
 ) -> bool:
-    if risk_score < rule.min_risk_score:
-        return False
-
     action_match = not rule.action_types or normalized_action in {item.strip().lower() for item in rule.action_types}
     target_match = not rule.target_prefixes or any(normalized_target.startswith(prefix.strip().lower()) for prefix in rule.target_prefixes)
     content_match = not rule.content_patterns or any(pattern.strip().lower() in normalized_content for pattern in rule.content_patterns)
@@ -410,7 +457,7 @@ def _rule_matches(
         return action_match and target_match
     if has_content_rules:
         return action_match and content_match
-    return action_match
+    return action_match and risk_score >= rule.min_risk_score
 
 
 def _build_match_reason(
@@ -438,7 +485,7 @@ def _build_summary(
 def _derive_final_verdict(matches: list[PolicyMatch]) -> PolicyVerdict:
     if not matches:
         return "allow"
-    return max(matches, key=lambda item: VERDICT_ORDER[item.verdict]).verdict
+    return "block"
 
 
 def _derive_risk_level(matches: list[PolicyMatch], risk_score: int) -> RiskLevel:
@@ -446,9 +493,9 @@ def _derive_risk_level(matches: list[PolicyMatch], risk_score: int) -> RiskLevel
         return max(matches, key=lambda item: RISK_LEVEL_ORDER[item.risk_level]).risk_level
     if risk_score >= 90:
         return "critical"
-    if risk_score >= 70:
+    if risk_score >= RISK_THRESHOLD_BLOCK_MIN:
         return "high"
-    if risk_score >= 40:
+    if risk_score > RISK_THRESHOLD_ALLOW_MAX:
         return "medium"
     return "low"
 
@@ -457,13 +504,12 @@ def _derive_final_risk_score(matches: list[PolicyMatch], risk_score: int) -> int
     bonus = 0
     if matches:
         bonus = min(25, len(matches) * 5)
-    return max(0, min(100, risk_score + bonus))
+    return min(100, max(0, risk_score + bonus))
 
 
 def _allow_execution(mode: PolicyMode, verdict: PolicyVerdict) -> bool:
-    if mode == "monitor":
-        return True
-    return verdict in {"allow", "warn"}
+    del mode
+    return verdict == "allow"
 
 
 def _build_decision_id() -> str:
@@ -480,18 +526,15 @@ def _should_apply_tool_guard_overlay(
     static_verdict: PolicyVerdict,
     risk_score: int,
 ) -> bool:
+    del risk_score
     if not _is_tool_guarded_action(action_type):
         return False
-    if static_verdict != "allow":
-        return False
-    return risk_score >= 60
+    return static_verdict == "allow"
 
 
 def _risk_level_from_verdict(verdict: PolicyVerdict) -> RiskLevel:
     mapping: dict[PolicyVerdict, RiskLevel] = {
         "allow": "low",
-        "warn": "medium",
-        "quarantine": "high",
         "block": "critical",
     }
     return mapping[verdict]
@@ -514,7 +557,7 @@ def _build_tool_guard_matches(
         PolicyMatch(
             rule_id="tool-guard-execution-decision",
             name="Tool Guard Execution Decision",
-            verdict=tool_verdict,
+            verdict="block",
             risk_level=_risk_level_from_verdict(tool_verdict),
             reason=(f"Tool guard escalated action via {tool_decision.get('decision_source', 'unknown')} with verdict '{tool_verdict}' and risk score {tool_decision.get('risk_score', 0)}."),
             tags=tuple(tags),

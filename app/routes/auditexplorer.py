@@ -207,6 +207,7 @@ def _build_risk_flags(item: dict[str, Any]) -> list[str]:
     elif severity == "high":
         flags.append("high-risk")
 
+    # Keep legacy verdict flags available for historical audit rows.
     if verdict in {"block", "blocked"}:
         flags.append("blocked")
     elif verdict == "quarantine":
@@ -364,6 +365,7 @@ def get_audit_explorer(
         "Audit explorer is optimized for operator triage and trace-linked investigation workflows.",
         "Filter options are derived from the live event set returned by the audit explorer data source.",
         "Detail links pivot into the audit log using trace, request, or event identifiers when available.",
+        "Historical audit records may retain legacy warn, quarantine, or review labels; these are not current verdict options.",
     ]
 
     return AuditExplorerResponse(

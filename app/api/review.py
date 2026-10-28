@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.actiondecision import decideaction
+from app.api.actiondecision import DecisionOutcome, decideaction
 
 router = APIRouter(prefix="/review", tags=["review"])
 
@@ -75,7 +75,7 @@ class ReviewResponse(BaseModel):
     clientid: str | None = None
     sessionid: str | None = None
     # EnforcedVerdict telemetry — present on all records going forward
-    guard_verdict: str | None = None
+    guard_verdict: DecisionOutcome | None = None
     guard_risk_score: int | None = None
     guard_confidence: float | None = None
     guard_latency_ms: float | None = None
@@ -109,19 +109,15 @@ def createreviewitem(
         metadata=metadata or {},
     )
 
-    outcome = decision.get("outcome", "deny")
+    outcome = decision.get("outcome", "block")
     if outcome == "allow":
         status: ReviewStatus = "approved"
         resolution: ReviewResolution = "allow"
         reason = "Review workflow approved the action because it remained within safe execution bounds."
-    elif outcome == "review":
+    elif outcome == "block" and decision.get("requiresreview") is True:
         status = "pending"
         resolution = "needsreview"
         reason = "Review workflow created a pending item because the action requires human review."
-    elif outcome == "quarantine":
-        status = "quarantined"
-        resolution = "quarantine"
-        reason = "Review workflow quarantined the action because the runtime detected containment-level risk."
     else:
         status = "rejected"
         resolution = "deny"

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.runtime.toolcallguard import ToolCallRequest, build_toolcallguard
 
 
@@ -97,7 +98,7 @@ def test_allow_safe_command_request():
 
     decision = guard.evaluate(
         request=ToolCallRequest(
-            tool_name="bash",
+            tool_name="safe_command",
             command="echo hello",
             cwd="/workspace",
             metadata={"request_id": "req-1"},
@@ -106,11 +107,10 @@ def test_allow_safe_command_request():
 
     assert decision.allowed is True
     assert decision.verdict == "allow"
-    assert decision.tool_name == "bash"
+    assert decision.tool_name == "safe_command"
     assert decision.actiontype == "toolcall"
     assert decision.target == "runtime"
-    assert decision.risk_delta == 30
-    assert "toolcallguard:high_risk:bash" in decision.matched_rules
+    assert decision.risk_delta == 5
     assert "commandsupervisor:allow" in decision.matched_rules
     assert len(command_supervisor.calls) == 1
     assert len(network_guard.calls) == 0
@@ -141,7 +141,7 @@ def test_normalizes_request_fields_before_evaluation():
     assert command_supervisor.calls[0]["metadata"]["tool_name"] == "bash"
 
 
-def test_missing_tool_name_quarantines():
+def test_missing_tool_name_blocks():
     guard, command_supervisor, network_guard, file_return_guard = _build_guard()
 
     decision = guard.evaluate(
@@ -152,16 +152,17 @@ def test_missing_tool_name_quarantines():
     )
 
     assert decision.allowed is False
-    assert decision.verdict == "quarantine"
-    assert decision.should_quarantine is True
+    assert decision.verdict == "block"
+    assert decision.should_quarantine is False
     assert decision.should_block is True
+    assert decision.risk_delta >= RISK_THRESHOLD_BLOCK_MIN
     assert "toolcallguard:missing_tool_name" in decision.matched_rules
     assert len(command_supervisor.calls) == 0
     assert len(network_guard.calls) == 0
     assert len(file_return_guard.calls) == 0
 
 
-def test_non_sandbox_scope_triggers_review_or_block():
+def test_non_sandbox_scope_blocks():
     guard, _, _, _ = _build_guard(
         command_policy=_Policy(
             verdict="allow",
@@ -179,7 +180,9 @@ def test_non_sandbox_scope_triggers_review_or_block():
         ),
     )
 
-    assert decision.verdict in {"review", "block", "quarantine"}
+    assert decision.verdict == "block"
+    assert decision.allowed is False
+    assert decision.risk_delta >= RISK_THRESHOLD_BLOCK_MIN
     assert "toolcallguard:non_sandbox_scope" in decision.matched_rules
 
 
@@ -199,7 +202,8 @@ def test_missing_command_for_command_tool_raises_risk():
         ),
     )
 
-    assert decision.verdict in {"review", "block", "quarantine"}
+    assert decision.verdict == "block"
+    assert decision.allowed is False
     assert "toolcallguard:missing_command" in decision.matched_rules
     assert len(command_supervisor.calls) == 1
 
@@ -214,7 +218,8 @@ def test_missing_network_url_for_network_tool_raises_risk():
         ),
     )
 
-    assert decision.verdict in {"review", "block", "quarantine"}
+    assert decision.verdict == "block"
+    assert decision.allowed is False
     assert "toolcallguard:missing_network_url" in decision.matched_rules
 
 
@@ -228,7 +233,8 @@ def test_missing_artifact_paths_for_file_tool_raises_risk():
         ),
     )
 
-    assert decision.verdict in {"review", "block", "quarantine"}
+    assert decision.verdict == "block"
+    assert decision.allowed is False
     assert "toolcallguard:missing_artifact_paths" in decision.matched_rules
 
 
@@ -290,9 +296,11 @@ def test_file_request_invokes_file_return_guard_for_each_artifact():
         ),
     )
 
-    assert decision.allowed is True
-    assert decision.verdict == "review"
+    assert decision.allowed is False
+    assert decision.verdict == "block"
     assert decision.should_review is True
+    assert decision.should_block is True
+    assert decision.risk_delta >= RISK_THRESHOLD_BLOCK_MIN
     assert "filereturnguard:allow:first" in decision.matched_rules
     assert "filereturnguard:review:second" in decision.matched_rules
     assert len(file_return_guard.calls) == 2
@@ -323,7 +331,7 @@ def test_command_policy_block_forces_block_verdict():
     assert "commandsupervisor:block" in decision.matched_rules
 
 
-def test_network_policy_quarantine_forces_quarantine_verdict():
+def test_network_policy_quarantine_forces_block_verdict():
     network_policy = _Policy(
         verdict="quarantine",
         allowed=False,
@@ -342,13 +350,14 @@ def test_network_policy_quarantine_forces_quarantine_verdict():
     )
 
     assert decision.allowed is False
-    assert decision.verdict == "quarantine"
-    assert decision.should_quarantine is True
+    assert decision.verdict == "block"
+    assert decision.should_quarantine is False
     assert decision.should_block is True
+    assert decision.risk_delta >= RISK_THRESHOLD_BLOCK_MIN
     assert "networkguard:quarantine" in decision.matched_rules
 
 
-def test_risk_threshold_alone_can_trigger_review():
+def test_high_risk_tool_signal_blocks():
     command_policy = _Policy(
         verdict="allow",
         allowed=True,
@@ -364,9 +373,10 @@ def test_risk_threshold_alone_can_trigger_review():
         ),
     )
 
-    assert decision.verdict == "review"
-    assert decision.should_review is True
-    assert decision.allowed is True
+    assert decision.verdict == "block"
+    assert decision.should_block is True
+    assert decision.allowed is False
+    assert decision.risk_delta >= RISK_THRESHOLD_BLOCK_MIN
     assert "toolcallguard:high_risk:powershell" in decision.matched_rules
 
 
@@ -383,11 +393,12 @@ def test_risk_threshold_alone_can_trigger_block():
     assert decision.allowed is False
     assert decision.verdict == "block"
     assert decision.should_block is True
+    assert decision.risk_delta >= RISK_THRESHOLD_BLOCK_MIN
     assert "toolcallguard:high_risk:powershell" in decision.matched_rules
     assert "toolcallguard:non_sandbox_scope" in decision.matched_rules
 
 
-def test_risk_threshold_alone_can_trigger_quarantine():
+def test_risk_threshold_alone_blocks_without_quarantine_outcome():
     guard, _, _, _ = _build_guard()
 
     decision = guard.evaluate(
@@ -398,9 +409,10 @@ def test_risk_threshold_alone_can_trigger_quarantine():
     )
 
     assert decision.allowed is False
-    assert decision.verdict == "quarantine"
-    assert decision.should_quarantine is True
+    assert decision.verdict == "block"
+    assert decision.should_quarantine is False
     assert "toolcallguard:missing_tool_name" in decision.matched_rules
+    assert decision.risk_delta >= RISK_THRESHOLD_BLOCK_MIN
 
 
 def test_allow_helper_matches_decision():
@@ -414,7 +426,7 @@ def test_allow_helper_matches_decision():
 
     allowed = guard.allow(
         request=ToolCallRequest(
-            tool_name="bash",
+            tool_name="safe_command",
             command="echo ok",
         ),
     )
@@ -434,7 +446,7 @@ def test_as_dict_contains_expected_shapes():
 
     decision = guard.evaluate(
         request=ToolCallRequest(
-            tool_name="bash",
+            tool_name="safe_command",
             command="echo ok",
         ),
     )
@@ -442,7 +454,7 @@ def test_as_dict_contains_expected_shapes():
 
     assert body["verdict"] == decision.verdict
     assert body["allowed"] is True
-    assert body["toolname"] == "bash"
+    assert body["toolname"] == "safe_command"
     assert isinstance(body["reasons"], list)
     assert isinstance(body["matchedrules"], list)
     assert isinstance(body["commandpolicy"], dict)
@@ -527,3 +539,5 @@ def test_initialize_builder_uses_custom_high_risk_tools():
     )
 
     assert "toolcallguard:high_risk:custom_exec" in decision.matched_rules
+    assert decision.verdict == "block"
+    assert decision.allowed is False

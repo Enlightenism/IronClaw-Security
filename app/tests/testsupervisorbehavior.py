@@ -29,7 +29,7 @@ def test_supervisor_allows_safe_sandbox_execution() -> None:
         ),
     )
 
-    assert result["decision"] in {"allow", "review", "approve"}
+    assert result["decision"] == "allow"
     assert result["runtime"]["target"] == "shell"
 
 
@@ -45,7 +45,7 @@ def test_supervisor_blocks_known_malicious_command() -> None:
         ),
     )
 
-    assert result["decision"] in {"block", "quarantine"}
+    assert result["decision"] == "block"
     assert result["runtime"]["target"] == "shell"
 
 
@@ -124,7 +124,7 @@ def test_supervisor_reviews_high_risk_tool_call() -> None:
         ),
     )
 
-    assert result["decision"] in {"review", "block", "quarantine"}
+    assert result["decision"] == "block"
     assert result["toolcall"]["toolname"] == "bash"
 
 
@@ -142,11 +142,11 @@ def test_supervisor_blocks_metadata_tool_fetch() -> None:
         ),
     )
 
-    assert result["decision"] in {"block", "quarantine"}
+    assert result["decision"] == "block"
     assert result["requires_incident"] is True
 
 
-def test_supervisor_marks_quarantine_for_quarantine_tool_verdict() -> None:
+def test_supervisor_blocks_legacy_quarantine_tool_verdict() -> None:
     quarantine_guard = type(
         "QuarantineGuard",
         (),
@@ -202,7 +202,7 @@ def test_supervisor_marks_quarantine_for_quarantine_tool_verdict() -> None:
         ),
     )
 
-    assert result["decision"] == "quarantine"
+    assert result["decision"] == "block"
     assert result["requires_incident"] is True
 
 
@@ -233,7 +233,7 @@ def test_supervisor_normalizes_missing_runtime_reasons() -> None:
         ),
     )
 
-    assert result["decision"] == "review"
+    assert result["decision"] == "block"
     assert isinstance(result["runtime"]["reasons"], list)
 
 
@@ -293,5 +293,5 @@ def test_supervisor_normalizes_missing_toolcall_reasons() -> None:
         ),
     )
 
-    assert result["decision"] == "review"
+    assert result["decision"] == "block"
     assert isinstance(result["toolcall"]["reasons"], list)

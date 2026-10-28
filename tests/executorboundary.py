@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.executorboundary import executewithboundary
 from app.orchestrator.secureruntimepipeline import initialize_secureruntimepipeline
 
@@ -37,11 +38,11 @@ def test_execute_with_boundary_blocks_high_risk_shell_content() -> None:
     assert receipt.state == "denied"
     assert receipt.shouldexecute is False
     assert receipt.haltedbyboundary is True
-    assert receipt.policyverdict in {"block", "quarantine"}
+    assert receipt.policyverdict == "block"
     assert runtimeresult is None
 
 
-def test_execute_with_boundary_current_runtime_allows_mid_risk_request() -> None:
+def test_execute_with_boundary_blocks_mid_risk_request_for_review() -> None:
     pipeline = initialize_secureruntimepipeline()
 
     receipt, runtimeresult = executewithboundary(
@@ -50,17 +51,20 @@ def test_execute_with_boundary_current_runtime_allows_mid_risk_request() -> None
         actiontype="httpfetch",
         target="https://example.com/docs",
         content="Fetch a public document for security analysis.",
-        riskscore=55,
+        riskscore=(RISK_THRESHOLD_ALLOW_MAX + RISK_THRESHOLD_BLOCK_MIN) // 2,
         sessionid="sess-mid-001",
         filepath="app/api/actionexecute.py",
         metadata={},
         executor=DemoExecutor(),
     )
 
-    assert receipt.state in {"executed", "queuedforreview"}
-    assert receipt.state != "denied"
-    assert receipt.policyverdict in {"allow", "warn"}
+    assert receipt.state == "queuedforreview"
+    assert receipt.policyverdict == "block"
+    assert receipt.shouldexecute is False
+    assert receipt.haltedbyboundary is True
+    assert receipt.riskscore >= RISK_THRESHOLD_BLOCK_MIN
     assert runtimeresult is not None
+    assert runtimeresult["summary"]["executorresult"] is None
 
 
 def test_execute_with_boundary_runs_dry_run_for_safe_request() -> None:
@@ -111,7 +115,31 @@ def test_execute_with_boundary_runs_real_executor_for_safe_request() -> None:
     assert runtimeresult["summary"]["executorresult"]["ok"] is True
 
 
-def test_execute_with_boundary_raises_indirect_injection_to_review() -> None:
+def test_execute_with_boundary_blocks_invalid_risk_score() -> None:
+    pipeline = initialize_secureruntimepipeline()
+
+    receipt, runtimeresult = executewithboundary(
+        pipeline=pipeline,
+        actorid="test-client-invalid-risk",
+        actiontype="httpfetch",
+        target="https://example.com",
+        content="Fetch a public document.",
+        riskscore=-1,
+        sessionid="sess-invalid-risk-001",
+        filepath="app/api/actionexecute.py",
+        metadata={},
+        executor=DemoExecutor(),
+    )
+
+    assert receipt.state == "denied"
+    assert receipt.policyverdict == "block"
+    assert receipt.shouldexecute is False
+    assert receipt.haltedbyboundary is True
+    assert receipt.riskscore >= RISK_THRESHOLD_BLOCK_MIN
+    assert runtimeresult is None
+
+
+def test_execute_with_boundary_blocks_indirect_injection_for_review() -> None:
     pipeline = initialize_secureruntimepipeline()
 
     receipt, runtimeresult = executewithboundary(
@@ -131,8 +159,8 @@ def test_execute_with_boundary_raises_indirect_injection_to_review() -> None:
     )
 
     assert receipt.state == "queuedforreview"
-    assert receipt.shouldexecute is True
-    assert receipt.haltedbyboundary is False
-    assert receipt.policyverdict == "warn"
+    assert receipt.shouldexecute is False
+    assert receipt.haltedbyboundary is True
+    assert receipt.policyverdict == "block"
     assert runtimeresult is not None
     assert runtimeresult["summary"]["promptinjection"]["flagged"] is True

@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+
 JsonPrimitive = str | int | float | bool | None
 JsonValue: TypeAlias = JsonPrimitive | list["JsonValue"] | dict[str, "JsonValue"]
 
@@ -689,7 +691,7 @@ class SkillDecisionMetadataModel(SkillBaseModel):
 
 class SkillDecisionMetadata(SkillBaseModel):
     shouldhalt: bool = False
-    shouldwarn: bool = False
+    shouldwarn: Literal[False] = False
     matchedpatterns: list[str] = Field(default_factory=list)
     riskscore: int | float | None = None
 
@@ -703,7 +705,7 @@ class SkillReasonModel(SkillBaseModel):
 
 
 class SkillResponsePayload(SkillBaseModel):
-    verdict: Literal["allow", "review", "block", "error"]
+    verdict: Literal["allow", "block"]
     summary: str
     shouldhalt: bool = False
     shouldwarn: bool = False
@@ -729,11 +731,15 @@ class SkillResponsePayload(SkillBaseModel):
         )
 
     def model_post_init(self, __context: Any) -> None:
+        object.__setattr__(self, "shouldhalt", self.verdict == "block")
+        object.__setattr__(self, "shouldwarn", False)
         if self.verdict == "allow":
             if self.riskscore is None:
                 object.__setattr__(self, "riskscore", 0)
             if not self.matchedpatterns:
                 object.__setattr__(self, "matchedpatterns", [])
+        elif self.riskscore is None or self.riskscore < RISK_THRESHOLD_BLOCK_MIN:
+            object.__setattr__(self, "riskscore", RISK_THRESHOLD_BLOCK_MIN)
 
 
 class SkillResponseEnvelope(SkillBaseModel):
@@ -742,7 +748,7 @@ class SkillResponseEnvelope(SkillBaseModel):
 
     @property
     def ok(self) -> bool:
-        return self.payload.verdict in {"allow", "review"}
+        return self.errorcode is None
 
     @property
     def operation(self) -> str | None:
@@ -768,7 +774,7 @@ SkillRequestUnion: TypeAlias = SkillRequest
 def buildskillsuccessresponse(
     *,
     operation: Literal["scan", "execute", "policy"],
-    verdict: Literal["allow", "review", "block"],
+    verdict: Literal["allow", "block"],
     summary: str,
     shouldhalt: bool = False,
     shouldwarn: bool = False,
@@ -829,15 +835,15 @@ def buildskillerrorresponse(
         for r in (reasons or [])
     ]
     payload = SkillResponsePayload(
-        verdict="error",
+        verdict="block",
         summary=summary,
         shouldhalt=True,
-        shouldwarn=True,
+        shouldwarn=False,
         requestid=requestid,
         scanid=None,
         decisionsource="unknown",
         matchedpatterns=[],
-        riskscore=None,
+        riskscore=RISK_THRESHOLD_BLOCK_MIN,
         reasons=reasons_models,
         rawresult=rawresult or {},
     )

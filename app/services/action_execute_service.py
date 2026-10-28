@@ -51,6 +51,5 @@ def execute_guarded_action(
     )
 
     summary = summarize_execution_receipt(receipt, runtime_result)
-    summary["risk_score"] = risk_score
     summary["file_path"] = effective_file_path
     return cast("ActionExecuteResult", summary)

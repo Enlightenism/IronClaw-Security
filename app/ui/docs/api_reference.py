@@ -55,7 +55,7 @@ def _build_groups() -> list[ApiRouteGroupView]:
             routeid="guard-action",
             method="POST",
             path="/guard/action",
-            description="Evaluate a proposed agent action against runtime policy and return an allow, warn, quarantine, or block verdict.",
+            description="Evaluate a proposed agent action and return the final allow or block verdict.",
             authrequired=True,
             requestfields=[
                 ApiRouteFieldView(name="actiontype", location="body", required=True, description="Type of action being guarded (e.g. toolcall, httpfetch, shellexec)."),
@@ -64,7 +64,7 @@ def _build_groups() -> list[ApiRouteGroupView]:
                 ApiRouteFieldView(name="metadata", location="body", required=False, description="Arbitrary key-value context passed through to audit and telemetry."),
             ],
             responsefields=[
-                ApiRouteFieldView(name="verdict", location="body", required=True, description="Policy decision: allow | warn | quarantine | block."),
+                ApiRouteFieldView(name="verdict", location="body", required=True, description="Final policy decision: allow | block."),
                 ApiRouteFieldView(name="reason", location="body", required=False, description="Human-readable explanation for the verdict."),
                 ApiRouteFieldView(name="policyid", location="body", required=False, description="ID of the policy rule that produced the verdict."),
                 ApiRouteFieldView(name="eventid", location="body", required=False, description="Audit event ID emitted for this guard decision."),
@@ -82,7 +82,7 @@ def _build_groups() -> list[ApiRouteGroupView]:
                 ApiRouteFieldView(name="riskscore", location="body", required=False, description="Caller-provided risk score (0–100)."),
             ],
             responsefields=[
-                ApiRouteFieldView(name="decision", location="body", required=True, description="allow | warn | quarantine | block."),
+                ApiRouteFieldView(name="decision", location="body", required=True, description="allow | block."),
                 ApiRouteFieldView(name="confidence", location="body", required=False, description="Model or policy confidence for the decision (0.0–1.0)."),
                 ApiRouteFieldView(name="eventid", location="body", required=False, description="Linked audit event ID."),
             ],
@@ -102,7 +102,7 @@ def _build_groups() -> list[ApiRouteGroupView]:
             responsefields=[
                 ApiRouteFieldView(name="verdict", location="body", required=True, description="Guard verdict for the execution plan."),
                 ApiRouteFieldView(name="executionid", location="body", required=False, description="Execution record ID for downstream audit lookup."),
-                ApiRouteFieldView(name="reason", location="body", required=False, description="Explanation attached to non-allow verdicts."),
+                ApiRouteFieldView(name="reason", location="body", required=False, description="Explanation attached to a block verdict."),
             ],
         ),
         ApiRouteEntryView(
@@ -197,9 +197,9 @@ def _build_groups() -> list[ApiRouteGroupView]:
             requestfields=[],
             responsefields=[
                 ApiRouteFieldView(name="mode", location="body", required=True, description="Enforcement mode: strict | permissive | monitor."),
-                ApiRouteFieldView(name="reviewthreshold", location="body", required=True, description="Risk score at which actions enter the review queue."),
-                ApiRouteFieldView(name="blockthreshold", location="body", required=True, description="Risk score at which actions are hard-blocked."),
-                ApiRouteFieldView(name="quarantinethreshold", location="body", required=False, description="Risk score at which actions are quarantined pending investigation."),
+                ApiRouteFieldView(name="reviewthreshold", location="body", required=True, description="Operational threshold for routing held actions to review; review status is separate from the final verdict."),
+                ApiRouteFieldView(name="blockthreshold", location="body", required=True, description="Score-based block threshold; suspicious signals block regardless of score."),
+                ApiRouteFieldView(name="quarantinethreshold", location="body", required=False, description="Operational isolation threshold for blocked actions; quarantine is not a verdict."),
                 ApiRouteFieldView(name="updatedby", location="body", required=False, description="Operator identity who last modified policy settings."),
             ],
         ),
@@ -224,7 +224,7 @@ def _build_groups() -> list[ApiRouteGroupView]:
             routeid="policy-rules",
             method="GET",
             path="/policy/rules",
-            description="List all active policy rules with their conditions, verdicts, and priority ordering.",
+            description="List active policy rules with their conditions, allow/block outcomes, and priority ordering.",
             authrequired=True,
             requestfields=[
                 ApiRouteFieldView(name="enabled", location="query", required=False, description="Filter to only enabled rules when true."),
@@ -320,7 +320,7 @@ def _build_groups() -> list[ApiRouteGroupView]:
             responsefields=[
                 ApiRouteFieldView(name="totalrequests", location="body", required=True, description="Total requests in the window."),
                 ApiRouteFieldView(name="blocked", location="body", required=True, description="Count of blocked actions."),
-                ApiRouteFieldView(name="quarantined", location="body", required=True, description="Count of quarantined actions."),
+                ApiRouteFieldView(name="quarantined", location="body", required=True, description="Count of actions in operational quarantine; this is not a verdict count."),
                 ApiRouteFieldView(name="reviewed", location="body", required=True, description="Count of actions that entered review queue."),
                 ApiRouteFieldView(name="topactions", location="body", required=False, description="Most-frequent action types observed in the window."),
             ],
@@ -473,7 +473,7 @@ def _build_groups() -> list[ApiRouteGroupView]:
             responsefields=[
                 ApiRouteFieldView(name="sections", location="body", required=True, description="Ordered policy guide sections with rule syntax examples."),
                 ApiRouteFieldView(name="enforcementmodes", location="body", required=True, description="Available enforcement modes and their behavioural differences."),
-                ApiRouteFieldView(name="thresholds", location="body", required=True, description="Threshold configuration reference for review, quarantine, and block."),
+                ApiRouteFieldView(name="thresholds", location="body", required=True, description="Risk threshold and operational review/isolation configuration; final verdicts are allow or block."),
             ],
         ),
         ApiRouteEntryView(

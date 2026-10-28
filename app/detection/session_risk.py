@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from app.detection.artifact_analyzer import analyze_artifact
 from app.detection.download_analyzer import analyze_download
@@ -15,7 +15,7 @@ class SessionRiskAssessment:
     session_id: str
     client_id: str
     risk_score: int
-    verdict: str
+    verdict: Literal["allow", "block"]
     confidence: str
     reason: str
     component_scores: dict[str, int] = field(default_factory=dict)
@@ -41,11 +41,11 @@ def _get_value(payload: Mapping[str, Any], *keys: str) -> Any:
     return None
 
 
-def _derive_verdict(score: int) -> tuple[str, str]:
+def _derive_verdict(score: int) -> tuple[Literal["allow", "block"], str]:
     if score >= 80:
-        return "quarantine", "high"
+        return "block", "high"
     if score >= 40:
-        return "warn", "medium"
+        return "block", "medium"
     return "allow", "low"
 
 
@@ -74,6 +74,8 @@ def assess_session_risk(payload: Mapping[str, Any]) -> SessionRiskAssessment:
     )
 
     verdict, confidence = _derive_verdict(weighted_score)
+    if any(result.verdict == "block" for result in (prompt_result, download_result, artifact_result, output_result)):
+        verdict = "block"
 
     matched_patterns = [
         *prompt_result.matched_patterns,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.services.guard_security_brain import GuardSecurityDecision
 from app.services.verdict_enforcer import EnforcedVerdict, VerdictType, enforce_verdict
 
@@ -29,6 +30,7 @@ def _enforce(
     *,
     verdict: VerdictType = "allow",
     risk_score: int = 25,
+    should_warn: bool = False,
     guard_decision: GuardSecurityDecision | None = None,
     reasons: list[dict[str, object]] | None = None,
 ) -> EnforcedVerdict:
@@ -39,8 +41,8 @@ def _enforce(
         verdict=verdict,
         summary="Baseline decision.",
         risk_score=risk_score,
-        should_halt=verdict in ("block", "quarantine"),
-        should_warn=verdict in ("warn", "quarantine"),
+        should_halt=verdict == "block",
+        should_warn=should_warn,
         reasons=reasons,
         guard_decision=guard_decision,
     )
@@ -72,14 +74,14 @@ def test_guard_telemetry_is_propagated_and_harder_verdict_escalates() -> None:
     reasons = [baseline_reason]
 
     result = _enforce(
-        verdict="warn",
+        verdict="allow",
         risk_score=45,
         guard_decision=guard_decision,
         reasons=reasons,
     )
 
     assert result["verdict"] == "block"
-    assert result["risk_score"] == 45
+    assert result["risk_score"] >= RISK_THRESHOLD_BLOCK_MIN
     assert result["should_halt"] is True
     assert result["should_warn"] is False
     assert result["guard_verdict"] == "block"
@@ -104,8 +106,8 @@ def test_guard_telemetry_is_propagated_and_harder_verdict_escalates() -> None:
     ("baseline_verdict", "guard_verdict"),
     [
         ("block", "allow"),
-        ("quarantine", "warn"),
-        ("warn", "allow"),
+        ("block", "block"),
+        ("allow", "block"),
         ("allow", "allow"),
     ],
 )
@@ -118,15 +120,19 @@ def test_guard_verdict_never_downgrades_baseline(
         guard_decision=_guard_decision(guard_verdict, risk_score=25),
     )
 
-    assert result["verdict"] == baseline_verdict
-    assert result["reasons"] == []
+    expected_verdict = "block" if "block" in (baseline_verdict, guard_verdict) else "allow"
+    assert result["verdict"] == expected_verdict
+    assert result["should_halt"] is (expected_verdict == "block")
+    assert result["should_warn"] is False
+    if expected_verdict == "block":
+        assert result["risk_score"] >= RISK_THRESHOLD_BLOCK_MIN
 
 
-def test_quarantine_verdict_sets_both_halt_and_warn_flags() -> None:
-    result = _enforce(
-        guard_decision=_guard_decision("quarantine", risk_score=75),
-    )
+def test_warning_signal_fails_closed_without_warning_output() -> None:
+    result = _enforce(should_warn=True, risk_score=25)
 
-    assert result["verdict"] == "quarantine"
+    assert result["verdict"] == "block"
+    assert result["risk_score"] >= RISK_THRESHOLD_BLOCK_MIN
     assert result["should_halt"] is True
-    assert result["should_warn"] is True
+    assert result["should_warn"] is False
+    assert result["reasons"][0]["label"] == "Warning-only outcome blocked"

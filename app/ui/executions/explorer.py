@@ -7,6 +7,8 @@ from typing import Any
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+
 router = APIRouter(
     prefix="/ui/executions",
     tags=["execution-explorer"],
@@ -134,7 +136,7 @@ def _sample_execution_records() -> list[dict[str, Any]]:
             "sessionid": "sess-alpha-001",
             "actiontype": "toolcall",
             "target": "shell",
-            "riskscore": 91,
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 91),
             "executionstate": "denied",
             "responsestatus": "denied",
             "policyverdict": "block",
@@ -151,15 +153,15 @@ def _sample_execution_records() -> list[dict[str, Any]]:
             "sessionid": "sess-beta-001",
             "actiontype": "httpfetch",
             "target": "https://example.com/docs",
-            "riskscore": 52,
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 52),
             "executionstate": "dryrun",
             "responsestatus": "queuedforreview",
-            "policyverdict": "review",
-            "shouldexecute": True,
-            "haltedbyboundary": False,
+            "policyverdict": "block",
+            "shouldexecute": False,
+            "haltedbyboundary": True,
             "reviewitemid": "review-203",
             "traceid": "trace-203",
-            "reason": "Mid-risk fetch request queued for analyst review.",
+            "reason": "Suspicious fetch request was blocked and queued for analyst review.",
         },
         {
             "executionid": "exec-204",
@@ -185,10 +187,10 @@ def _sample_execution_records() -> list[dict[str, Any]]:
             "sessionid": "sess-delta-001",
             "actiontype": "toolcall",
             "target": "filesystem",
-            "riskscore": 68,
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 68),
             "executionstate": "dryrun",
             "responsestatus": "queuedforreview",
-            "policyverdict": "review",
+            "policyverdict": "block",
             "shouldexecute": False,
             "haltedbyboundary": True,
             "reviewitemid": "review-205",
@@ -202,15 +204,15 @@ def _sample_execution_records() -> list[dict[str, Any]]:
             "sessionid": "sess-alpha-002",
             "actiontype": "toolcall",
             "target": "shell",
-            "riskscore": 88,
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 88),
             "executionstate": "denied",
             "responsestatus": "denied",
-            "policyverdict": "quarantine",
+            "policyverdict": "block",
             "shouldexecute": False,
             "haltedbyboundary": True,
             "reviewitemid": "review-206",
             "traceid": "trace-206",
-            "reason": "Repeated risky shell pattern escalated into quarantine denial.",
+            "reason": "Repeated risky shell pattern was blocked before execution.",
         },
     ]
 
@@ -259,7 +261,7 @@ def _build_timeline(records: list[dict[str, Any]]) -> list[ExecutionTimelinePoin
     for bucket in buckets:
         bucket_records = [record for record in records if _safe_str(record.get("timestamp")).startswith(bucket[:13])]
         denied = sum(1 for record in bucket_records if _safe_str(record.get("executionstate")) == "denied")
-        review = sum(1 for record in bucket_records if _safe_str(record.get("policyverdict")) == "review")
+        review = sum(1 for record in bucket_records if _safe_str(record.get("responsestatus")) == "queuedforreview")
         completed = sum(1 for record in bucket_records if _safe_str(record.get("responsestatus")) == "completed")
 
         points.append(
@@ -343,7 +345,7 @@ def get_execution_explorer(
 
     total = len(items)
     deniedcount = sum(1 for record in filtered if _safe_str(record.get("executionstate")) == "denied")
-    reviewcount = sum(1 for record in filtered if _safe_str(record.get("policyverdict")) == "review")
+    reviewcount = sum(1 for record in filtered if _safe_str(record.get("responsestatus")) == "queuedforreview")
     highriskcount = sum(1 for record in filtered if _safe_int(record.get("riskscore"), 0) >= 75)
     boundaryhaltcount = sum(1 for record in filtered if _safe_bool(record.get("haltedbyboundary"), False))
 

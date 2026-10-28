@@ -141,11 +141,12 @@ def test_review_tool_call_marks_review_without_incident() -> None:
         ),
     )
 
-    assert result["decision"] == "review"
-    assert result["requires_incident"] is False
+    assert result["decision"] == "block"
+    assert result["requires_incident"] is True
     assert result["toolcall"]["riskdelta"] == 25
     assert result["toolcall"]["shouldreview"] is True
-    assert result["toolcall"]["allowed"] is True
+    assert result["toolcall"]["allowed"] is False
+    assert result["toolcall"]["shouldblock"] is True
 
 
 def test_review_tool_call_blocks_and_requires_incident() -> None:
@@ -178,7 +179,7 @@ def test_review_tool_call_blocks_and_requires_incident() -> None:
     assert result["toolcall"]["shouldblock"] is True
 
 
-def test_review_tool_call_quarantine_requires_incident() -> None:
+def test_review_tool_call_legacy_quarantine_requires_incident() -> None:
     guard = _ToolGuardStub(
         _Decision(
             verdict="quarantine",
@@ -201,9 +202,9 @@ def test_review_tool_call_quarantine_requires_incident() -> None:
         ),
     )
 
-    assert result["decision"] == "quarantine"
+    assert result["decision"] == "block"
     assert result["requires_incident"] is True
-    assert result["toolcall"]["shouldquarantine"] is True
+    assert result["toolcall"]["shouldquarantine"] is False
     assert result["toolcall"]["allowed"] is False
     assert result["toolcall"]["shouldblock"] is True
 
@@ -255,7 +256,8 @@ def test_review_runtime_request_review_path() -> None:
         ),
     )
 
-    assert result["decision"] == "review"
+    assert result["decision"] == "block"
+    assert result["requires_incident"] is True
     assert result["requires_incident"] is False
     assert result["runtime"]["executionstate"] == "pending_review"
     assert result["runtime"]["executed"] is False
@@ -307,7 +309,7 @@ def test_review_runtime_request_quarantine_path() -> None:
         ),
     )
 
-    assert result["decision"] == "quarantine"
+    assert result["decision"] == "block"
     assert result["requires_incident"] is True
     assert result["runtime"]["executionstate"] == "quarantined"
     assert result["runtime"]["executed"] is False
@@ -333,7 +335,8 @@ def test_review_runtime_request_inserts_default_reasons_when_missing() -> None:
         ),
     )
 
-    assert result["decision"] == "review"
+    assert result["decision"] == "block"
+    assert result["requires_incident"] is True
     assert isinstance(result["runtime"]["reasons"], list)
     assert result["runtime"]["reasons"]
 
@@ -360,7 +363,8 @@ def test_review_tool_call_inserts_default_reasons_when_empty() -> None:
         ),
     )
 
-    assert result["decision"] == "review"
+    assert result["decision"] == "block"
+    assert result["requires_incident"] is True
     assert isinstance(result["toolcall"]["reasons"], list)
     assert result["toolcall"]["reasons"]
 
@@ -405,8 +409,8 @@ def test_supervisor_routes_both_runtime_and_tool_reviews_independently() -> None
 
     assert runtime_result["decision"] == "allow"
     assert runtime_result["requires_incident"] is False
-    assert tool_result["decision"] == "review"
-    assert tool_result["requires_incident"] is False
+    assert tool_result["decision"] == "block"
+    assert tool_result["requires_incident"] is True
     assert tool_result["toolcall"]["riskdelta"] == 35
 
 

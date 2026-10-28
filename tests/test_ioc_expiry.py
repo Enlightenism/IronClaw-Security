@@ -26,7 +26,7 @@ ThreatIndicatorType = Literal[
 ]
 ThreatSeverity = Literal["critical", "high", "medium", "low", "info"]
 ThreatFeedStatus = Literal["active", "inactive", "error", "pending"]
-ThreatMatchVerdict = Literal["block", "quarantine", "warn", "allow"]
+ThreatMatchVerdict = Literal["block", "allow"]
 IndicatorLifecycleEvent = Literal[
     "ingested",
     "updated",
@@ -39,10 +39,10 @@ IndicatorLifecycleEvent = Literal[
 _SEVERITY_RANK: list[str] = ["critical", "high", "medium", "low", "info"]
 _VERDICT_FROM_SEVERITY: dict[str, ThreatMatchVerdict] = {
     "critical": "block",
-    "high": "quarantine",
-    "medium": "warn",
-    "low": "allow",
-    "info": "allow",
+    "high": "block",
+    "medium": "block",
+    "low": "block",
+    "info": "block",
 }
 _NEAR_EXPIRY_THRESHOLD_HOURS: int = 24
 
@@ -655,7 +655,7 @@ class TestLookupExpiryGate:
     def test_active_indicator_matched(self, engine: IOCExpiryEngine, active_indicator: ThreatIndicator) -> None:
         result = engine.lookup(active_indicator.value, "ip")
         assert result.matched is True
-        assert result.verdict in ("block", "quarantine", "warn", "allow")
+        assert result.verdict == "block"
 
     def test_no_expiry_indicator_always_matched(self, engine: IOCExpiryEngine, no_expiry_indicator: ThreatIndicator) -> None:
         result = engine.lookup(no_expiry_indicator.value, "domain")

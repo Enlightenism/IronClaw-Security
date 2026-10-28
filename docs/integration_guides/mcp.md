@@ -13,7 +13,7 @@ Agent selects tool
 ▼
 IronClaw /scan/ ← inspect tool name + args before dispatch
 │
-├── block/quarantine → tool call rejected
+├── block → tool call rejected
 │
 ▼
 Tool executes
@@ -21,7 +21,7 @@ Tool executes
 ▼
 IronClaw /scan/ ← inspect tool output before returning to agent
 │
-├── block/quarantine → output withheld
+├── block → output withheld
 │
 ▼
 Result returned to agent
@@ -55,17 +55,13 @@ def guarded_tool_call(tool_name: str, tool_args: dict, agent_id: str) -> dict:
     if pre_result.verdict == "block":
         raise PermissionError(f"Tool call blocked: {pre_result.reason}")
 
-    if pre_result.verdict == "quarantine":
-        # Submit to review queue — do not execute yet
-        raise PermissionError(f"Tool call quarantined — pending review: {pre_result.scan_id}")
-
     # Execute tool
     tool_output = mcp_dispatch(tool_name, tool_args)
 
     # Inspect output
     post_result = guard.scan(content=str(tool_output), context="agent_output", agent_id=agent_id, tool_name=tool_name)
 
-    if post_result.verdict in ("block", "quarantine"):
+    if post_result.verdict == "block":
         raise PermissionError(f"Tool output blocked: {post_result.reason}")
 
     return tool_output
@@ -105,7 +101,7 @@ scan_items = [{"content": f"{c['tool_name']}({c['args']})", "context": "tool_cal
 results = guard.scan_batch(scan_items)
 
 for i, result in enumerate(results):
-    if result.verdict in ("block", "quarantine"):
+    if result.verdict == "block":
         raise PermissionError(f"Planned tool call [{planned_calls[i]['tool_name']}] blocked: {result.reason}")
 
 # All cleared — dispatch in order
@@ -115,16 +111,18 @@ for call in planned_calls:
 
 ---
 
-## Quarantine Handling with Review Queue
+## Operational Isolation and Review Queue
 
-When a tool call is quarantined, surface the review ID to your operator interface:
+Blocked items may be isolated in the operational review queue. Quarantine is
+not a separate verdict; do not execute the blocked action while it is under
+review.
 
 ```python
 try:
     result = guarded_tool_call("delete_record", {"id": "user-123"}, "mcp-agent")
 except PermissionError as e:
-    print(f"Quarantined: {e}")
-    # The scan_id is in the error message — operators can approve or reject via /review/
+    print(f"Blocked: {e}")
+    # Operators can inspect the related review record through the review API.
 ```
 
 Approve via SDK:

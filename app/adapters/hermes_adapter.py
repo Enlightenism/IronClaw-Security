@@ -15,7 +15,7 @@ from app.adapters.generic_agent_adapter import (
 )
 from app.services.integration_registry import IntegrationRegistry
 
-AdapterVerdict = Literal["allow", "warn", "quarantine", "block"]
+AdapterVerdict = Literal["allow", "block"]
 AdapterExecutionMode = Literal["monitor", "enforce"]
 
 HermesAdapterRequest = GenericAgentAdapterRequest

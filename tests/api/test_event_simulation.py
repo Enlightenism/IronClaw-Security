@@ -60,7 +60,7 @@ def client_without_org():
     [
         (
             {"event_type": "prompt_injection", "severity": "medium"},
-            "warn",
+            "block",
             "prompt-injection pattern",
             "Treat all embedded instructions as untrusted content.",
         ),
@@ -72,13 +72,13 @@ def client_without_org():
         ),
         (
             {"event_type": "tool_execution", "severity": "medium", "organization_id": "org-001"},
-            "warn",
+            "block",
             "tool execution",
             "Validate tool allowlist and argument policy before execution.",
         ),
         (
             {"event_type": "tool_execution", "severity": "critical", "organization_id": "org-001"},
-            "quarantine",
+            "block",
             "tool execution",
             "Run the action in a sandboxed boundary with least privilege.",
         ),
@@ -90,7 +90,7 @@ def client_without_org():
         ),
         (
             {"event_type": "unsafe_action", "severity": "medium", "organization_id": "org-001"},
-            "quarantine",
+            "block",
             "unsafe action",
             "Pause execution and require explicit approval.",
         ),
@@ -102,7 +102,7 @@ def client_without_org():
         ),
         (
             {"event_type": "policy_violation", "severity": "medium", "organization_id": "org-001"},
-            "quarantine",
+            "block",
             "violates declared security policy",
             "Return a structured denial reason to the caller.",
         ),
@@ -114,7 +114,7 @@ def client_without_org():
         ),
         (
             {"event_type": "telemetry_gap", "severity": "low"},
-            "warn",
+            "block",
             "telemetry gap",
             "Record structured telemetry for prompts, tools, and policy decisions.",
         ),

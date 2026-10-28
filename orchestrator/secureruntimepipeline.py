@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from orchestrator.policyenforcer import (
     EnforcementContext,
     EnforcementResult,
@@ -126,8 +127,32 @@ class SecureRuntimePipeline:
             },
         )
 
-        result.verdict = result.enforcement.decision.verdict.value
-        result.allowed = result.enforcement.decision.allowed
+        decision = result.enforcement.decision
+        decision_score_is_valid = isinstance(decision.risk_score, int) and not isinstance(decision.risk_score, bool) and 0 <= decision.risk_score <= 100
+        decision_score = decision.risk_score if decision_score_is_valid else RISK_THRESHOLD_BLOCK_MIN
+        should_block = (
+            decision.verdict != PolicyVerdict.ALLOW
+            or decision.allowed is not True
+            or bool(decision.matched_rules)
+            or decision.requires_human_review
+            or not decision_score_is_valid
+            or decision_score > RISK_THRESHOLD_ALLOW_MAX
+            or result.enforcement.blocked
+            or result.enforcement.quarantine_required
+            or result.enforcement.review_required
+        )
+        if should_block:
+            self._mark_blocked(
+                result,
+                ("Secure runtime pipeline blocked a non-allow or invalid policy decision." if not decision.reasons else ""),
+            )
+        else:
+            result.verdict = PolicyVerdict.ALLOW.value
+            result.allowed = True
+            decision.verdict = PolicyVerdict.ALLOW
+            decision.allowed = True
+            decision.risk_score = decision_score
+        result.runtime_metadata["risk_score"] = decision.risk_score
 
         self._record_step(
             result,
@@ -141,7 +166,16 @@ class SecureRuntimePipeline:
             },
         )
 
-        if result.enforcement.blocked:
+        if result.enforcement.review_required:
+            self._record_step(
+                result,
+                name="human_review",
+                status="pending",
+                message="Execution requires human review before unrestricted completion.",
+                details={"review_required": True},
+            )
+
+        if result.verdict == PolicyVerdict.BLOCK.value:
             result.status = "blocked"
             self._record_step(
                 result,
@@ -153,30 +187,9 @@ class SecureRuntimePipeline:
             self._emit_telemetry(result, event="runtime.blocked")
             return result.finalize()
 
-        if result.enforcement.quarantine_required:
-            result.status = "quarantined"
-            self._record_step(
-                result,
-                name="runtime_quarantine",
-                status="quarantined",
-                message="Execution diverted into quarantine.",
-                details={"reason": "policy_quarantine"},
-            )
-            self._emit_telemetry(result, event="runtime.quarantined")
-            return result.finalize()
-
-        if result.enforcement.review_required:
-            self._record_step(
-                result,
-                name="human_review",
-                status="pending",
-                message="Execution requires human review before unrestricted completion.",
-                details={"review_required": True},
-            )
-
         self._run_pre_execution_guards(result, normalized_request)
 
-        if result.status in {"blocked", "quarantined"}:
+        if result.status == "blocked":
             self._emit_telemetry(result, event=f"runtime.{result.status}")
             return result.finalize()
 
@@ -204,7 +217,7 @@ class SecureRuntimePipeline:
             },
         )
 
-        result.status = "completed_with_warnings" if result.enforcement.decision.verdict == PolicyVerdict.WARN else "completed"
+        result.status = "completed"
         self._emit_telemetry(result, event="runtime.completed")
         return result.finalize()
 
@@ -260,16 +273,22 @@ class SecureRuntimePipeline:
         if request.requires_network:
             guard_result = self._invoke_guard(self.network_guard, request, guard_name="network_guard")
             self._apply_guard_result(result, guard_result, default_name="network_guard")
+            if result.status == "blocked":
+                return
 
         if request.requires_filesystem:
             guard_result = self._invoke_guard(self.filesystem_guard, request, guard_name="filesystem_guard")
             self._apply_guard_result(result, guard_result, default_name="filesystem_guard")
+            if result.status == "blocked":
+                return
 
         if request.requires_secrets:
             guard_result = self._invoke_guard(self.secrets_guard, request, guard_name="secrets_guard")
             self._apply_guard_result(result, guard_result, default_name="secrets_guard")
+            if result.status == "blocked":
+                return
 
-        if result.status not in {"blocked", "quarantined"}:
+        if result.status != "blocked":
             self._record_step(
                 result,
                 name="preflight_complete",
@@ -293,13 +312,51 @@ class SecureRuntimePipeline:
                 "action": "allow",
             }
 
-        payload = guard(request) or {}
+        try:
+            payload = guard(request)
+        except Exception as exc:
+            return {
+                "name": guard_name,
+                "status": "blocked",
+                "message": f"{guard_name} failed; runtime execution is blocked.",
+                "action": "block",
+                "details": {"error_type": type(exc).__name__},
+            }
+
+        if not isinstance(payload, Mapping):
+            return {
+                "name": guard_name,
+                "status": "blocked",
+                "message": f"{guard_name} returned no valid decision; runtime execution is blocked.",
+                "action": "block",
+            }
+        raw_action = payload.get("action")
+        status = str(payload.get("status") or "")
+        status_value = status.strip().lower()
+        action = (
+            "allow"
+            if raw_action == "allow"
+            and status_value
+            not in {
+                "error",
+                "failed",
+                "failure",
+                "blocked",
+                "denied",
+                "warn",
+                "warning",
+                "quarantine",
+                "quarantined",
+            }
+            else "block"
+        )
+        raw_details = payload.get("details")
         return {
             "name": payload.get("name", guard_name),
-            "status": payload.get("status", "passed"),
+            "status": "passed" if action == "allow" else "blocked",
             "message": payload.get("message", f"{guard_name} completed."),
-            "action": payload.get("action", "allow"),
-            "details": dict(payload.get("details") or {}),
+            "action": action,
+            "details": dict(raw_details) if isinstance(raw_details, Mapping) else {},
         }
 
     def _apply_guard_result(
@@ -310,17 +367,18 @@ class SecureRuntimePipeline:
         default_name: str,
     ) -> None:
         name = str(guard_result.get("name") or default_name)
-        status = str(guard_result.get("status") or "passed")
+        status = str(guard_result.get("status") or "blocked")
         message = str(guard_result.get("message") or f"{name} completed.")
-        action = str(guard_result.get("action") or "allow")
+        action = "allow" if guard_result.get("action") == "allow" else "block"
         details = dict(guard_result.get("details") or {})
         details["guard_action"] = action
 
-        self._record_step(result, name=name, status=status, message=message, details=details)
-
         if action == "block":
-            result.status = "blocked"
-            result.allowed = False
+            status = "blocked"
+            self._mark_blocked(
+                result,
+                message or f"{name} blocked runtime execution.",
+            )
             self._record_step(
                 result,
                 name=f"{name}_halt",
@@ -328,28 +386,62 @@ class SecureRuntimePipeline:
                 message=f"{name} blocked runtime execution.",
                 details={"reason": action},
             )
+        self._record_step(
+            result,
+            name=name,
+            status=status,
+            message=message,
+            details=details,
+        )
 
-        if action == "quarantine":
-            result.status = "quarantined"
-            result.allowed = False
-            self._record_step(
-                result,
-                name=f"{name}_containment",
-                status="quarantined",
-                message=f"{name} quarantined runtime execution.",
-                details={"reason": action},
-            )
+    def _mark_blocked(
+        self,
+        result: RuntimeExecutionResult,
+        reason: str,
+    ) -> None:
+        decision = result.enforcement.decision
+        risk_score = decision.risk_score
+        if not isinstance(risk_score, int) or isinstance(risk_score, bool) or not 0 <= risk_score <= 100:
+            risk_score = RISK_THRESHOLD_BLOCK_MIN
 
-        if action == "warn" and result.status not in {"blocked", "quarantined"}:
-            if result.status == "initializing":
-                result.status = "warning"
-            self._record_step(
-                result,
-                name=f"{name}_warning",
-                status="warned",
-                message=f"{name} raised a runtime warning.",
-                details={"reason": action},
-            )
+        result.status = "blocked"
+        result.verdict = PolicyVerdict.BLOCK.value
+        result.allowed = False
+        decision.verdict = PolicyVerdict.BLOCK
+        decision.allowed = False
+        decision.risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
+        if reason and reason not in decision.reasons:
+            decision.reasons.append(reason)
+        result.enforcement.status = "blocked"
+        result.enforcement.blocked = True
+        result.enforcement.review_required = result.enforcement.review_required or decision.requires_human_review
+        result.enforcement.quarantine_required = False
+        result.enforcement.actions = [
+            action_name
+            for action_name in result.enforcement.actions
+            if action_name
+            not in {
+                "allow_execution",
+                "allow_with_warning",
+                "emit_security_warning",
+                "quarantine_request",
+            }
+        ]
+        for action_name in ("block_request", "halt_execution", "preserve_evidence"):
+            if action_name not in result.enforcement.actions:
+                result.enforcement.actions.append(action_name)
+        if result.enforcement.review_required and "enqueue_review" not in result.enforcement.actions:
+            result.enforcement.actions.append("enqueue_review")
+        result.runtime_metadata["risk_score"] = decision.risk_score
+        result.enforcement.metadata["risk_score"] = decision.risk_score
+        result.enforcement.audit_record.update(
+            status="blocked",
+            verdict=PolicyVerdict.BLOCK.value,
+            risk_score=decision.risk_score,
+            actions=list(result.enforcement.actions),
+            reasons=list(decision.reasons),
+            review_required=result.enforcement.review_required,
+        )
 
     def _execute(self, request: PolicyRequest, result: RuntimeExecutionResult) -> dict[str, Any]:
         self._record_step(

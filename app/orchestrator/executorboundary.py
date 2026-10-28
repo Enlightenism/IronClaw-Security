@@ -3,21 +3,23 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.security.hostilecontext import scanhostilecontextdict
 from app.security.promptinjection import scanpromptinjectiondict
 
 BoundaryState = str
 ExecutorCallable = Callable[..., Any]
+PolicyVerdict = Literal["allow", "block"]
 
 
 @dataclass(slots=True)
 class ExecutionReceipt:
     executionid: str
     state: str
-    policyverdict: str
+    policyverdict: PolicyVerdict
     shouldexecute: bool
     haltedbyboundary: bool
     reviewitemid: str | None = None
@@ -92,11 +94,13 @@ def _make_reason(source: str, label: str, details: str, score: int) -> dict[str,
     }
 
 
-def _decision_from_risk(riskscore: int) -> tuple[str, str, bool, bool, str, str]:
-    if riskscore >= 85:
-        return "denied", "block", False, True, "deny", "denied"
-    if riskscore >= 50:
-        return "queuedforreview", "warn", True, False, "review", "queuedforreview"
+def _decision_from_risk(
+    riskscore: int,
+) -> tuple[str, PolicyVerdict, bool, bool, str, str]:
+    if riskscore > RISK_THRESHOLD_ALLOW_MAX:
+        if riskscore < RISK_THRESHOLD_BLOCK_MIN:
+            return "queuedforreview", "block", False, True, "review", "queuedforreview"
+        return "denied", "block", False, True, "block", "denied"
     return "executed", "allow", True, False, "allow", "completed"
 
 
@@ -132,19 +136,31 @@ def executewithboundary(
         metadata=effective_metadata,
     )
 
+    risk_score_is_valid = isinstance(riskscore, int) and not isinstance(riskscore, bool) and 0 <= riskscore <= 100
+    base_riskscore = riskscore if risk_score_is_valid else RISK_THRESHOLD_BLOCK_MIN
     combined_risk_delta = int(injectionscan.get("riskdelta", 0)) + int(
         hostilecontextscan.get("riskdelta", 0),
     )
-    adjusted_riskscore = max(0, min(100, int(riskscore) + combined_risk_delta))
+    adjusted_riskscore = max(0, min(100, base_riskscore + combined_risk_delta))
 
-    (
-        state,
-        policyverdict,
-        shouldexecute,
-        haltedbyboundary,
-        responseaction,
-        responsestatus,
-    ) = _decision_from_risk(adjusted_riskscore)
+    if risk_score_is_valid:
+        (
+            state,
+            policyverdict,
+            shouldexecute,
+            haltedbyboundary,
+            responseaction,
+            responsestatus,
+        ) = _decision_from_risk(adjusted_riskscore)
+    else:
+        state = "denied"
+        policyverdict = "block"
+        shouldexecute = False
+        haltedbyboundary = True
+        responseaction = "block"
+        responsestatus = "denied"
+    if policyverdict == "block":
+        adjusted_riskscore = max(adjusted_riskscore, RISK_THRESHOLD_BLOCK_MIN)
 
     reasons: list[dict[str, Any]] = []
     reasons.append(
@@ -155,6 +171,15 @@ def executewithboundary(
             score=int(adjusted_riskscore),
         ),
     )
+    if not risk_score_is_valid:
+        reasons.append(
+            _make_reason(
+                source="boundary",
+                label="Invalid risk score",
+                details="The supplied risk score was invalid; block-only policy denied execution.",
+                score=RISK_THRESHOLD_BLOCK_MIN,
+            ),
+        )
 
     for reason in injectionscan.get("reasons", []):
         if isinstance(reason, dict):
@@ -204,20 +229,20 @@ def executewithboundary(
             injectionscan.get("shouldreview") or hostilecontextscan.get("shouldreview"),
         )
 
-        if should_quarantine:
+        policyverdict = "block"
+        shouldexecute = False
+        haltedbyboundary = True
+        if should_quarantine or not should_review or state == "denied":
             state = "denied"
-            policyverdict = "quarantine"
-            shouldexecute = False
-            haltedbyboundary = True
-            responseaction = "quarantine"
+            responseaction = "block"
             responsestatus = "denied"
-        elif should_review and state == "executed":
+        else:
             state = "queuedforreview"
-            policyverdict = "warn"
-            shouldexecute = True
-            haltedbyboundary = False
             responseaction = "review"
             responsestatus = "queuedforreview"
+
+    if policyverdict == "block":
+        adjusted_riskscore = max(adjusted_riskscore, RISK_THRESHOLD_BLOCK_MIN)
 
     executionid = f"exec_{uuid4().hex}"
     traceid = f"trace_{uuid4().hex}"

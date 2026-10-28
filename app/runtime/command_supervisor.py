@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from app.runtime.tool_call_guard import evaluate_tool_call
 
@@ -58,7 +58,7 @@ RESTRICTED_COMMANDS = {
 class CommandSupervisorDecision:
     allowed: bool
     response_status: str
-    policy_verdict: str
+    policy_verdict: Literal["allow", "block"]
     risk_score: int
     should_execute: bool
     halted_by_boundary: bool

@@ -161,7 +161,7 @@ def test_adapt_openclaw_request_rejects_missing_bundle_for_prompt_bundle() -> No
 def test_adapt_openclaw_response_maps_success_envelope() -> None:
     envelope = build_skill_success_response(
         operation="scan",
-        verdict="review",
+        verdict="block",
         summary="Potential prompt injection markers found.",
         should_halt=False,
         should_warn=True,
@@ -178,10 +178,10 @@ def test_adapt_openclaw_response_maps_success_envelope() -> None:
     assert payload["operation"] == "scan"
     assert payload["request_id"] == "req-response-1"
     assert payload["error_code"] is None
-    assert payload["result"]["verdict"] == "review"
+    assert payload["result"]["verdict"] == "block"
     assert payload["result"]["summary"] == "Potential prompt injection markers found."
-    assert payload["result"]["should_halt"] is False
-    assert payload["result"]["should_warn"] is True
+    assert payload["result"]["should_halt"] is True
+    assert payload["result"]["should_warn"] is False
     assert payload["result"]["allowed"] is False
     assert payload["result"]["scan_id"] == "scan-123"
     assert payload["result"]["decision_source"] == "scan"
@@ -218,9 +218,9 @@ def test_build_openclaw_error_response_returns_error_payload() -> None:
     assert payload["success"] is False
     assert payload["operation"] == "execute"
     assert payload["error_code"] == "adapter_failure"
-    assert payload["result"]["verdict"] == "error"
+    assert payload["result"]["verdict"] == "block"
     assert payload["result"]["should_halt"] is True
-    assert payload["result"]["should_warn"] is True
+    assert payload["result"]["should_warn"] is False
     assert payload["result"]["allowed"] is False
     assert payload["request_id"] == "req-error-1"
     assert len(payload["result"]["reasons"]) == 1

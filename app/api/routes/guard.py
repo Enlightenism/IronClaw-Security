@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.core.auth import require_api_key
 from app.orchestrator.policy_enforcer import enforce_policy, initialize_policy_engine
 from app.services.action_decision import evaluate_action_execution
@@ -85,13 +86,18 @@ def guarded_execute(payload: ExecuteRequest, request: Request) -> dict[str, Any]
         metadata=_merge_metadata(payload.metadata, session_id=payload.session_id),
     )
 
+    verdict = "allow" if policy_decision.verdict == "allow" and policy_decision.allow_execution else "block"
+    risk_score = int(policy_decision.risk_score)
+    if verdict == "block":
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
+
     if policy_decision.verdict == "block":
         response_status = "denied"
         execution_state = "denied"
     elif policy_decision.requires_review:
         response_status = "queued_for_review"
         execution_state = "held"
-    elif policy_decision.allow_execution:
+    elif verdict == "allow":
         response_status = "completed"
         execution_state = "executed"
     else:
@@ -103,10 +109,10 @@ def guarded_execute(payload: ExecuteRequest, request: Request) -> dict[str, Any]
         "trace_id": trace_id,
         "response_status": response_status,
         "execution_state": execution_state,
-        "policy_verdict": policy_decision.verdict,
-        "risk_score": int(policy_decision.risk_score),
+        "policy_verdict": verdict,
+        "risk_score": risk_score,
         "risk_level": policy_decision.risk_level,
-        "allow_execution": policy_decision.allow_execution,
+        "allow_execution": policy_decision.allow_execution and verdict == "allow",
         "requires_review": policy_decision.requires_review,
         "matched_rules": [match.to_dict() for match in policy_decision.matched_rules],
         "reasons": list(policy_decision.reasons),

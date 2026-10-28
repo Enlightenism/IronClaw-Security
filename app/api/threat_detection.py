@@ -15,6 +15,7 @@ from app.schemas.threat_detection import (
     DetectionResult,
     DetectionSummary,
     DetectionVerdict,
+    HistoricalDetectionVerdict,
     ThreatSeverityLevel,
 )
 from app.services.threat_detection_engine import get_detection_engine
@@ -43,7 +44,7 @@ _TABLE_DETECTIONS = "threat_detections"
 # ---------------------------------------------------------------------------
 
 
-_BLOCK_STATUSES: frozenset[str] = frozenset({DetectionVerdict.BLOCK.value, DetectionVerdict.REVIEW.value})
+_BLOCK_STATUSES: frozenset[str] = frozenset({DetectionVerdict.BLOCK.value})
 
 
 # ---------------------------------------------------------------------------
@@ -133,9 +134,9 @@ def _persist_detection(result: DetectionResult) -> None:
 def _emit_alert_if_needed(result: DetectionResult) -> None:
     """
     Bridge high-severity DetectionResults into the alert pipeline.
-    Delegates to threat_alerts service when verdict is REVIEW or BLOCK.
+    Delegates to threat_alerts service when the verdict is BLOCK.
     """
-    if result.verdict not in (DetectionVerdict.REVIEW, DetectionVerdict.BLOCK):
+    if result.verdict != DetectionVerdict.BLOCK:
         return
     try:
         from app.services.threat_alerts import emit_detection_alert  # noqa: PLC0415
@@ -274,12 +275,12 @@ def run_detection(
         "Accepts a DetectionRequest with any combination of text, url, domain, "
         "hashes, or ioc_values. Runs the full ThreatDetectionEngine pipeline: "
         "observable extraction → IOC resolution → correlation signal generation → "
-        "composite scoring → verdict (allow/monitor/review/block). "
+        "composite scoring → verdict (allow/block). "
         "Persists the result to threat_detections and emits telemetry asynchronously. "
-        "REVIEW and BLOCK verdicts trigger the alert bridge."
+        "BLOCK verdicts trigger the alert bridge."
     ),
     responses={
-        200: {"description": "Detection completed — verdict in [allow, monitor, review, block]"},
+        200: {"description": "Detection completed — verdict in [allow, block]"},
         400: {"description": "Invalid request — no observable payload provided"},
         500: {"description": "Detection engine error"},
     },
@@ -389,7 +390,7 @@ async def list_detection_summaries(
     org_id: str | None = Query(default=None),
     agent_id: str | None = Query(default=None),
     session_id: str | None = Query(default=None),
-    verdict: DetectionVerdict | None = Query(default=None),
+    verdict: HistoricalDetectionVerdict | None = Query(default=None),
     severity: ThreatSeverityLevel | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),

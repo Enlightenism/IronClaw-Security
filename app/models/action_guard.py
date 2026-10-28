@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.services.action_guard import ActionType
 
+VerdictType = Literal["allow", "block"]
+
 
 class ActionReason(BaseModel):
     source: Literal["policy", "scan", "ai"]
@@ -39,10 +41,10 @@ class ActionPolicyResponse(BaseModel):
     action_type: ActionType
     target: str
     policy_mode: Literal["allow", "review", "block"]
-    verdict: Literal["allow", "warn", "quarantine", "block"]
+    verdict: VerdictType
     summary: str
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     client_id: str | None = None
     session_id: str | None = None
     reasons: list[ActionReason] = Field(default_factory=list)
@@ -50,7 +52,7 @@ class ActionPolicyResponse(BaseModel):
 
 class ActionGuardResponse(BaseModel):
     action_type: ActionType
-    verdict: Literal["allow", "warn", "quarantine", "block"]
+    verdict: VerdictType
     scan_id: str | None
     summary: str
     risk_score: int
@@ -58,7 +60,7 @@ class ActionGuardResponse(BaseModel):
     target: str
     content: str
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     client_id: str | None = None
     session_id: str | None = None
     reasons: list[ActionReason] = Field(default_factory=list)
@@ -69,13 +71,13 @@ class ActionDecisionResponse(BaseModel):
     target: str
     content: str
     policy_mode: Literal["allow", "review", "block"] | None = None
-    verdict: Literal["allow", "warn", "quarantine", "block"]
+    verdict: VerdictType
     summary: str
     risk_score: int
     matched_patterns: list[str]
     scan_id: str | None = None
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     decision_source: Literal["policy", "scan", "policy_and_scan"]
     client_id: str | None = None
     session_id: str | None = None
@@ -84,7 +86,7 @@ class ActionDecisionResponse(BaseModel):
     drift_report: dict[str, Any] | None = None
     reasons: list[ActionReason] = Field(default_factory=list)
     # Guard telemetry — full EnforcedVerdict surface
-    guard_verdict: str | None = None
+    guard_verdict: VerdictType | None = None
     guard_risk_score: int | None = None
     guard_confidence: float | None = None
     guard_latency_ms: float | None = None

@@ -10,23 +10,20 @@ app.include_router(router)
 client = TestClient(app)
 
 
-def test_executeaction_safe_request_includes_usage_payload() -> None:
+def test_executeaction_safe_file_read_includes_usage_payload() -> None:
     response = client.post(
         "/action/execute",
         json={
-            "actiontype": "httpfetch",
-            "target": "https://example.com",
-            "content": "Fetch the public homepage and summarize it.",
+            "actiontype": "fileread",
+            "target": "README.md",
+            "content": "Read the project overview.",
             "clientid": "client-usage-001",
             "sessionid": "session-usage-001",
             "ownerkey": "owner-usage-001",
             "requestedunits": 1,
             "filepath": "app/api/actionexecute.py",
             "riskscore": 0,
-            "metadata": {
-                "source": "web",
-                "documenttext": "Example Domain is for use in illustrative examples.",
-            },
+            "metadata": {},
         },
     )
 
@@ -67,12 +64,14 @@ def test_executeaction_review_request_skips_usage_consumption() -> None:
 
     assert body["status"] == "review"
     assert body["executionallowed"] is False
+    assert body["promptinjection"]["verdict"] == "block"
+    assert body["promptinjection"]["shouldquarantine"] is False
     assert body["usage"]["applied"] is False
     assert body["usage"]["consumedunits"] == 0
     assert body["usage"]["reason"] == "blocked_by_security_review"
 
 
-def test_executeaction_quarantined_request_skips_usage_consumption() -> None:
+def test_executeaction_high_risk_review_skips_usage_consumption() -> None:
     response = client.post(
         "/action/execute",
         json={
@@ -95,8 +94,10 @@ def test_executeaction_quarantined_request_skips_usage_consumption() -> None:
     assert response.status_code == 200
     body = response.json()
 
-    assert body["status"] == "quarantined"
+    assert body["status"] == "review"
     assert body["executionallowed"] is False
+    assert body["promptinjection"]["verdict"] == "block"
+    assert body["promptinjection"]["shouldquarantine"] is False
     assert body["usage"]["applied"] is False
     assert body["usage"]["consumedunits"] == 0
     assert body["usage"]["reason"] == "blocked_by_security_review"

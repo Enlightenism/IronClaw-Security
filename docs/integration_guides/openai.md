@@ -11,7 +11,7 @@ User input
 ▼
 IronClaw /scan/ ← inspect before sending to OpenAI
 │
-├── block/quarantine → stop, return error to caller
+├── block → stop, return error to caller
 │
 ▼
 OpenAI API call
@@ -19,7 +19,7 @@ OpenAI API call
 ▼
 IronClaw /scan/ ← inspect model output before returning to user
 │
-├── block/quarantine → stop, redact or hold response
+├── block → stop, redact or hold response
 │
 ▼
 Return to caller
@@ -52,7 +52,7 @@ def guarded_chat(user_message: str, agent_id: str = "openai-agent") -> str:
     # 1. Inspect input
     input_result = guard.scan(content=user_message, context="user_input", agent_id=agent_id)
 
-    if input_result.verdict in ("block", "quarantine"):
+    if input_result.verdict != "allow":
         raise PermissionError(f"IronClaw blocked input: {input_result.reason}")
 
     # 2. Call OpenAI
@@ -62,7 +62,7 @@ def guarded_chat(user_message: str, agent_id: str = "openai-agent") -> str:
     # 3. Inspect output
     output_result = guard.scan(content=output, context="agent_output", agent_id=agent_id)
 
-    if output_result.verdict in ("block", "quarantine"):
+    if output_result.verdict != "allow":
         raise PermissionError(f"IronClaw blocked output: {output_result.reason}")
 
     return output
@@ -78,7 +78,7 @@ When using OpenAI function calling, inspect each tool invocation before dispatch
 def guarded_tool_dispatch(tool_name: str, tool_args: dict, agent_id: str) -> dict:
     result = guard.scan(content=f"{tool_name}({tool_args})", context="tool_call", agent_id=agent_id, tool_name=tool_name, tool_args=tool_args)
 
-    if result.verdict in ("block", "quarantine"):
+    if result.verdict != "allow":
         raise PermissionError(f"IronClaw blocked tool call: {result.reason}")
 
     # Dispatch the actual tool here

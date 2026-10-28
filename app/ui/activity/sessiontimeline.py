@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+
 router = APIRouter(
     prefix="/ui/activity",
     tags=["session-timeline"],
@@ -63,10 +65,10 @@ def _sample_session_timelines() -> dict[str, SessionTimelineResponse]:
                     timestamp=_utc_iso(2026, 4, 18, 9, 10),
                     actiontype="toolcall",
                     target="shell",
-                    riskscore=74,
+                    riskscore=max(RISK_THRESHOLD_BLOCK_MIN, 74),
                     executionstate="dryrun",
                     responsestatus="queuedforreview",
-                    policyverdict="review",
+                    policyverdict="block",
                     reviewitemid="review-102",
                     reason="Mid-risk shell-adjacent request queued for review.",
                 ),
@@ -84,7 +86,7 @@ def _sample_session_timelines() -> dict[str, SessionTimelineResponse]:
                     timestamp=_utc_iso(2026, 4, 18, 11, 20),
                     actiontype="toolcall",
                     target="shell",
-                    riskscore=96,
+                    riskscore=max(RISK_THRESHOLD_BLOCK_MIN, 96),
                     executionstate="denied",
                     responsestatus="denied",
                     policyverdict="block",

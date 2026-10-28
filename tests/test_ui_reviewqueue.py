@@ -181,7 +181,9 @@ class TestReviewQueueEndpoint:
         pending = [i for i in data["items"] if i["reviewstatus"] == "pending"]
         for item in pending:
             assert item["responsestatus"] == "queuedforreview"
-            assert item["policyverdict"] == "review"
+            assert item["policyverdict"] == "block"
+            assert item["shouldexecute"] is False
+            assert item["haltedbyboundary"] is True
 
     def test_demo_item_002_halted_by_boundary(self, test_client: TestClient) -> None:
         data = test_client.get("/ui/reviews/queue").json()
@@ -190,12 +192,12 @@ class TestReviewQueueEndpoint:
         assert item["haltedbyboundary"] is True
         assert item["shouldexecute"] is False
 
-    def test_demo_item_001_not_halted(self, test_client: TestClient) -> None:
+    def test_demo_item_001_halted_by_boundary(self, test_client: TestClient) -> None:
         data = test_client.get("/ui/reviews/queue").json()
         item = next((i for i in data["items"] if i["reviewitemid"] == "review-demo-001"), None)
         assert item is not None
-        assert item["haltedbyboundary"] is False
-        assert item["shouldexecute"] is True
+        assert item["haltedbyboundary"] is True
+        assert item["shouldexecute"] is False
 
     def test_demo_item_001_actiontype(self, test_client: TestClient) -> None:
         data = test_client.get("/ui/reviews/queue").json()

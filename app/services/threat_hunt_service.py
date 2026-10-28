@@ -9,7 +9,7 @@ import uuid
 
 from app.core.supabase import get_supabase_service_client
 from app.schemas.threat_detection import (
-    DetectionVerdict,
+    HistoricalDetectionVerdict,
     HuntMatch,
     HuntQuery,
     HuntResult,
@@ -295,9 +295,9 @@ class ThreatHuntService:
                 return None
 
         try:
-            verdict = DetectionVerdict(row["verdict"])
+            verdict = HistoricalDetectionVerdict(row["verdict"])
         except (KeyError, ValueError, TypeError):
-            verdict = DetectionVerdict.MONITOR
+            verdict = HistoricalDetectionVerdict.BLOCK
 
         try:
             severity = ThreatSeverityLevel(row["severity"])

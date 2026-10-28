@@ -55,8 +55,8 @@ const ATTACKS = [
     id: "attack-2",
     timestamp: "2026-07-12T11:20:00.000Z",
     threat_type: "Secrets Leakage",
-    risk_score: 58,
-    verdict: "WARN",
+    risk_score: 74,
+    verdict: "BLOCK",
   },
   {
     id: "attack-3",
@@ -237,11 +237,41 @@ describe("SecurityAnalysis", () => {
     expect(screen.getByText("Secrets Leakage")).toBeInTheDocument();
     expect(screen.getByText("Malware File")).toBeInTheDocument();
     expect(screen.getByText("22")).toBeInTheDocument();
-    expect(screen.getByText("58")).toBeInTheDocument();
+    expect(screen.getByText("74")).toBeInTheDocument();
     expect(screen.getByText("91")).toBeInTheDocument();
     expect(screen.getByText("ALLOW")).toBeInTheDocument();
-    expect(screen.getByText("WARN")).toBeInTheDocument();
-    expect(screen.getByText("BLOCK")).toBeInTheDocument();
+    expect(screen.getAllByText("BLOCK")).toHaveLength(2);
+  });
+
+  it("retains styles for legacy verdicts in historical rows", () => {
+    const historicalAttacks = [
+      {
+        id: "legacy-warn",
+        timestamp: "2026-07-12T11:20:00.000Z",
+        threat_type: "Legacy warning",
+        risk_score: 58,
+        verdict: "WARN",
+      },
+      {
+        id: "legacy-quarantine",
+        timestamp: "2026-07-12T11:25:00.000Z",
+        threat_type: "Legacy quarantine",
+        risk_score: 69,
+        verdict: "QUARANTINE",
+      },
+    ];
+
+    render(
+      <SecurityAnalysis
+        unitsToday={12}
+        unitsWeek={45}
+        dailyUsage={DAILY_USAGE}
+        attacks={historicalAttacks}
+      />,
+    );
+
+    expect(screen.getByText("WARN")).toHaveClass("text-[#EAB308]");
+    expect(screen.getByText("QUARANTINE")).toHaveClass("text-[#F97316]");
   });
 
   it("falls back to empty attack state when attacks are empty with live incoming stats", () => {

@@ -23,7 +23,7 @@ def test_pipeline_allows_safe_httpfetch_request() -> None:
     assert decision.haltedbyboundary is False
 
 
-def test_pipeline_reviews_low_risk_toolcall_due_to_stricter_thresholds() -> None:
+def test_pipeline_blocks_and_queues_low_risk_toolcall_for_review() -> None:
     pipeline = initialize_secureruntimepipeline()
 
     decision = pipeline.evaluate(
@@ -38,8 +38,9 @@ def test_pipeline_reviews_low_risk_toolcall_due_to_stricter_thresholds() -> None
     )
 
     assert decision.executionstate == "queuedforreview"
-    assert decision.policyverdict == "warn"
-    assert decision.shouldexecute is True
+    assert decision.policyverdict == "block"
+    assert decision.shouldexecute is False
+    assert decision.haltedbyboundary is True
     assert any(reason["label"] == "Tool-call hardening" for reason in decision.reasons)
 
 
@@ -63,7 +64,7 @@ def test_pipeline_blocks_shell_request_at_stricter_shell_threshold() -> None:
     assert decision.haltedbyboundary is True
 
 
-def test_pipeline_reviews_hostile_retrieved_context_even_with_low_base_risk() -> None:
+def test_pipeline_blocks_hostile_retrieved_context_even_with_low_base_risk() -> None:
     pipeline = initialize_secureruntimepipeline()
 
     decision = pipeline.evaluate(
@@ -81,11 +82,13 @@ def test_pipeline_reviews_hostile_retrieved_context_even_with_low_base_risk() ->
     )
 
     assert decision.executionstate == "queuedforreview"
-    assert decision.policyverdict == "warn"
+    assert decision.policyverdict == "block"
+    assert decision.shouldexecute is False
+    assert decision.haltedbyboundary is True
     assert decision.hostilecontext["flagged"] is True
 
 
-def test_pipeline_quarantines_combined_prompt_injection_and_hostile_context() -> None:
+def test_pipeline_blocks_combined_prompt_injection_and_hostile_context() -> None:
     pipeline = initialize_secureruntimepipeline()
 
     decision = pipeline.evaluate(
@@ -103,7 +106,7 @@ def test_pipeline_quarantines_combined_prompt_injection_and_hostile_context() ->
     )
 
     assert decision.executionstate == "denied"
-    assert decision.policyverdict in {"quarantine", "block"}
+    assert decision.policyverdict == "block"
     assert decision.shouldexecute is False
     assert decision.promptinjection["flagged"] is True
     assert decision.hostilecontext["flagged"] is True

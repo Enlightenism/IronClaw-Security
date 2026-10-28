@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
@@ -149,7 +149,7 @@ def _build_capabilities(*, include_runtime_details: bool = True) -> list[dict[st
         },
         {
             "name": "policy-enforcement",
-            "description": "Apply IronClaw policy decisions with allow, warn, quarantine, and block verdicts.",
+            "description": "Apply IronClaw policy decisions with allow and block verdicts.",
             "required": True,
         },
     ]
@@ -265,7 +265,7 @@ class GeminiCliEvaluateResponse(BaseModel):
     adapter_name: str
     platform: str
     mode: str
-    verdict: str
+    verdict: Literal["allow", "block"]
     should_allow: bool
     should_warn: bool
     should_quarantine: bool
@@ -328,7 +328,7 @@ class GeminiCliManifestResponse(BaseModel):
     response_model=GeminiCliEvaluateResponse,
     status_code=status.HTTP_200_OK,
     summary="Evaluate a Gemini CLI prompt, workflow step, command, or tool-plan action",
-    description=("Accepts a Gemini CLI prompt, workflow step, command, or tool-plan payload. Runs secret scanning before policy evaluation and returns a deterministic allow/warn/quarantine/block verdict with a full audit trail."),
+    description=("Accepts a Gemini CLI prompt, workflow step, command, or tool-plan payload. Runs secret scanning before policy evaluation and returns a deterministic allow/block verdict with a full audit trail."),
 )
 async def evaluate_gemini_cli(body: GeminiCliEvaluateRequest) -> GeminiCliEvaluateResponse:
     trace_id = _trace_id()
@@ -353,7 +353,7 @@ async def evaluate_gemini_cli(body: GeminiCliEvaluateRequest) -> GeminiCliEvalua
             verdict="block",
             should_allow=False,
             should_warn=False,
-            should_quarantine=True,
+            should_quarantine=False,
             should_block=True,
             risk_score=100,
             risk_level="critical",
@@ -429,6 +429,7 @@ async def evaluate_gemini_cli(body: GeminiCliEvaluateRequest) -> GeminiCliEvalua
     response.platform = _PLATFORM
     response.adapter_name = _ADAPTER_NAME
     response.metadata = _canonical_adapter_metadata(response.metadata)
+    verdict: Literal["allow", "block"] = "allow" if response.verdict == "allow" else "block"
 
     audit_trail = _build_audit_trail(
         trace_id=trace_id,
@@ -440,7 +441,7 @@ async def evaluate_gemini_cli(body: GeminiCliEvaluateRequest) -> GeminiCliEvalua
         risk_score_input=body.risk_score,
         risk_score_final=response.risk_score,
         risk_level=response.risk_level,
-        verdict=response.verdict,
+        verdict=verdict,
         matched_rule_count=len(response.matched_rules),
         evaluated_at=response.reviewed_at,
         metadata=body.metadata,
@@ -452,11 +453,11 @@ async def evaluate_gemini_cli(body: GeminiCliEvaluateRequest) -> GeminiCliEvalua
         adapter_name=response.adapter_name,
         platform=response.platform,
         mode=response.mode,
-        verdict=response.verdict,
-        should_allow=response.should_allow,
-        should_warn=response.should_warn,
-        should_quarantine=response.should_quarantine,
-        should_block=response.should_block,
+        verdict=verdict,
+        should_allow=verdict == "allow",
+        should_warn=False,
+        should_quarantine=False,
+        should_block=verdict == "block",
         risk_score=response.risk_score,
         risk_level=response.risk_level,
         summary=response.summary,
@@ -549,8 +550,8 @@ async def gemini_cli_manifest() -> GeminiCliManifestResponse:
         "total_rules": len(engine.rules),
         "verdicts": {
             "block": [r.rule_id for r in engine.rules if r.verdict == "block"],
-            "quarantine": [r.rule_id for r in engine.rules if r.verdict == "quarantine"],
-            "warn": [r.rule_id for r in engine.rules if r.verdict == "warn"],
+            "quarantine": [],
+            "warn": [],
             "allow": [r.rule_id for r in engine.rules if r.verdict == "allow"],
         },
         "tags": sorted({tag for rule in engine.rules for tag in rule.tags}),

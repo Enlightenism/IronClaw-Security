@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.checkpoint_store import (
     CheckpointBundle,
     load_checkpoint_bundle,
@@ -17,6 +18,7 @@ from app.orchestrator.supervisor import SupervisorSnapshot
 
 ReplayMode = str
 ReplayStatus = str
+ReplayVerdict = Literal["allow", "block"]
 
 
 @dataclass(frozen=True)
@@ -26,7 +28,7 @@ class ReplayStep:
     session_id: str
     action_type: str
     target: str
-    verdict: str
+    verdict: ReplayVerdict
     risk_score: int
     replay_outcome: str
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
@@ -124,26 +126,28 @@ def restore_runtime_state(checkpoint_path: str | Path) -> RestoredRuntimeState:
 
 
 def _derive_replay_outcome(verdict: str) -> str:
-    if verdict == "block":
-        return "halted"
-    if verdict == "quarantine":
-        return "isolated"
-    if verdict == "warn":
-        return "review-required"
-    return "continued"
+    return "continued" if verdict == "allow" else "halted"
+
+
+def _normalize_replay_verdict(verdict: str) -> ReplayVerdict:
+    return "allow" if verdict == "allow" else "block"
 
 
 def _build_replay_step(trace: DecisionTrace) -> ReplayStep:
     execution_plan = trace.execution_plan
+    verdict = _normalize_replay_verdict(execution_plan.verdict)
+    risk_score = execution_plan.risk_score
+    if verdict == "block":
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
     return ReplayStep(
         step_id=f"step-{uuid4().hex[:12]}",
         trace_id=trace.trace_id,
         session_id=trace.session_id,
         action_type=trace.action_type,
         target=trace.target,
-        verdict=execution_plan.verdict,
-        risk_score=execution_plan.risk_score,
-        replay_outcome=_derive_replay_outcome(execution_plan.verdict),
+        verdict=verdict,
+        risk_score=risk_score,
+        replay_outcome=_derive_replay_outcome(verdict),
     )
 
 
@@ -156,8 +160,8 @@ def replay_checkpoint(
     steps = [_build_replay_step(trace) for trace in restored.traces]
 
     blocked = sum(1 for step in steps if step.verdict == "block")
-    quarantined = sum(1 for step in steps if step.verdict == "quarantine")
-    warnings = sum(1 for step in steps if step.verdict == "warn")
+    quarantined = 0
+    warnings = 0
     allowed = sum(1 for step in steps if step.verdict == "allow")
 
     notes = [
@@ -168,18 +172,12 @@ def replay_checkpoint(
 
     if blocked:
         notes.append("Replay encountered blocked traces that would halt live execution.")
-    if quarantined:
-        notes.append("Replay encountered quarantined traces that would require isolation.")
     if not restored.traces:
         notes.append("Checkpoint contained no decision traces; replay completed as restore-only.")
 
     status: ReplayStatus = "completed"
     if blocked:
         status = "completed-with-blocks"
-    elif quarantined:
-        status = "completed-with-quarantine"
-    elif warnings:
-        status = "completed-with-warnings"
 
     return ReplayReport(
         replay_id=f"rpl-{uuid4().hex[:16]}",

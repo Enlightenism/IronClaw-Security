@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import hashlib
 import ipaddress
 import re
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from app.detection.artifactanalyzer import ArtifactAnalyzer, build_artifact_analyzer
@@ -76,6 +76,8 @@ HEX_ESCAPE_PATTERN = re.compile(r"%[0-9a-fA-F]{2}")
 REPEATED_SUBDOMAIN_PATTERN = re.compile(r"(?:[^.]+\.){4,}")
 CREDENTIAL_STYLE_PATTERN = re.compile(r"^[^/@:]+:[^/@]+@")
 
+DownloadVerdict = Literal["allow", "block"]
+
 
 @dataclass(slots=True)
 class DownloadSignal:
@@ -91,7 +93,7 @@ class DownloadAnalysisResult:
     url: str | None
     file_name: str | None
     sha256: str | None
-    verdict: str
+    verdict: DownloadVerdict
     severity: str
     score: float
     confidence: float
@@ -536,16 +538,8 @@ class DownloadAnalyzer:
             return "medium"
         return "low"
 
-    def _resolve_verdict(self, score: float, signals: list[DownloadSignal]) -> str:
-        names = {signal.name for signal in signals}
-
-        if score >= 0.82 or "unicode_direction_override" in names or ("portable_executable_header" in names and "double_extension_name" in names):
-            return "block"
-        if score >= 0.52 or "threatintel_match" in names:
-            return "review"
-        if score >= 0.22:
-            return "monitor"
-        return "allow"
+    def _resolve_verdict(self, score: float, signals: list[DownloadSignal]) -> DownloadVerdict:
+        return "block" if signals or score > 0.0 else "allow"
 
     def _resolve_confidence(
         self,
@@ -645,7 +639,7 @@ def analyze_download_dict(
     )
     result_dict = result.as_dict()
 
-    verdict = result_dict.get("verdict", "allow")
+    verdict: DownloadVerdict = "allow" if result_dict.get("verdict") == "allow" else "block"
     score = float(result_dict.get("score", 0.0))
     risk_delta = int(round(score * 100))
 
@@ -668,7 +662,7 @@ def analyze_download_dict(
         "reasons": reasons_out,
         "signals": result_dict.get("signals", []),
         "metadata": result_dict.get("metadata", {}),
-        "shouldreview": verdict in {"review", "monitor"},
+        "shouldreview": False,
         "shouldblock": verdict == "block",
         "shouldquarantine": False,
         "blocked": verdict == "block",

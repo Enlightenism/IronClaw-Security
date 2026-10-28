@@ -140,7 +140,7 @@ def test_allow_safe_runtime_request():
     assert len(review_queue.items) == 0
 
 
-def test_missing_session_id_quarantines_early():
+def test_missing_session_id_blocks_early():
     pipeline, sandbox_router, tool_guard, telemetry_sink, review_queue = _build_pipeline()
 
     result = pipeline.evaluate(
@@ -150,8 +150,8 @@ def test_missing_session_id_quarantines_early():
     )
 
     assert result.allowed is False
-    assert result.verdict == "quarantine"
-    assert result.should_quarantine is True
+    assert result.verdict == "block"
+    assert result.should_quarantine is False
     assert result.should_block is True
     assert "secureruntimepipeline:missing_session_id" in result.matched_rules
     assert len(sandbox_router.calls) == 0
@@ -160,7 +160,7 @@ def test_missing_session_id_quarantines_early():
     assert len(review_queue.items) == 0
 
 
-def test_missing_tool_name_quarantines_early():
+def test_missing_tool_name_blocks_early():
     pipeline, sandbox_router, tool_guard, telemetry_sink, _ = _build_pipeline()
 
     result = pipeline.evaluate(
@@ -170,8 +170,9 @@ def test_missing_tool_name_quarantines_early():
     )
 
     assert result.allowed is False
-    assert result.verdict == "quarantine"
-    assert result.should_quarantine is True
+    assert result.verdict == "block"
+    assert result.should_quarantine is False
+    assert result.should_block is True
     assert "secureruntimepipeline:missing_tool_name" in result.matched_rules
     assert len(sandbox_router.calls) == 0
     assert len(tool_guard.calls) == 0
@@ -230,8 +231,9 @@ def test_sandbox_quarantine_short_circuits_before_tool_guard():
     )
 
     assert result.allowed is False
-    assert result.verdict == "quarantine"
-    assert result.should_quarantine is True
+    assert result.verdict == "block"
+    assert result.should_quarantine is False
+    assert result.should_block is True
     assert "sandboxrouter:quarantine" in result.matched_rules
     assert len(sandbox_router.calls) == 1
     assert len(tool_guard.calls) == 0
@@ -263,14 +265,16 @@ def test_tool_guard_review_enqueues_review():
         metadata={"request_id": "req-005"},
     )
 
-    assert result.allowed is True
-    assert result.verdict == "review"
+    assert result.allowed is False
+    assert result.verdict == "block"
+    assert result.should_block is True
     assert result.should_review is True
     assert "toolcallguard:review" in result.matched_rules
     assert len(sandbox_router.calls) == 1
     assert len(tool_guard.calls) == 1
     assert len(review_queue.items) == 1
     assert review_queue.items[0]["session_id"] == "sess-005"
+    assert review_queue.items[0]["verdict"] == "block"
     assert len(telemetry_sink.events) >= 1
 
 
@@ -332,8 +336,8 @@ def test_tool_guard_quarantine_quarantines_request():
     )
 
     assert result.allowed is False
-    assert result.verdict == "quarantine"
-    assert result.should_quarantine is True
+    assert result.verdict == "block"
+    assert result.should_quarantine is False
     assert result.should_block is True
     assert "toolcallguard:quarantine" in result.matched_rules
     assert len(sandbox_router.calls) == 1
@@ -387,7 +391,9 @@ def test_risk_delta_is_aggregated():
     )
 
     assert result.risk_delta == 40
-    assert result.verdict == "review"
+    assert result.verdict == "block"
+    assert result.should_block is True
+    assert result.should_review is True
 
 
 def test_allow_helper_matches_safe_decision():
@@ -535,6 +541,58 @@ def test_builder_accepts_submit_style_review_queue_only():
         network_url="https://example.com",
     )
 
-    assert result.verdict == "review"
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
+    assert result.should_review is True
     assert len(review_queue.items) == 1
+    assert review_queue.items[0]["verdict"] == "block"
     assert review_queue.items[0]["session_id"] == "sess-015"
+
+
+def test_legacy_warning_verdict_blocks_without_review():
+    pipeline, _, tool_guard, _, _ = _build_pipeline(
+        tool_decision=_GuardDecision(
+            verdict="warn",
+            allowed=True,
+            matched_rules=["toolcallguard:warn"],
+        ),
+    )
+
+    result = pipeline.evaluate(
+        session_id="sess-016",
+        tool_name="fetch",
+        network_url="https://example.com",
+    )
+
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
+    assert result.should_review is False
+    assert result.should_quarantine is False
+    assert len(tool_guard.calls) == 1
+
+
+def test_detector_review_and_degraded_signals_return_block():
+    pipeline, _, _, _, _ = _build_pipeline()
+    common = {
+        "hostilecontext": {},
+        "downloadanalysis": {},
+        "outputsanitization": {},
+    }
+
+    assert (
+        pipeline._event_verdict_for_detectors(
+            promptscan={"shouldreview": True},
+            **common,
+        )
+        == "block"
+    )
+    assert (
+        pipeline._event_verdict_for_detectors(
+            promptscan={},
+            degradedmode=True,
+            **common,
+        )
+        == "block"
+    )

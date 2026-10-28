@@ -38,7 +38,7 @@ def test_execute_guarded_action_denies_high_risk_request() -> None:
     assert summary.shouldexecute is False
     assert summary.haltedbyboundary is True
     assert summary.executorresult is None
-    assert summary.policyverdict in {"block", "quarantine"}
+    assert summary.policyverdict == "block"
 
 
 def test_execute_guarded_action_uses_default_filepath() -> None:

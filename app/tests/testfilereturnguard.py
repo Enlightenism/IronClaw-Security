@@ -80,7 +80,7 @@ def test_file_return_guard_allows_safe_text_file() -> None:
     assert len(policy_engine.calls) == 1
 
 
-def test_file_return_guard_reviews_unknown_binary_file() -> None:
+def test_file_return_guard_blocks_unknown_binary_file() -> None:
     policy_engine = _PolicyEngineStub(
         _Decision(
             verdict="review",
@@ -103,9 +103,10 @@ def test_file_return_guard_reviews_unknown_binary_file() -> None:
         metadata={"size_bytes": 8192},
     )
 
-    assert result.verdict == "review"
-    assert result.allowed is True
+    assert result.verdict == "block"
+    assert result.allowed is False
     assert result.should_review is True
+    assert result.should_block is True
 
 
 def test_file_return_guard_blocks_sensitive_file_exfiltration() -> None:
@@ -140,7 +141,7 @@ def test_file_return_guard_blocks_sensitive_file_exfiltration() -> None:
     assert result.should_block is True
 
 
-def test_file_return_guard_quarantines_malicious_artifact() -> None:
+def test_file_return_guard_blocks_malicious_artifact() -> None:
     policy_engine = _PolicyEngineStub(
         _Decision(
             verdict="quarantine",
@@ -168,10 +169,10 @@ def test_file_return_guard_quarantines_malicious_artifact() -> None:
         },
     )
 
-    assert result.verdict == "quarantine"
+    assert result.verdict == "block"
     assert result.allowed is False
     assert result.should_block is True
-    assert result.should_quarantine is True
+    assert result.should_quarantine is False
 
 
 def test_file_return_guard_passes_context_to_policy_engine() -> None:
@@ -229,7 +230,9 @@ def test_file_return_guard_handles_missing_file_path() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 
@@ -255,7 +258,9 @@ def test_file_return_guard_handles_blank_file_path() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 
@@ -281,7 +286,9 @@ def test_file_return_guard_handles_missing_file_name() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block", "allow"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 
@@ -307,7 +314,9 @@ def test_file_return_guard_handles_missing_tool_name() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 

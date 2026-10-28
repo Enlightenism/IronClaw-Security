@@ -167,7 +167,8 @@ def createauditevent(
         metadata=safe_metadata,
     )
 
-    outcome = _coerceoutcome(decision.get("outcome"))
+    decision_state = str(decision.get("state") or "").strip().lower()
+    outcome = "review" if decision_state == "queuedforreview" else _coerceoutcome(decision.get("outcome"))
     eventtype, severity, summary = _eventshape(outcome)
 
     return {

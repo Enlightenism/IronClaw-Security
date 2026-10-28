@@ -9,6 +9,7 @@ from app.api.routes.billing import router as billing_router
 from app.api.routes.install_key_events import router as install_key_events_router
 from app.api.routes.unit_ledger import router as unit_ledger_router
 from app.api.routes.unit_wallet import router as unit_wallet_router
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.services import action_decision as action_decision_svc
 from app.services import action_guard as action_guard_svc
 from app.services import action_policy as action_policy_svc
@@ -21,7 +22,15 @@ router.include_router(unit_ledger_router)
 router.include_router(billing_router)
 router.include_router(install_key_events_router)
 
-Verdict = Literal["allow", "warn", "quarantine", "block"]
+Verdict = Literal["allow", "block"]
+
+
+def _normalize_verdict(value: object) -> Verdict:
+    return "allow" if value == "allow" else "block"
+
+
+def _normalize_risk_score(verdict: Verdict, risk_score: int) -> int:
+    return max(risk_score, RISK_THRESHOLD_BLOCK_MIN) if verdict == "block" else risk_score
 
 
 class ScanRequest(BaseModel):
@@ -56,6 +65,22 @@ class HistoryItem(BaseModel):
     quarantine_reason: str | None = None
 
 
+def _history_item_response(item: Any) -> HistoryItem:
+    verdict = _normalize_verdict(item.verdict)
+    return HistoryItem(
+        scan_id=item.scan_id,
+        target_type=item.targettype,
+        target_value=item.targetvalue,
+        verdict=verdict,
+        summary=item.summary,
+        risk_score=_normalize_risk_score(verdict, item.riskscore),
+        matched_patterns=list(getattr(item, "matchedpatterns", [])),
+        review_status=getattr(item, "reviewstatus", None),
+        untrusted=True if verdict == "block" else getattr(item, "untrusted", None),
+        quarantine_reason=getattr(item, "quarantinereason", None),
+    )
+
+
 class HistoryListResponse(BaseModel):
     items: list[HistoryItem]
 
@@ -78,7 +103,7 @@ class GuardActionResponse(BaseModel):
     content: str
     verdict: Verdict
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     matched_patterns: list[str] = Field(default_factory=list)
     client_id: str
     session_id: str
@@ -91,7 +116,7 @@ class GuardPolicyResponse(BaseModel):
     policy_mode: Literal["allow", "review", "block"]
     verdict: Verdict
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     client_id: str
     session_id: str
 
@@ -104,7 +129,7 @@ class GuardDecisionResponse(BaseModel):
     verdict: Verdict
     decision_source: Literal["policy", "scan"]
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     matched_patterns: list[str] = Field(default_factory=list)
     client_id: str
     session_id: str
@@ -125,18 +150,19 @@ def scan_target(request: ScanRequest) -> ScanResponse:
         raise HTTPException(status_code=400, detail=f"unsupported target_type={target_type}")
 
     stored = history_svc.append_scan_result(scan_result)
+    verdict = _normalize_verdict(stored.verdict)
 
     return ScanResponse(
         scan_id=stored.scan_id,
-        verdict=stored.verdict,  # type: ignore[assignment]
+        verdict=verdict,
         summary=stored.summary,
-        risk_score=stored.riskscore,
+        risk_score=_normalize_risk_score(verdict, stored.riskscore),
         matched_patterns=list(getattr(stored, "matchedpatterns", [])),
         risky_files=list(getattr(stored, "riskyfiles", [])),
         checks_loaded=list(getattr(stored, "checksloaded", [])),
         failed_checks=list(getattr(stored, "failedchecks", [])),
         review_status=getattr(stored, "reviewstatus", None),
-        untrusted=getattr(stored, "untrusted", None),
+        untrusted=True if verdict == "block" else getattr(stored, "untrusted", None),
         quarantine_reason=getattr(stored, "quarantinereason", None),
     )
 
@@ -145,21 +171,7 @@ def scan_target(request: ScanRequest) -> ScanResponse:
 def list_history() -> HistoryListResponse:
     items = history_svc.get_history_items()
     return HistoryListResponse(
-        items=[
-            HistoryItem(
-                scan_id=i.scan_id,
-                target_type=i.targettype,
-                target_value=i.targetvalue,
-                verdict=i.verdict,  # type: ignore[assignment]
-                summary=i.summary,
-                risk_score=i.riskscore,
-                matched_patterns=list(getattr(i, "matchedpatterns", [])),
-                review_status=getattr(i, "reviewstatus", None),
-                untrusted=getattr(i, "untrusted", None),
-                quarantine_reason=getattr(i, "quarantinereason", None),
-            )
-            for i in items
-        ],
+        items=[_history_item_response(i) for i in items],
     )
 
 
@@ -169,18 +181,7 @@ def get_history(scan_id: str) -> HistoryItem:
     if item is None:
         raise HTTPException(status_code=404, detail="scan_id not found")
 
-    return HistoryItem(
-        scan_id=item.scan_id,
-        target_type=item.targettype,
-        target_value=item.targetvalue,
-        verdict=item.verdict,  # type: ignore[assignment]
-        summary=item.summary,
-        risk_score=item.riskscore,
-        matched_patterns=list(getattr(item, "matchedpatterns", [])),
-        review_status=getattr(item, "reviewstatus", None),
-        untrusted=getattr(item, "untrusted", None),
-        quarantine_reason=getattr(item, "quarantinereason", None),
-    )
+    return _history_item_response(item)
 
 
 @router.post("/history/{scan_id}/review")
@@ -205,7 +206,7 @@ def guard_action(request: GuardActionRequest) -> GuardActionResponse:
         content=request.content,
     )
 
-    verdict: Verdict = result.verdict  # type: ignore[assignment]
+    verdict = _normalize_verdict(result.verdict)
     matched_patterns = list(getattr(result, "matchedpatterns", []))
 
     return GuardActionResponse(
@@ -213,8 +214,8 @@ def guard_action(request: GuardActionRequest) -> GuardActionResponse:
         target=request.target,
         content=request.content,
         verdict=verdict,
-        should_halt=verdict in ("block", "quarantine"),
-        should_warn=verdict in ("warn", "quarantine"),
+        should_halt=verdict == "block",
+        should_warn=False,
         matched_patterns=matched_patterns,
         client_id=request.client_id,
         session_id=request.session_id,
@@ -234,9 +235,9 @@ def guard_action_policy(request: GuardActionRequest) -> GuardPolicyResponse:
         target=request.target,
         content=request.content,
         policy_mode=result.mode,
-        verdict=result.verdict,  # type: ignore[assignment]
-        should_halt=result.should_halt,
-        should_warn=result.should_warn,
+        verdict=_normalize_verdict(result.verdict),
+        should_halt=_normalize_verdict(result.verdict) == "block",
+        should_warn=False,
         client_id=request.client_id,
         session_id=request.session_id,
     )
@@ -255,10 +256,10 @@ def guard_action_decision(request: GuardActionRequest) -> GuardDecisionResponse:
         target=request.target,
         content=request.content,
         policy_mode=result.policy_mode,
-        verdict=result.verdict,  # type: ignore[assignment]
+        verdict=_normalize_verdict(result.verdict),
         decision_source=result.source,
-        should_halt=result.should_halt,
-        should_warn=result.should_warn,
+        should_halt=_normalize_verdict(result.verdict) == "block",
+        should_warn=False,
         matched_patterns=list(getattr(result, "matchedpatterns", [])),
         client_id=request.client_id,
         session_id=request.session_id,

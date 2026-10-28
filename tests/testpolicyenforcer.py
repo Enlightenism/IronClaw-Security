@@ -355,7 +355,7 @@ def test_review_policy_decision_flows_through_when_no_override():
     )
 
     assert result.allowed is False
-    assert result.verdict == "review"
+    assert result.verdict == "block"
     assert result.override_active is False
     assert result.rollout_enabled is True
     assert "policy:review" in result.matched_rules

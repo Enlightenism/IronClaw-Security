@@ -6,6 +6,8 @@ import re
 import shlex
 from typing import Any
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
+
 SHELL_LIKE_TARGETS = {
     "shell",
     "bash",
@@ -153,9 +155,9 @@ class CommandPolicy:
 
 @dataclass(slots=True)
 class CommandSupervisor:
-    review_threshold: int = 20
-    block_threshold: int = 50
-    quarantine_threshold: int = 80
+    review_threshold: int = RISK_THRESHOLD_ALLOW_MAX + 1
+    block_threshold: int = RISK_THRESHOLD_BLOCK_MIN
+    quarantine_threshold: int = RISK_THRESHOLD_BLOCK_MIN
     max_command_length: int = 4000
     allowed_binaries: set[str] = field(default_factory=lambda: set(DEFAULT_ALLOWED_BINARIES))
     blocked_basenames: set[str] = field(default_factory=lambda: set(DEFAULT_BLOCKED_BASENAMES))
@@ -363,33 +365,18 @@ class CommandSupervisor:
         command_kind: str,
     ) -> CommandPolicy:
         normalized_risk = max(0, min(100, int(risk_delta)))
-
-        verdict = "allow"
-        allowed = True
-        should_review = False
-        should_block = False
-        should_quarantine = False
-
-        if normalized_risk >= self.quarantine_threshold:
-            verdict = "quarantine"
-            allowed = False
-            should_block = True
-            should_quarantine = True
-        elif normalized_risk >= self.block_threshold:
-            verdict = "block"
-            allowed = False
-            should_block = True
-        elif normalized_risk >= self.review_threshold:
-            verdict = "review"
-            should_review = True
+        should_review = normalized_risk >= self.review_threshold
+        suspicious_rules = [rule for rule in matched_rules if rule != "execution_boundary"]
+        should_block = bool(suspicious_rules) or normalized_risk > RISK_THRESHOLD_ALLOW_MAX or should_review
+        final_risk = max(normalized_risk, RISK_THRESHOLD_BLOCK_MIN) if should_block else normalized_risk
 
         return CommandPolicy(
-            verdict=verdict,
-            allowed=allowed,
+            verdict="block" if should_block else "allow",
+            allowed=not should_block,
             should_review=should_review,
             should_block=should_block,
-            should_quarantine=should_quarantine,
-            risk_delta=normalized_risk,
+            should_quarantine=False,
+            risk_delta=final_risk,
             normalized_command=normalized_command,
             executable=executable,
             reasons=[reason.as_dict() for reason in reasons],
@@ -439,9 +426,9 @@ class CommandSupervisor:
 
 def initialize_commandsupervisor(
     *,
-    review_threshold: int = 20,
-    block_threshold: int = 50,
-    quarantine_threshold: int = 80,
+    review_threshold: int = RISK_THRESHOLD_ALLOW_MAX + 1,
+    block_threshold: int = RISK_THRESHOLD_BLOCK_MIN,
+    quarantine_threshold: int = RISK_THRESHOLD_BLOCK_MIN,
     max_command_length: int = 4000,
     allowed_binaries: Iterable[str] | None = None,
     blocked_basenames: Iterable[str] | None = None,

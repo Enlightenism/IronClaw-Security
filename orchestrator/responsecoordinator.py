@@ -14,13 +14,7 @@ from orchestrator.supervisor import SupervisorDecision, SupervisorStatus
 
 class ResponseOutcome(StrEnum):
     ALLOW = "allow"
-    ALLOW_WITH_SANDBOX = "allow_with_sandbox"
-    ALLOW_WITH_REDACTION = "allow_with_redaction"
-    ALLOW_WITH_CONTROLS = "allow_with_controls"
-    NEEDS_REVIEW = "needs_review"
-    QUARANTINE = "quarantine"
     BLOCK = "block"
-    FAILED = "failed"
 
 
 @dataclass(slots=True)
@@ -155,11 +149,11 @@ class ResponseCoordinator:
             gate=gate.to_dict(),
             supervisor=supervisor.to_dict(),
             session=session.to_dict(),
-            allow=self._is_allowed(supervisor, session),
+            allow=self._is_allowed(gate, supervisor, session),
             sandbox_required=self._sandbox_required(gate, supervisor),
             redaction_required=self._redaction_required(gate, supervisor),
             quarantine_required=self._quarantine_required(gate, supervisor, session),
-            review_required=self._review_required(supervisor, session),
+            review_required=self._review_required(gate, supervisor, session),
             review_id=supervisor.review_id,
             quarantine_id=session.quarantine_id,
             metadata={
@@ -189,59 +183,17 @@ class ResponseCoordinator:
         supervisor: SupervisorDecision,
         session: RuntimeSession,
     ) -> ResponseOutcome:
-        if supervisor.status in {SupervisorStatus.BLOCKED, SupervisorStatus.FAILED}:
+        if not gate.allowed or gate.action != RemediationAction.NONE or gate.status != GateStatus.OPEN or gate.review_required or gate.quarantine_required or not supervisor.allowed or supervisor.status != SupervisorStatus.APPROVED or session.status != RuntimeSessionStatus.ACTIVE:
             return ResponseOutcome.BLOCK
-        if supervisor.status == SupervisorStatus.QUARANTINED or session.status == RuntimeSessionStatus.QUARANTINED:
-            return ResponseOutcome.QUARANTINE
-        if supervisor.status == SupervisorStatus.NEEDS_REVIEW or session.status == RuntimeSessionStatus.NEEDS_REVIEW:
-            return ResponseOutcome.NEEDS_REVIEW
+        return ResponseOutcome.ALLOW
 
-        if supervisor.status == SupervisorStatus.CONDITIONAL:
-            if gate.action == RemediationAction.APPLY_REDACTION and gate.sandbox_required:
-                return ResponseOutcome.ALLOW_WITH_CONTROLS
-            if gate.action == RemediationAction.APPLY_REDACTION:
-                return ResponseOutcome.ALLOW_WITH_REDACTION
-            if gate.action == RemediationAction.SANDBOX_ONLY or gate.sandbox_required:
-                return ResponseOutcome.ALLOW_WITH_SANDBOX
-            return ResponseOutcome.ALLOW_WITH_CONTROLS
-
-        if supervisor.status == SupervisorStatus.APPROVED and gate.status in {
-            GateStatus.OPEN,
-            GateStatus.CONDITIONAL,
-        }:
-            if gate.action == RemediationAction.SANDBOX_ONLY or gate.sandbox_required:
-                return ResponseOutcome.ALLOW_WITH_SANDBOX
-            if gate.action == RemediationAction.APPLY_REDACTION:
-                return ResponseOutcome.ALLOW_WITH_REDACTION
-            return ResponseOutcome.ALLOW
-
-        if gate.status in {GateStatus.CLOSED, GateStatus.QUARANTINED}:
-            if gate.action == RemediationAction.QUARANTINE:
-                return ResponseOutcome.QUARANTINE
-            if gate.action == RemediationAction.BLOCK:
-                return ResponseOutcome.BLOCK
-
-        if gate.status == GateStatus.NEEDS_REVIEW:
-            return ResponseOutcome.NEEDS_REVIEW
-
-        return ResponseOutcome.FAILED
-
-    def _is_allowed(self, supervisor: SupervisorDecision, session: RuntimeSession) -> bool:
-        if supervisor.status in {
-            SupervisorStatus.BLOCKED,
-            SupervisorStatus.QUARANTINED,
-            SupervisorStatus.NEEDS_REVIEW,
-            SupervisorStatus.FAILED,
-        }:
-            return False
-        if session.status in {
-            RuntimeSessionStatus.BLOCKED,
-            RuntimeSessionStatus.QUARANTINED,
-            RuntimeSessionStatus.NEEDS_REVIEW,
-            RuntimeSessionStatus.FAILED,
-        }:
-            return False
-        return True
+    def _is_allowed(
+        self,
+        gate: GateDecision,
+        supervisor: SupervisorDecision,
+        session: RuntimeSession,
+    ) -> bool:
+        return self._derive_outcome(gate, supervisor, session) == ResponseOutcome.ALLOW
 
     def _sandbox_required(self, gate: GateDecision, supervisor: SupervisorDecision) -> bool:
         if gate.sandbox_required:
@@ -267,10 +219,15 @@ class ResponseCoordinator:
             return True
         return False
 
-    def _review_required(self, supervisor: SupervisorDecision, session: RuntimeSession) -> bool:
-        if supervisor.status == SupervisorStatus.NEEDS_REVIEW:
+    def _review_required(
+        self,
+        gate: GateDecision,
+        supervisor: SupervisorDecision,
+        session: RuntimeSession,
+    ) -> bool:
+        if gate.review_required or supervisor.review_id is not None or session.review_id is not None:
             return True
-        if session.status == RuntimeSessionStatus.NEEDS_REVIEW:
+        if supervisor.status == SupervisorStatus.NEEDS_REVIEW or session.status == RuntimeSessionStatus.NEEDS_REVIEW:
             return True
         return False
 

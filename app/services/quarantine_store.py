@@ -68,7 +68,7 @@ class QuarantineStore:
                         trace_id="trace-qtn-001",
                         incident_id="inc-seed-001",
                         asset_ref="prompt:user-input",
-                        metadata={"verdict": "quarantine", "seeded": True},
+                        metadata={"verdict": "block", "seeded": True},
                         tags=["prompt-injection", "ingress", "scanner"],
                     ),
                     QuarantineRecord(
@@ -85,7 +85,7 @@ class QuarantineStore:
                         incident_id="inc-seed-002",
                         asset_ref="tool-output:external-content",
                         owner="sandbox-review",
-                        metadata={"verdict": "quarantine", "seeded": True},
+                        metadata={"verdict": "block", "seeded": True},
                         tags=["sandbox", "tool-output", "containment"],
                     ),
                 ],

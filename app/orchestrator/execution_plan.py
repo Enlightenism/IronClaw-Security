@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.orchestrator import OrchestrationDecision
 
 ExecutionLane = Literal[
@@ -50,6 +51,10 @@ def _clamp_risk(value: Any, default: int = 0) -> int:
     return max(0, min(100, parsed))
 
 
+def _is_valid_risk_score(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100
+
+
 def _copy_str_list(values: list[str] | None) -> list[str]:
     if not values:
         return []
@@ -60,7 +65,7 @@ def _copy_str_list(values: list[str] | None) -> list[str]:
 class ExecutionPlan:
     agent_id: str
     file_path: str
-    verdict: str
+    verdict: Literal["allow", "block"]
     allowed: bool
     should_halt: bool
     should_warn: bool
@@ -88,49 +93,64 @@ class ExecutionPlan:
         return asdict(self)
 
 
+def normalize_plan_verdict(plan: ExecutionPlan) -> Literal["allow", "block"]:
+    risk_score = _clamp_risk(plan.risk_score, default=RISK_THRESHOLD_BLOCK_MIN)
+    if (
+        plan.verdict == "allow"
+        and plan.allowed is True
+        and plan.should_halt is False
+        and plan.should_warn is False
+        and isinstance(plan.matched_patterns, list)
+        and not plan.matched_patterns
+        and _is_valid_risk_score(plan.risk_score)
+        and risk_score <= RISK_THRESHOLD_ALLOW_MAX
+        and plan.decision_source in {"guard_api", "registry_only"}
+    ):
+        return "allow"
+    return "block"
+
+
+def normalized_plan_risk_score(plan: ExecutionPlan) -> int:
+    risk_score = _clamp_risk(plan.risk_score, default=RISK_THRESHOLD_BLOCK_MIN)
+    if normalize_plan_verdict(plan) == "block":
+        return max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
+    return risk_score
+
+
+def _decision_verdict(decision: OrchestrationDecision) -> Literal["allow", "block"]:
+    risk_score = _clamp_risk(decision.risk_score, default=RISK_THRESHOLD_BLOCK_MIN)
+    if (
+        decision.verdict == "allow"
+        and decision.allowed is True
+        and decision.should_halt is False
+        and decision.should_warn is False
+        and isinstance(decision.matched_patterns, list)
+        and not decision.matched_patterns
+        and _is_valid_risk_score(decision.risk_score)
+        and risk_score <= RISK_THRESHOLD_ALLOW_MAX
+        and decision.decision_source in {"guard_api", "registry_only"}
+    ):
+        return "allow"
+    return "block"
+
+
 def _lane_for_decision(decision: OrchestrationDecision) -> ExecutionLane:
-    if decision.verdict == "block":
-        return "hard_block"
-    if decision.verdict == "quarantine":
-        return "quarantine_isolation"
-    if decision.verdict == "warn":
-        return "review_required"
-    return "direct_allow"
+    return "direct_allow" if _decision_verdict(decision) == "allow" else "hard_block"
 
 
 def _isolation_for_decision(decision: OrchestrationDecision) -> IsolationProfile:
-    if decision.verdict == "block":
-        return "full_quarantine"
-    if decision.verdict == "quarantine":
-        return "full_quarantine"
-    if decision.verdict == "warn":
-        if decision.registry_threat_profile in {"execution_capable", "security_critical"}:
-            return "restricted_sandbox"
-        return "observation_only"
-    return "none"
+    return "none" if _decision_verdict(decision) == "allow" else "full_quarantine"
 
 
 def _approval_mode_for_decision(decision: OrchestrationDecision) -> ApprovalMode:
-    if decision.verdict == "block":
-        return "security_review"
-    if decision.verdict == "quarantine":
-        return "security_review"
-    if decision.verdict == "warn":
-        return "operator_confirm"
-    return "none"
+    return "none" if _decision_verdict(decision) == "allow" else "security_review"
 
 
 def _escalation_reason_for_decision(decision: OrchestrationDecision) -> EscalationReason:
     if decision.decision_source == "guard_api_fallback":
         return "fallback_review"
-    if decision.verdict == "block":
+    if _decision_verdict(decision) == "block":
         return "block_required"
-    if decision.verdict == "quarantine":
-        return "quarantine_required"
-    if decision.verdict == "warn":
-        if decision.risk_score > 0 or decision.matched_patterns:
-            return "scan_warning"
-        return "policy_review"
     return "clean_allow"
 
 
@@ -186,10 +206,14 @@ def _recommended_actions_for_decision(
 
 
 def build_execution_plan(decision: OrchestrationDecision) -> ExecutionPlan:
+    verdict = _decision_verdict(decision)
     lane = _lane_for_decision(decision)
     isolation_profile = _isolation_for_decision(decision)
     approval_mode = _approval_mode_for_decision(decision)
     escalation_reason = _escalation_reason_for_decision(decision)
+    risk_score = _clamp_risk(decision.risk_score, default=RISK_THRESHOLD_BLOCK_MIN)
+    if verdict == "block":
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
 
     requires_sandbox = lane in {"quarantine_isolation", "hard_block"} or (lane == "review_required" and isolation_profile in {"restricted_sandbox", "full_quarantine"})
 
@@ -205,10 +229,10 @@ def build_execution_plan(decision: OrchestrationDecision) -> ExecutionPlan:
     return ExecutionPlan(
         agent_id=_text(decision.agent_id),
         file_path=_text(decision.file_path),
-        verdict=_text(decision.verdict, "allow"),
-        allowed=bool(decision.allowed),
-        should_halt=bool(decision.should_halt),
-        should_warn=bool(decision.should_warn),
+        verdict=verdict,
+        allowed=verdict == "allow",
+        should_halt=verdict == "block",
+        should_warn=False,
         lane=lane,
         isolation_profile=isolation_profile,
         approval_mode=approval_mode,
@@ -216,7 +240,7 @@ def build_execution_plan(decision: OrchestrationDecision) -> ExecutionPlan:
         summary=_text(decision.summary),
         target=_text(decision.target),
         action_type=_text(decision.action_type),
-        risk_score=_clamp_risk(decision.risk_score),
+        risk_score=risk_score,
         matched_patterns=_copy_str_list(decision.matched_patterns),
         recommended_actions=recommended_actions,
         decision_source=_text(decision.decision_source, "guard_api"),
@@ -239,11 +263,11 @@ if __name__ == "__main__":
         target="scanner",
         content="perform_scan(...)",
         allowed=False,
-        verdict="quarantine",
+        verdict="block",
         should_halt=True,
-        should_warn=True,
-        summary="Execution should be quarantined for isolated handling.",
-        risk_score=55,
+        should_warn=False,
+        summary="Execution is blocked and requires security review.",
+        risk_score=RISK_THRESHOLD_BLOCK_MIN,
         matched_patterns=["heuristic_prompt_injection_score"],
         decision_source="guard_api",
         registry_tags=["python", "security", "scanner"],

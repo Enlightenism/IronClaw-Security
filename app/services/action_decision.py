@@ -17,15 +17,11 @@ from app.services.verdict_enforcer import EnforcedVerdict, enforce_verdict
 FinalDecisionSource = Literal["policy", "scan", "policy_and_scan"]
 
 
-def _verdict_rank(verdict: VerdictType) -> int:
-    return {"allow": 1, "warn": 2, "quarantine": 3, "block": 4}[verdict]
-
-
 def _resolve_final_verdict(
     policy_verdict: VerdictType,
     guard_verdict: VerdictType,
 ) -> VerdictType:
-    return policy_verdict if _verdict_rank(policy_verdict) >= _verdict_rank(guard_verdict) else guard_verdict
+    return "allow" if policy_verdict == "allow" and guard_verdict == "allow" else "block"
 
 
 def _decision_source(
@@ -115,8 +111,8 @@ def evaluate_action_execution(
         verdict=final_verdict,
         summary=summary,
         risk_score=guard_decision["risk_score"],
-        should_halt=final_verdict in ("block", "quarantine"),
-        should_warn=final_verdict in ("warn", "quarantine"),
+        should_halt=final_verdict == "block",
+        should_warn=False,
         scan_id=guard_decision["scan_id"],
         matched_patterns=guard_decision["matched_patterns"],
         categories=guard_decision.get("categories", []),

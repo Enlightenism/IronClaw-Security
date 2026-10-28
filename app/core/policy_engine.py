@@ -9,7 +9,7 @@ from typing import Any, Literal
 import uuid
 
 from app.core.logging import get_logger
-from app.core.verdicts import ALLOW, BLOCK, QUARANTINE, WARN
+from app.core.verdicts import ALLOW, BLOCK
 
 _logger: logging.Logger = get_logger("ironclaw.policy_engine")
 
@@ -19,16 +19,9 @@ _logger: logging.Logger = get_logger("ironclaw.policy_engine")
 
 InputType = Literal["prompt", "tool_call", "execution_plan"]
 
-VerdictAction = Literal["allow", "warn", "quarantine", "block"]
+VerdictAction = Literal["allow", "block"]
 
-VERDICT_PRIORITY: dict[str, int] = {
-    ALLOW: 0,
-    WARN: 1,
-    QUARANTINE: 2,
-    BLOCK: 3,
-}
-
-# Trust score threshold below which a warn rule is injected (but not blocked)
+# Trust score threshold below which policy blocks the request.
 _TRUST_WARN_THRESHOLD: float = 0.25
 
 
@@ -117,7 +110,7 @@ def _eval_keyword_warn(rule: dict[str, Any], pinput: PolicyInput) -> MatchedRule
             rule_id=str(rule.get("id", "")),
             rule_name=str(rule.get("rule_name") or rule.get("name") or rule_type_label(rule)),
             rule_type="keyword_warn",
-            action=WARN,
+            action=BLOCK,
             risk_contribution=0.4,
             matched_field="content",
             matched_value=_truncate(pattern, 120),
@@ -165,7 +158,7 @@ def _eval_regex_warn(rule: dict[str, Any], pinput: PolicyInput) -> MatchedRule |
             rule_id=str(rule.get("id", "")),
             rule_name=str(rule.get("rule_name") or rule.get("name") or rule_type_label(rule)),
             rule_type="regex_warn",
-            action=WARN,
+            action=BLOCK,
             risk_contribution=0.5,
             matched_field="content",
             matched_value=_truncate(m.group(0), 120),
@@ -189,7 +182,7 @@ def _eval_regex_quarantine(rule: dict[str, Any], pinput: PolicyInput) -> Matched
             rule_id=str(rule.get("id", "")),
             rule_name=str(rule.get("rule_name") or rule.get("name") or rule_type_label(rule)),
             rule_type="regex_quarantine",
-            action=QUARANTINE,
+            action=BLOCK,
             risk_contribution=0.8,
             matched_field="content",
             matched_value=_truncate(m.group(0), 120),
@@ -315,7 +308,7 @@ def _eval_data_exfil(rule: dict[str, Any], pinput: PolicyInput) -> MatchedRule |
             rule_id=str(rule.get("id", "")),
             rule_name=str(rule.get("rule_name") or rule.get("name") or rule_type_label(rule)),
             rule_type="data_exfiltration_pattern",
-            action=QUARANTINE,
+            action=BLOCK,
             risk_contribution=0.9,
             matched_field="content",
             matched_value=_truncate(m.group(0), 120),
@@ -331,8 +324,8 @@ def _eval_data_exfil(rule: dict[str, Any], pinput: PolicyInput) -> MatchedRule |
 _SAFETY_NET_SEVERITY_ACTION: dict[str, VerdictAction] = {
     "critical": BLOCK,
     "high": BLOCK,
-    "medium": WARN,
-    "low": WARN,
+    "medium": BLOCK,
+    "low": BLOCK,
 }
 
 # Risk contribution per severity level for safety-net hits
@@ -486,7 +479,7 @@ def _apply_trust_gate(pinput: PolicyInput) -> tuple[list[MatchedRule], float | N
     Resolution:
       - No agent_id → no trust gate applied (pass-through).
       - is_suspended=True → immediate block rule injected; callers must short-circuit.
-      - trust_score < _TRUST_WARN_THRESHOLD → warn rule injected.
+      - trust_score < _TRUST_WARN_THRESHOLD → block rule injected.
       - Otherwise → no synthetic rules added.
     """
     if not pinput.agent_id or not pinput.agent_id.strip():
@@ -527,9 +520,9 @@ def _apply_trust_gate(pinput: PolicyInput) -> tuple[list[MatchedRule], float | N
     if trust_score < _TRUST_WARN_THRESHOLD:
         rule = MatchedRule(
             rule_id="trust_gate",
-            rule_name="Low trust score — elevated review",
+            rule_name="Low trust score blocked by trust gate",
             rule_type="trust_score_warn",
-            action=WARN,
+            action=BLOCK,
             risk_contribution=round(1.0 - trust_score, 4),
             matched_field="trust_score",
             matched_value=str(round(trust_score, 4)),
@@ -574,10 +567,7 @@ def _compute_risk_score(matched_rules: list[MatchedRule]) -> float:
 
 
 def _resolve_action(matched_rules: list[MatchedRule]) -> VerdictAction:
-    if not matched_rules:
-        return ALLOW
-    best = max(matched_rules, key=lambda r: VERDICT_PRIORITY.get(r.action, 0))
-    return best.action
+    return BLOCK if matched_rules else ALLOW
 
 
 def _build_explanation(
@@ -610,13 +600,13 @@ def evaluate(pinput: PolicyInput) -> PolicyVerdict:
       0. Trust gate — if agent_id is set, trust_engine.get_trust() is called.
          Suspended agents receive an immediate block verdict; no further
          rule evaluation is performed.  Low-trust agents receive a synthetic
-         warn rule that propagates into the final verdict.
+         block rule that propagates into the final verdict.
       1. pinput.tenant_key — tenant-specific policy set if non-empty and found.
       2. ironclaw_default  — authoritative fallback policy set.
       3. Built-in safety net — always applied via pattern_registry regardless
          of DB state; covers prompt_injection and separator_injection categories.
 
-    Returns a PolicyVerdict with action: allow | warn | quarantine | block,
+    Returns a PolicyVerdict with action: allow | block,
     matched_rules, risk_score, trust_score_at_eval, agent_suspended, and a
     human-readable explanation.
     """
@@ -663,7 +653,7 @@ def evaluate(pinput: PolicyInput) -> PolicyVerdict:
     # --- Policy set resolution + rule evaluation (steps 1-3) ---------------
     policy_set_key, db_rules = _resolve_rules(pinput.tenant_key)
 
-    matched: list[MatchedRule] = list(trust_matched)  # carry low-trust warn if present
+    matched: list[MatchedRule] = list(trust_matched)  # carry low-trust block if present
 
     builtin_hits = _apply_builtin_safety_net(pinput)
     matched.extend(builtin_hits)

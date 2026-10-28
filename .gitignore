@@ -11,10 +11,12 @@ data/
 *.pem
 openapi.json.bak
 
+
 # Runtime-generated data — never commit
 telemetry_events.jsonl
 scan_history.json
 *.jsonl
+
 
 # Local installer runtime artifacts — never commit
 .ironclaw/
@@ -22,6 +24,7 @@ scan_history.json
 **/.ironclaw/
 **/.ironclaw-user/
 **/config.json
+!models/prompt-guard-86m/config.json
 **/skill.json
 **/.vscode/settings.json
 .claude/
@@ -41,9 +44,11 @@ scan_history.json
 **/.gemini/
 **/.gemini/**
 
+
 # Test fixture data — move to tests/fixtures/
 benign.json
 malicious.json
+
 
 # Coverage and reports
 .coverage
@@ -52,14 +57,17 @@ coverage.xml
 htmlcov/
 .reports/
 
+
 # Snapshot artifacts — too large for version control
 _project_snapshot.txt
 project_snapshot.txt
 app_snapshot.txt
 *.zip
 
+
 # Temp upload artifacts
 .tmp.driveupload/
+
 
 node_modules/
 package-lock.json

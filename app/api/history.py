@@ -24,12 +24,11 @@ _HISTORY_EVENTS_LIMIT_DEFAULT = 100
 _HISTORY_EVENTS_LIMIT_MAX = 1000
 _SCAN_HISTORY_LIMIT_DEFAULT = 20
 _SCAN_HISTORY_LIMIT_MAX = 200
-_REVIEWABLE_VERDICT = "quarantine"
+_REVIEWABLE_VERDICTS = frozenset({"block", "quarantine"})
 _HEURISTIC_PROMPT_INJECTION_SCORE_ID = "heuristic_prompt_injection_score"
 _REVIEW_STATUS_NONE = "none"
 _REVIEW_STATUS_APPROVED = "approved"
 _REVIEW_STATUS_REJECTED = "rejected"
-_VERDICT_ALLOW = "allow"
 _VERDICT_BLOCK = "block"
 _DEFAULT_SAFE_SUMMARY = "No risky patterns detected."
 
@@ -46,7 +45,7 @@ _REPO_CONNECTION_ERROR_NAMES = frozenset(
 
 
 class ReviewRequest(BaseModel):
-    """Request body for reviewing a quarantined scan record."""
+    """Request body for reviewing a blocked or legacy quarantined scan record."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -252,9 +251,9 @@ def get_scan_record(scan_id: str) -> ScanHistoryItem:
 
 @router.post("/{scan_id}/review", response_model=ScanHistoryItem)
 def review_scan_record(scan_id: str, request: ReviewRequest) -> ScanHistoryItem:
-    """Review a quarantined scan record and update its verdict + review status.
+    """Review a blocked or legacy quarantined record without releasing its block.
 
-    Only scans with verdict == "quarantine" are eligible for review.
+    Review status is operational metadata; approval does not change the final verdict.
     """
     try:
         item = get_scan_by_id(scan_id)
@@ -271,10 +270,10 @@ def review_scan_record(scan_id: str, request: ReviewRequest) -> ScanHistoryItem:
 
     item = _normalize_history_item(item)
 
-    if item.get("verdict") != _REVIEWABLE_VERDICT:
+    if item.get("verdict") not in _REVIEWABLE_VERDICTS:
         raise AppError(
             error="invalid_review_state",
-            message="Only quarantined scans can be reviewed",
+            message="Only blocked scans or legacy quarantined scans can be reviewed",
             status_code=400,
             details={
                 "scan_id": scan_id,
@@ -286,8 +285,8 @@ def review_scan_record(scan_id: str, request: ReviewRequest) -> ScanHistoryItem:
     approved = request.action == "approve"
     updates: dict[str, Any] = {
         "review_status": _REVIEW_STATUS_APPROVED if approved else _REVIEW_STATUS_REJECTED,
-        "untrusted": not approved,
-        "verdict": _VERDICT_ALLOW if approved else _VERDICT_BLOCK,
+        "untrusted": True,
+        "verdict": _VERDICT_BLOCK,
         "summary": _build_review_summary(item.get("summary"), request.action),
     }
 

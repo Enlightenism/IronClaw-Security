@@ -5,6 +5,7 @@ import uuid
 
 import pytest
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 import ironclaw_skill  # public top-level package
 
 # ── Public sub-module imports (the only layer external consumers may use) ──────
@@ -117,13 +118,15 @@ def _assert_envelope_invariants(
     assert isinstance(envelope, SkillResponseEnvelope)
     assert envelope.operation == expected_operation
     assert isinstance(envelope.payload, SkillResponsePayload)
-    assert envelope.payload.verdict in {"allow", "review", "block", "error"}
+    assert envelope.payload.verdict in {"allow", "block"}
     assert isinstance(envelope.payload.summary, str) and len(envelope.payload.summary) > 0
     assert isinstance(envelope.ok, bool)
     if expect_ok is not None:
         assert envelope.ok is expect_ok
     assert isinstance(envelope.payload.should_halt, bool)
     assert isinstance(envelope.payload.should_warn, bool)
+    assert envelope.payload.should_halt is (envelope.payload.verdict == "block")
+    assert envelope.payload.should_warn is False
     assert isinstance(envelope.payload.reasons, list)
     assert isinstance(envelope.payload.metadata, SkillDecisionMetadata)
 
@@ -244,7 +247,7 @@ class TestPublicContractConstruction:
             request_id="req-002",
         )
         _assert_envelope_invariants(envelope, expected_operation="execute", expect_ok=False)
-        assert envelope.payload.verdict == "error"
+        assert envelope.payload.verdict == "block"
         assert envelope.error_code == "boundary_test_error"
         assert envelope.payload.should_halt is True
         assert envelope.payload.allowed is False
@@ -260,7 +263,7 @@ class TestDefaultRouterAllOperations:
         router = IronClawSkillRouter()
         envelope = router.route(_scan_request())
         _assert_envelope_invariants(envelope, expected_operation="scan", expect_ok=True)
-        assert envelope.payload.verdict in {"allow", "review", "block"}
+        assert envelope.payload.verdict == "block"
         assert envelope.payload.metadata.risk_score is not None
 
     def test_default_scan_bundle(self):
@@ -272,22 +275,24 @@ class TestDefaultRouterAllOperations:
         router = IronClawSkillRouter()
         envelope = router.route(_action_policy_request(action_type="python_code"))
         _assert_envelope_invariants(envelope, expected_operation="action_policy", expect_ok=True)
-        assert envelope.payload.metadata.risk_score is not None
-        assert envelope.payload.metadata.risk_score < 70
+        risk_score = envelope.payload.metadata.risk_score
+        assert risk_score is not None
+        assert envelope.payload.verdict == "block"
+        assert risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
     def test_default_action_policy_high_risk(self):
         router = IronClawSkillRouter()
         for action_type in ("shell_command", "system_change", "file_delete"):
             envelope = router.route(_action_policy_request(action_type=action_type))
             _assert_envelope_invariants(envelope, expected_operation="action_policy", expect_ok=True)
-            assert envelope.payload.metadata.risk_score == 70
+            assert envelope.payload.metadata.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
-    def test_default_action_decision_low_risk(self):
+    def test_default_action_decision_low_risk_blocks_without_policy(self):
         router = IronClawSkillRouter()
         envelope = router.route(_action_decision_request(action_type="python_code"))
         _assert_envelope_invariants(envelope, expected_operation="action_decision", expect_ok=True)
-        assert envelope.payload.verdict == "allow"
-        assert envelope.payload.should_halt is False
+        assert envelope.payload.verdict == "block"
+        assert envelope.payload.should_halt is True
 
     def test_default_action_decision_high_risk(self):
         router = IronClawSkillRouter()
@@ -295,8 +300,9 @@ class TestDefaultRouterAllOperations:
             req = _action_decision_request(action_type=action_type)
             envelope = router.route(req)
             _assert_envelope_invariants(envelope, expected_operation="action_decision", expect_ok=True)
-            assert envelope.payload.verdict == "review"
-            assert envelope.payload.should_warn is True
+            assert envelope.payload.verdict == "block"
+            assert envelope.payload.should_halt is True
+            assert envelope.payload.should_warn is False
 
     def test_default_execute_blocks(self):
         router = IronClawSkillRouter()
@@ -407,7 +413,7 @@ class TestCustomHandlerRegistration:
             received.append(type(request).__name__)
             return build_skill_success_response(
                 operation="scan",
-                verdict="review",
+                verdict="block",
                 summary="Inspected.",
                 request_id=request.context.request_id,
             )
@@ -448,7 +454,7 @@ class TestHandlerExceptionWrapping:
         router.register("scan", self._raising_handler("scan"))
         envelope = router.route(_scan_request())
         _assert_envelope_invariants(envelope, expected_operation="scan", expect_ok=False)
-        assert envelope.payload.verdict == "error"
+        assert envelope.payload.verdict == "block"
         assert envelope.error_code == "router_handler_failure"
         assert "Simulated failure" in envelope.payload.summary
 
@@ -519,7 +525,7 @@ class TestOperationMismatch:
         def bad_handler(request):
             return build_skill_success_response(
                 operation="scan",  # wrong operation
-                verdict="review",
+                verdict="block",
                 summary="Mismatch in execute slot.",
                 request_id=request.context.request_id,
             )
@@ -645,14 +651,6 @@ class TestEnvelopeShapeInvariants:
         )
         assert envelope.payload.allowed is False
 
-    def test_allowed_false_when_verdict_review(self):
-        envelope = build_skill_success_response(
-            operation="scan",
-            verdict="review",
-            summary="Under review.",
-        )
-        assert envelope.payload.allowed is False
-
     def test_error_envelope_ok_is_false(self):
         envelope = build_skill_error_response(
             operation="scan",
@@ -660,13 +658,13 @@ class TestEnvelopeShapeInvariants:
             error_code="test_error",
         )
         assert envelope.ok is False
-        assert envelope.payload.verdict == "error"
+        assert envelope.payload.verdict == "block"
 
     def test_success_envelope_ok_is_true(self):
         envelope = build_skill_success_response(
             operation="action_policy",
-            verdict="review",
-            summary="Success test.",
+            verdict="block",
+            summary="Blocked decision.",
         )
         assert envelope.ok is True
 

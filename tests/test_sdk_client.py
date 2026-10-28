@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+from pydantic import ValidationError
 import pytest
 import respx
 
@@ -194,6 +195,11 @@ class TestScanResponseBinding:
         assert result.review_status == _VALID_SCAN_RESPONSE["review_status"]
         assert result.sandbox_lane == _VALID_SCAN_RESPONSE["sandbox_lane"]
         assert result.untrusted == _VALID_SCAN_RESPONSE["untrusted"]
+
+    @pytest.mark.parametrize("verdict", ["warn", "quarantine"])
+    def test_scan_response_rejects_legacy_verdicts(self, verdict):
+        with pytest.raises(ValidationError):
+            ScanResponse(**{**_VALID_SCAN_RESPONSE, "verdict": verdict})
 
     @respx.mock
     def test_malformed_response_raises_api_error(self):

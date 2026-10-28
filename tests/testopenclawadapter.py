@@ -12,6 +12,7 @@ from app.adapters.openclaw_adapter import (
     build_openclaw_adapter,
     build_openclaw_adapter_request,
 )
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.policy_enforcer import (
     PolicyDecision,
     PolicyMatch,
@@ -183,20 +184,26 @@ def test_adapt_block_sets_should_block_and_hold() -> None:
     assert "signature_mismatch" in resp.matched_rules
 
 
-def test_adapt_quarantine_sets_should_hold() -> None:
+def test_legacy_quarantine_decision_blocks_and_holds() -> None:
     decision = _make_decision("quarantine", matched_rules=["policy:review"])
     resp = adapt_policy_decision_to_openclaw(decision, request=_ocrequest())
-    assert resp.should_quarantine is True
+    assert resp.should_quarantine is False
+    assert resp.should_warn is False
+    assert resp.should_block is True
     assert resp.should_hold is True
-    assert resp.verdict == "quarantine"
+    assert resp.verdict == "block"
+    assert resp.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
 
-def test_adapt_warn_sets_should_warn_and_hold() -> None:
+def test_legacy_warning_decision_blocks_and_holds() -> None:
     decision = _make_decision("warn", matched_rules=["risk:elevated"])
     resp = adapt_policy_decision_to_openclaw(decision, request=_ocrequest())
-    assert resp.should_warn is True
+    assert resp.should_warn is False
+    assert resp.should_quarantine is False
+    assert resp.should_block is True
     assert resp.should_hold is True
-    assert resp.verdict == "warn"
+    assert resp.verdict == "block"
+    assert resp.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
 
 def test_adapt_carries_decision_id() -> None:

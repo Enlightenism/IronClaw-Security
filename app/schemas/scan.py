@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 
 # ---------------------------------------------------------------------------
 # Enum-style Literals — single source of truth for all verdict / type values
@@ -19,7 +21,8 @@ TargetType = Literal[
     "local_path",
 ]
 
-VerdictType = Literal["allow", "warn", "quarantine", "block"]
+VerdictType = Literal["allow", "block"]
+LegacyStoredVerdictType = VerdictType
 
 ReviewStatusType = Literal["none", "pending", "approved", "rejected"]
 
@@ -89,7 +92,7 @@ class ScanVerdict(BaseModel):
     @field_validator("verdict")
     @classmethod
     def validate_verdict(cls, v: str) -> str:
-        allowed: set[str] = {"allow", "warn", "quarantine", "block"}
+        allowed: set[str] = {"allow", "block"}
         if v not in allowed:
             raise ValueError(f"verdict must be one of {sorted(allowed)}, got '{v}'")
         return v
@@ -124,7 +127,7 @@ class ScanResponse(BaseModel):
     @field_validator("verdict")
     @classmethod
     def validate_verdict(cls, v: str) -> str:
-        allowed: set[str] = {"allow", "warn", "quarantine", "block"}
+        allowed: set[str] = {"allow", "block"}
         if v not in allowed:
             raise ValueError(f"verdict must be one of {sorted(allowed)}, got '{v}'")
         return v
@@ -170,7 +173,41 @@ class ScanSummary(BaseModel):
 
 
 class ScanHistoryItem(ScanResponse):
+    verdict: VerdictType
     timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_stored_verdict(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        normalized = dict(value)
+        legacy_verdict = normalized.get("verdict") in ("warn", "quarantine")
+        if legacy_verdict:
+            normalized["verdict"] = "block"
+            normalized["quarantine_reason"] = normalized.get("quarantine_reason") or "Legacy non-binary verdict normalized to block."
+
+        if normalized.get("verdict") == "block":
+            try:
+                risk_score = int(normalized.get("risk_score", 0) or 0)
+            except (TypeError, ValueError):
+                risk_score = 0
+            normalized["risk_score"] = min(
+                100,
+                max(RISK_THRESHOLD_BLOCK_MIN, risk_score),
+            )
+            normalized["untrusted"] = True
+
+        return normalized
+
+    @field_validator("verdict")
+    @classmethod
+    def validate_verdict(cls, v: str) -> str:
+        allowed: set[str] = {"allow", "block"}
+        if v not in allowed:
+            raise ValueError(f"verdict must be one of {sorted(allowed)}, got '{v}'")
+        return v
 
 
 # ---------------------------------------------------------------------------

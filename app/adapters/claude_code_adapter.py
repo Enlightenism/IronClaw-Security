@@ -8,6 +8,7 @@ from app.adapters.base import (
     AdapterExecutionRequest,
     AdapterExecutionResult,
 )
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.policy_enforcer import (
     PolicyDecision,
     PolicyEngine,
@@ -20,7 +21,7 @@ from app.services.integration_registry import (
     initialize_integration_registry,
 )
 
-AdapterVerdict = Literal["allow", "warn", "quarantine", "block"]
+AdapterVerdict = Literal["allow", "block"]
 AdapterExecutionMode = Literal["monitor", "enforce"]
 
 
@@ -158,7 +159,9 @@ def adapt_policy_decision_to_claude_code(
     metadata: dict[str, Any] | None = None,
     secret_scan: dict[str, Any] | None = None,
 ) -> ClaudeCodeAdapterResponse:
-    verdict: AdapterVerdict = decision.verdict  # type: ignore[assignment]
+    verdict: AdapterVerdict = "allow" if decision.verdict == "allow" and decision.allow_execution is True and not decision.requires_review and not decision.matched_rules and 0 <= decision.risk_score <= RISK_THRESHOLD_ALLOW_MAX else "block"
+    risk_score = max(decision.risk_score, RISK_THRESHOLD_BLOCK_MIN) if verdict == "block" else decision.risk_score
+    risk_level = "high" if verdict == "block" and decision.risk_level in {"low", "medium"} else decision.risk_level
     matched_rules = [match.rule_id for match in decision.matched_rules]
     reasons = [match.to_dict() for match in decision.matched_rules]
 
@@ -168,11 +171,11 @@ def adapt_policy_decision_to_claude_code(
         mode=mode,
         verdict=verdict,
         should_allow=verdict == "allow",
-        should_warn=verdict == "warn",
-        should_quarantine=verdict == "quarantine",
+        should_warn=False,
+        should_quarantine=False,
         should_block=verdict == "block",
-        risk_score=decision.risk_score,
-        risk_level=decision.risk_level,
+        risk_score=risk_score,
+        risk_level=risk_level,
         summary=decision.summary,
         matched_rules=matched_rules,
         reasons=reasons,

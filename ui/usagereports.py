@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Query
 
@@ -90,7 +90,7 @@ def usage_reports_page(
     session_id: str | None = Query(default=None),
     request_id: str | None = Query(default=None),
     source: str | None = Query(default=None),
-    verdict: str | None = Query(default=None),
+    verdict: Literal["allow", "block"] | None = Query(default=None),
     period: str = Query(default="24h"),
 ) -> dict[str, Any]:
     """UI metadata page for usage reporting.
@@ -146,9 +146,7 @@ def usage_reports_page(
             options=[
                 {"label": "Any", "value": ""},
                 {"label": "Allow", "value": "allow"},
-                {"label": "Warn", "value": "warn"},
                 {"label": "Block", "value": "block"},
-                {"label": "Quarantine", "value": "quarantine"},
             ],
         ),
     ]
@@ -219,7 +217,7 @@ def usage_reports_page(
             route="/brain/decision",
             unit_type="decision_request",
             unit_count=1,
-            verdict=verdict or "warn",
+            verdict=verdict or "block",
         ),
         _row(
             event_id="evt_003",

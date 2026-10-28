@@ -73,7 +73,7 @@ def _build_audit_items() -> list[AuditLogItemView]:
             target="https://example.test/source",
             summary="Fetched content was escalated for analyst review.",
             metadata={
-                "policy_verdict": "quarantine",
+                "policy_verdict": "block",
                 "action_type": "web_fetch",
             },
         ),

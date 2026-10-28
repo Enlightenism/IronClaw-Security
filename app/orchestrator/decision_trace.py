@@ -4,15 +4,20 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
-from app.orchestrator.execution_plan import ExecutionPlan
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
+from app.orchestrator.execution_plan import (
+    ExecutionPlan,
+    normalize_plan_verdict,
+    normalized_plan_risk_score,
+)
 from app.orchestrator.policy_engine import PolicyEvaluation
 from app.orchestrator.runtime_session import RuntimeSession
 from app.orchestrator.supervisor import SessionExecutionRecord, SupervisorEscalation
 
-TraceOutcome = str
+TraceOutcome = Literal["allowed", "blocked"]
 
 
 @dataclass(frozen=True)
@@ -83,13 +88,7 @@ def _content_preview(content: str, limit: int = 120) -> str:
 
 
 def _trace_outcome(plan: ExecutionPlan) -> TraceOutcome:
-    if plan.verdict == "block":
-        return "blocked"
-    if plan.verdict == "quarantine":
-        return "quarantined"
-    if plan.verdict == "warn":
-        return "review"
-    return "allowed"
+    return "allowed" if normalize_plan_verdict(plan) == "allow" else "blocked"
 
 
 def _matching_escalations(
@@ -124,22 +123,60 @@ def build_decision_trace(
     )
 
     evidence = TraceEvidence(
-        matched_rules=[match.to_dict() for match in (policy_evaluation.matched_rules if policy_evaluation else [])],
+        matched_rules=[
+            {
+                **match.to_dict(),
+                "effect": "allow" if match.effect == "allow" else "block",
+            }
+            for match in (policy_evaluation.matched_rules if policy_evaluation else [])
+        ],
         matched_patterns=list(execution_plan.matched_patterns),
         recommended_actions=list(execution_plan.recommended_actions),
         escalations=[item.to_dict() for item in matched_escalations],
     )
 
+    normalized_verdict = normalize_plan_verdict(execution_plan)
+    normalized_risk_score = normalized_plan_risk_score(execution_plan)
+    execution_plan_data = execution_plan.to_dict()
+    execution_plan_data.update(
+        verdict=normalized_verdict,
+        allowed=normalized_verdict == "allow",
+        should_halt=normalized_verdict == "block",
+        should_warn=False,
+        risk_score=normalized_risk_score,
+    )
+
+    policy_evaluation_data = None
+    policy_verdict = None
+    if policy_evaluation is not None:
+        policy_context = policy_evaluation.context
+        context_is_allow = policy_context.verdict == "allow" and policy_context.risk_score <= RISK_THRESHOLD_ALLOW_MAX and not policy_context.matched_patterns
+        policy_verdict = "allow" if policy_evaluation.final_effect == "allow" and policy_evaluation.decision == "allow" and policy_evaluation.allowed and context_is_allow else "block"
+        policy_evaluation_data = policy_evaluation.to_dict()
+        policy_evaluation_data.update(
+            decision=policy_verdict,
+            final_effect=policy_verdict,
+            allowed=policy_verdict == "allow",
+        )
+        context_data = policy_evaluation_data.get("context")
+        if isinstance(context_data, dict):
+            context_data["verdict"] = "allow" if context_is_allow else "block"
+            if not context_is_allow:
+                context_data["risk_score"] = max(
+                    int(context_data.get("risk_score", 0)),
+                    RISK_THRESHOLD_BLOCK_MIN,
+                )
+
     outcome = _trace_outcome(execution_plan)
     summary_parts = [
         f"Agent {session.agent_id} executed {action_type} on {target}.",
-        f"Final verdict: {execution_plan.verdict}.",
+        f"Final verdict: {normalized_verdict}.",
         f"Lane: {execution_plan.lane}.",
-        f"Risk score: {execution_plan.risk_score}.",
+        f"Risk score: {normalized_risk_score}.",
     ]
     if policy_evaluation is not None:
         summary_parts.append(
-            f"Policy decision: {policy_evaluation.decision} ({policy_evaluation.final_effect}).",
+            f"Policy decision: {policy_verdict}.",
         )
     if matched_escalations:
         summary_parts.append(f"Escalations: {len(matched_escalations)}.")
@@ -160,8 +197,8 @@ def build_decision_trace(
             content_preview=_content_preview(content),
             content_length=len(content),
         ),
-        execution_plan=execution_plan.to_dict(),
-        policy_evaluation=policy_evaluation.to_dict() if policy_evaluation else None,
+        execution_plan=execution_plan_data,
+        policy_evaluation=policy_evaluation_data,
         evidence=evidence,
         summary=" ".join(summary_parts),
         metadata=metadata or {},

@@ -5,11 +5,21 @@ from typing import Any, Final, Literal, TypedDict
 
 import httpx
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from ironclaw_sdk.models import GuardBundleRequest, GuardBundleResponse
 
-Verdict = Literal["allow", "warn", "quarantine", "block"]
+Verdict = Literal["allow", "block"]
 
 _DEFAULT_BASE_URL: Final[str] = "http://localhost:8000"
+
+
+def _normalize_verdict(value: Any) -> Verdict:
+    return "allow" if value == "allow" else "block"
+
+
+def _normalize_risk_score(value: Any, verdict: Verdict) -> int:
+    score = int(value or 0)
+    return max(score, RISK_THRESHOLD_BLOCK_MIN) if verdict == "block" else score
 
 
 class ScanResult(TypedDict):
@@ -46,7 +56,7 @@ class PromptBundleResult(TypedDict, total=False):
     model_output: dict[str, Any]
     highest_verdict: Verdict
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
 
 
 class IronClawScanClient:
@@ -72,13 +82,14 @@ class IronClawScanClient:
             resp = client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
+        verdict = _normalize_verdict(data.get("verdict"))
         return {
             "scan_id": data.get("scan_id"),
-            "verdict": data.get("verdict", "block"),
+            "verdict": verdict,
             "summary": data.get("summary", ""),
             "target_type": data.get("target_type", "text"),
             "target_value": data.get("target_value", text),
-            "risk_score": data.get("risk_score", 0),
+            "risk_score": _normalize_risk_score(data.get("risk_score"), verdict),
             "matched_patterns": data.get("matched_patterns", []),
             "risky_files": data.get("risky_files", []),
             "checks_loaded": data.get("checks_loaded", []),

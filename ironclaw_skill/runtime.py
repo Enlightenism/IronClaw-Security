@@ -110,20 +110,21 @@ def scan_for_skill(
             if response.is_success:
                 summary = response_payload.get("summary") or "IronClaw scan completed."
                 risk_score = response_payload.get("risk_score")
-                verdict = str(response_payload.get("verdict") or "review").lower()
-                if verdict not in {"allow", "review", "block"}:
-                    verdict = "review"
+                raw_verdict = str(response_payload.get("verdict") or "block").lower()
+                matched_patterns = response_payload.get("matched_patterns") or []
+                failed_checks = response_payload.get("failed_checks") or []
+                verdict: Literal["allow", "block"] = "allow" if raw_verdict == "allow" and not matched_patterns and not failed_checks and not response_payload.get("should_halt") and not response_payload.get("should_warn") and not response_payload.get("error_code") else "block"
 
                 envelope = build_skill_success_response(
                     operation="scan",
                     verdict=verdict,
                     summary=summary,
-                    should_halt=bool(response_payload.get("should_halt", verdict == "block")),
-                    should_warn=bool(response_payload.get("should_warn", verdict != "allow")),
+                    should_halt=verdict == "block",
+                    should_warn=False,
                     request_id=normalized_request_id,
                     scan_id=response_payload.get("scan_id"),
                     decision_source="scan",
-                    matched_patterns=response_payload.get("matched_patterns") or [],
+                    matched_patterns=matched_patterns,
                     risk_score=risk_score if isinstance(risk_score, int) else None,
                     reasons=[
                         SkillReason(
@@ -194,20 +195,21 @@ def evaluate_action_for_skill(
             if response.is_success:
                 summary = response_payload.get("summary") or "IronClaw action evaluation completed."
                 risk_score = response_payload.get("risk_score")
-                verdict = str(response_payload.get("verdict") or "review").lower()
-                if verdict not in {"allow", "review", "block"}:
-                    verdict = "review"
+                raw_verdict = str(response_payload.get("verdict") or "block").lower()
+                matched_patterns = response_payload.get("matched_patterns") or []
+                failed_checks = response_payload.get("failed_checks") or []
+                verdict: Literal["allow", "block"] = "allow" if raw_verdict == "allow" and not matched_patterns and not failed_checks and not response_payload.get("should_halt") and not response_payload.get("should_warn") and not response_payload.get("error_code") else "block"
 
                 envelope = build_skill_success_response(
                     operation="action_decision",
                     verdict=verdict,
                     summary=summary,
-                    should_halt=bool(response_payload.get("should_halt", verdict == "block")),
-                    should_warn=bool(response_payload.get("should_warn", verdict != "allow")),
+                    should_halt=verdict == "block",
+                    should_warn=False,
                     request_id=normalized_request_id,
                     scan_id=response_payload.get("scan_id"),
                     decision_source="policy",
-                    matched_patterns=response_payload.get("matched_patterns") or [action.action_type],
+                    matched_patterns=matched_patterns or [action.action_type],
                     risk_score=risk_score if isinstance(risk_score, int) else None,
                     reasons=[
                         SkillReason(
@@ -292,22 +294,14 @@ def execute_guarded_for_skill(
             check=False,
         )
 
-        verdict: Literal["allow", "review", "block"]
-        should_warn = False
-        should_halt = False
-
-        if result.returncode == 0:
-            verdict = "allow"
-        else:
-            verdict = "review"
-            should_warn = True
+        verdict: Literal["allow", "block"] = "allow" if result.returncode == 0 else "block"
 
         envelope = build_skill_success_response(
             operation="execute",
             verdict=verdict,
             summary="Guarded command executed through IronClaw shell guard.",
-            should_halt=should_halt,
-            should_warn=should_warn,
+            should_halt=verdict == "block",
+            should_warn=False,
             request_id=normalized_request_id,
             decision_source="runtime",
             matched_patterns=[],

@@ -23,6 +23,7 @@ def test_create_review_item_auto_approves_safe_request() -> None:
 
     assert result["status"] == "approved"
     assert result["resolution"] == "allow"
+    assert result["guard_verdict"] == "allow"
     assert result["adjustedriskscore"] >= 0
 
 
@@ -43,10 +44,11 @@ def test_create_review_item_stays_pending_for_reviewable_request() -> None:
 
     assert result["status"] == "pending"
     assert result["resolution"] == "needsreview"
+    assert result["guard_verdict"] == "block"
     assert isinstance(result["reasons"], list)
 
 
-def test_create_review_item_quarantines_high_risk_request() -> None:
+def test_create_review_item_blocks_high_risk_request() -> None:
     result = createreviewitem(
         actiontype="toolcall",
         target="shell",
@@ -61,8 +63,9 @@ def test_create_review_item_quarantines_high_risk_request() -> None:
         },
     )
 
-    assert result["status"] in {"quarantined", "rejected"}
-    assert result["resolution"] in {"quarantine", "deny"}
+    assert result["guard_verdict"] == "block"
+    assert result["status"] in {"pending", "rejected"}
+    assert result["resolution"] in {"needsreview", "deny"}
 
 
 def test_review_route_returns_typed_response() -> None:
@@ -82,4 +85,5 @@ def test_review_route_returns_typed_response() -> None:
     body = response.json()
     assert body["status"] in {"pending", "approved", "rejected", "quarantined"}
     assert body["resolution"] in {"allow", "deny", "quarantine", "needsreview"}
+    assert body.get("guard_verdict") in {None, "allow", "block"}
     assert isinstance(body["reasons"], list)

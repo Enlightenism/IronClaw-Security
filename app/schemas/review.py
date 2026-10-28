@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -55,7 +55,7 @@ class ReviewQueueItem(BaseModel):
     risk_score: int = Field(0, ge=0, le=100)
     verdict: str | None = Field(
         None,
-        description="Original verdict that triggered queueing (allow/warn/quarantine/block)",
+        description="Original verdict that triggered queueing; historical values are preserved",
     )
     summary: str | None = None
     matched_rules: list[str] = Field(default_factory=list)
@@ -116,9 +116,9 @@ class ReviewDecisionCreate(BaseModel):
         None,
         description="Human-readable explanation for the decision",
     )
-    override_verdict: str | None = Field(
+    override_verdict: Literal["allow", "block"] | None = Field(
         None,
-        description="Optional revised verdict to apply after approval (allow/warn/quarantine/block)",
+        description="Optional revised verdict to apply after approval (allow/block)",
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -133,7 +133,7 @@ class ReviewDecision(BaseModel):
     decision: ReviewStatus
     reviewer_id: str | None = None
     reasoning: str | None = None
-    override_verdict: str | None = None
+    override_verdict: Literal["allow", "block"] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     decided_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

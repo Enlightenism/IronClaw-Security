@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
+
 
 class SandboxLane(StrEnum):
     SAFE_READONLY = "safe_readonly"
@@ -34,13 +36,6 @@ class SandboxRouteDecision:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
-
-def _as_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -87,17 +82,31 @@ def _collect_signal_text(payload: Mapping[str, Any]) -> str:
 
 
 def _extract_policy_verdict(payload: Mapping[str, Any]) -> str:
-    for key in ("policy_verdict", "verdict", "response_status"):
-        value = payload.get(key)
-        if value:
-            return _normalize_text(value)
+    for key in ("policy_verdict", "verdict"):
+        if key in payload:
+            verdict = _normalize_text(payload.get(key))
+            if verdict != "allow":
+                return verdict
     return "allow"
 
 
 def _extract_risk_score(payload: Mapping[str, Any]) -> int:
     for key in ("risk_score", "score", "severity"):
         if key in payload:
-            return _as_int(payload.get(key), 0)
+            value = payload.get(key)
+            if value is None:
+                return 0
+            if isinstance(value, bool):
+                return RISK_THRESHOLD_BLOCK_MIN
+            try:
+                risk_score = int(value)
+            except (TypeError, ValueError, OverflowError):
+                return RISK_THRESHOLD_BLOCK_MIN
+            if isinstance(value, float) and not value.is_integer():
+                return RISK_THRESHOLD_BLOCK_MIN
+            if risk_score < 0:
+                return RISK_THRESHOLD_BLOCK_MIN
+            return min(risk_score, 100)
     return 0
 
 
@@ -105,23 +114,47 @@ def route_to_sandbox(payload: Mapping[str, Any]) -> SandboxRouteDecision:
     risk_score = _extract_risk_score(payload)
     policy_verdict = _extract_policy_verdict(payload)
     signal_text = _collect_signal_text(payload)
+    response_status = _normalize_text(payload.get("response_status"))
+    review_status = _normalize_text(payload.get("review_status"))
+    review_required = (
+        bool(payload.get("review_required"))
+        or bool(payload.get("should_review"))
+        or bool(payload.get("shouldreview"))
+        or policy_verdict in {"warn", "review", "needs_review"}
+        or response_status in {"queued_for_review", "needs_review"}
+        or review_status in {"pending", "required", "queued", "needs_review"}
+    )
+    quarantine_requested = bool(payload.get("quarantine_required")) or bool(payload.get("should_quarantine")) or bool(payload.get("shouldquarantine"))
+    has_matched_signals = any(_as_list(payload.get(key)) for key in ("matched_patterns", "matchedpatterns", "matched_rules", "failed_checks", "alerts"))
+    errors_detected = bool(payload.get("error")) or bool(payload.get("errors"))
+    force_block = (
+        policy_verdict != "allow"
+        or has_matched_signals
+        or quarantine_requested
+        or bool(payload.get("should_block"))
+        or bool(payload.get("shouldblock"))
+        or bool(payload.get("should_warn"))
+        or bool(payload.get("shouldwarn"))
+        or response_status in {"denied", "blocked", "failed", "error"}
+        or errors_detected
+    )
 
     reasons: list[str] = []
 
-    if policy_verdict in {"block", "blocked", "deny", "denied"} or risk_score >= 95:
-        reasons.append("hard block triggered by policy or extreme risk score")
+    if force_block:
+        reasons.append("hard block triggered by policy, matched signal, or error")
         return SandboxRouteDecision(
             lane=SandboxLane.HARD_BLOCK,
             should_execute=False,
-            requires_review=False,
+            requires_review=review_required,
             isolate_output=True,
             allow_network=False,
             allow_tool_calls=False,
             allow_file_write=False,
             reason=reasons[0],
             reasons=reasons,
-            risk_score=risk_score,
-            policy_verdict=policy_verdict or "deny",
+            risk_score=max(risk_score, RISK_THRESHOLD_BLOCK_MIN),
+            policy_verdict="block",
             metadata={"source": "sandbox_router"},
         )
 
@@ -137,8 +170,8 @@ def route_to_sandbox(payload: Mapping[str, Any]) -> SandboxRouteDecision:
             allow_file_write=False,
             reason=reasons[0],
             reasons=reasons,
-            risk_score=risk_score,
-            policy_verdict=policy_verdict or "quarantine",
+            risk_score=max(risk_score, RISK_THRESHOLD_BLOCK_MIN),
+            policy_verdict="block",
             metadata={"source": "sandbox_router"},
         )
 
@@ -154,8 +187,8 @@ def route_to_sandbox(payload: Mapping[str, Any]) -> SandboxRouteDecision:
             allow_file_write=False,
             reason=reasons[0],
             reasons=reasons,
-            risk_score=risk_score,
-            policy_verdict=policy_verdict or "quarantine",
+            risk_score=max(risk_score, RISK_THRESHOLD_BLOCK_MIN),
+            policy_verdict="block",
             metadata={"source": "sandbox_router"},
         )
 
@@ -171,12 +204,12 @@ def route_to_sandbox(payload: Mapping[str, Any]) -> SandboxRouteDecision:
             allow_file_write=False,
             reason=reasons[0],
             reasons=reasons,
-            risk_score=risk_score,
-            policy_verdict=policy_verdict or "warn",
+            risk_score=max(risk_score, RISK_THRESHOLD_BLOCK_MIN),
+            policy_verdict="block",
             metadata={"source": "sandbox_router"},
         )
 
-    if "http" in signal_text or "network" in signal_text or "fetch" in signal_text or "url" in signal_text or risk_score >= 70:
+    if "http" in signal_text or "network" in signal_text or "fetch" in signal_text or "url" in signal_text:
         reasons.append("network-linked action routed to restricted network lane")
         return SandboxRouteDecision(
             lane=SandboxLane.NETWORK_RESTRICTED,
@@ -188,8 +221,8 @@ def route_to_sandbox(payload: Mapping[str, Any]) -> SandboxRouteDecision:
             allow_file_write=False,
             reason=reasons[0],
             reasons=reasons,
-            risk_score=risk_score,
-            policy_verdict=policy_verdict or "warn",
+            risk_score=max(risk_score, RISK_THRESHOLD_BLOCK_MIN),
+            policy_verdict="block",
             metadata={"source": "sandbox_router"},
         )
 
@@ -205,12 +238,12 @@ def route_to_sandbox(payload: Mapping[str, Any]) -> SandboxRouteDecision:
             allow_file_write=False,
             reason=reasons[0],
             reasons=reasons,
-            risk_score=risk_score,
-            policy_verdict=policy_verdict or "warn",
+            risk_score=max(risk_score, RISK_THRESHOLD_BLOCK_MIN),
+            policy_verdict="block",
             metadata={"source": "sandbox_router"},
         )
 
-    if policy_verdict in {"warn", "review"} or risk_score >= 40:
+    if review_required or risk_score > RISK_THRESHOLD_ALLOW_MAX:
         reasons.append("moderate risk routed for human review")
         return SandboxRouteDecision(
             lane=SandboxLane.HUMAN_REVIEW,
@@ -222,8 +255,8 @@ def route_to_sandbox(payload: Mapping[str, Any]) -> SandboxRouteDecision:
             allow_file_write=False,
             reason=reasons[0],
             reasons=reasons,
-            risk_score=risk_score,
-            policy_verdict=policy_verdict or "warn",
+            risk_score=max(risk_score, RISK_THRESHOLD_BLOCK_MIN),
+            policy_verdict="block",
             metadata={"source": "sandbox_router"},
         )
 
@@ -239,7 +272,7 @@ def route_to_sandbox(payload: Mapping[str, Any]) -> SandboxRouteDecision:
         reason=reasons[0],
         reasons=reasons,
         risk_score=risk_score,
-        policy_verdict=policy_verdict or "allow",
+        policy_verdict="allow",
         metadata={"source": "sandbox_router"},
     )
 

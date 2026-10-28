@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.core.auth import require_api_key
 
 router = APIRouter(
@@ -120,7 +121,7 @@ _SAMPLE_EXECUTIONS: list[dict[str, Any]] = [
         "action_type": "shell_execute",
         "target": "rm -rf /tmp/test",
         "content": "Attempt to remove a local path.",
-        "risk_score": 91,
+        "risk_score": max(RISK_THRESHOLD_BLOCK_MIN, 91),
         "execution_state": "denied",
         "response_action": "block",
         "response_status": "denied",
@@ -227,16 +228,16 @@ def get_execution_detail(execution_id: str) -> ExecutionDetailResponse:
         "action_type": "unknown",
         "target": "unknown",
         "content": "",
-        "risk_score": 0,
+        "risk_score": RISK_THRESHOLD_BLOCK_MIN,
         "client_id": None,
         "session_id": None,
         "filepath": None,
         "execution_state": "failed",
-        "response_action": "review",
+        "response_action": "block",
         "response_status": "denied",
-        "policy_verdict": "warn",
+        "policy_verdict": "block",
         "should_execute": False,
-        "halted_by_boundary": False,
+        "halted_by_boundary": True,
         "trace_id": f"trace_{execution_id}",
         "request_id": f"req_{execution_id}",
         "decision_id": f"dec_{execution_id}",

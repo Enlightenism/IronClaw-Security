@@ -286,8 +286,6 @@
           "policy_verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Policy Verdict",
@@ -311,8 +309,6 @@
           "response_action": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block",
               "review"
             ],
@@ -1045,6 +1041,10 @@
             "type": "string"
           },
           "verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Verdict",
             "type": "string"
           }
@@ -6557,6 +6557,10 @@
             "type": "string"
           },
           "verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Verdict",
             "type": "string"
           }
@@ -7528,6 +7532,10 @@
             "type": "string"
           },
           "verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Verdict",
             "type": "string"
           }
@@ -8391,6 +8399,10 @@
             "type": "string"
           },
           "verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Verdict",
             "type": "string"
           }
@@ -8665,6 +8677,10 @@
             "type": "string"
           },
           "verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Verdict",
             "type": "string"
           }
@@ -10486,7 +10502,7 @@
             "$ref": "#/components/schemas/ThreatSeverityLevel"
           },
           "verdict": {
-            "$ref": "#/components/schemas/DetectionVerdict"
+            "$ref": "#/components/schemas/HistoricalDetectionVerdict"
           }
         },
         "required": [
@@ -10504,8 +10520,6 @@
       "DetectionVerdict": {
         "enum": [
           "allow",
-          "monitor",
-          "review",
           "block"
         ],
         "title": "DetectionVerdict",
@@ -11364,8 +11378,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -11473,8 +11485,6 @@
           "policy_verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Policy Verdict",
@@ -11498,8 +11508,6 @@
           "response_action": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block",
               "review"
             ],
@@ -12794,6 +12802,10 @@
             "type": "string"
           },
           "verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Verdict",
             "type": "string"
           }
@@ -13184,6 +13196,10 @@
             "type": "string"
           },
           "verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Verdict",
             "type": "string"
           }
@@ -13423,6 +13439,10 @@
       "GuardBundleResponse": {
         "properties": {
           "highest_verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Highest Verdict",
             "type": "string"
           },
@@ -13550,6 +13570,7 @@
             "type": "boolean"
           },
           "should_warn": {
+            "const": false,
             "title": "Should Warn",
             "type": "boolean"
           },
@@ -13560,8 +13581,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -13615,6 +13634,7 @@
             "type": "boolean"
           },
           "should_warn": {
+            "const": false,
             "title": "Should Warn",
             "type": "boolean"
           },
@@ -13625,8 +13645,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -13824,6 +13842,7 @@
             "type": "boolean"
           },
           "should_warn": {
+            "const": false,
             "title": "Should Warn",
             "type": "boolean"
           },
@@ -13834,8 +13853,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -14332,6 +14349,10 @@
             "type": "string"
           },
           "verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Verdict",
             "type": "string"
           }
@@ -14606,6 +14627,10 @@
             "type": "string"
           },
           "verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Verdict",
             "type": "string"
           }
@@ -14631,6 +14656,16 @@
         ],
         "title": "HermesPolicyDecisionResponse",
         "type": "object"
+      },
+      "HistoricalDetectionVerdict": {
+        "enum": [
+          "allow",
+          "monitor",
+          "review",
+          "block"
+        ],
+        "title": "HistoricalDetectionVerdict",
+        "type": "string"
       },
       "HistoryItem": {
         "properties": {
@@ -14697,8 +14732,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -14842,7 +14875,7 @@
             "$ref": "#/components/schemas/ThreatSeverityLevel"
           },
           "verdict": {
-            "$ref": "#/components/schemas/DetectionVerdict"
+            "$ref": "#/components/schemas/HistoricalDetectionVerdict"
           }
         },
         "required": [
@@ -16719,8 +16752,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -18812,6 +18843,7 @@
           "incident_opened",
           "incident_escalated",
           "incident_resolved",
+          "policy_allow",
           "policy_block",
           "policy_quarantine",
           "review_item_submitted",
@@ -19626,6 +19658,10 @@
             "type": "string"
           },
           "verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Verdict",
             "type": "string"
           }
@@ -20406,7 +20442,7 @@
             "title": "Trace Id"
           },
           "verdict": {
-            "pattern": "^(block|quarantine)$",
+            "pattern": "^(allow|block)$",
             "title": "Verdict",
             "type": "string"
           }
@@ -20580,7 +20616,7 @@
         "type": "object"
       },
       "PolicyEnforcementMode": {
-        "description": "How the policy engine handles a matched rule.",
+        "description": "Configuration for how a matched rule is handled.",
         "enum": [
           "block",
           "warn",
@@ -20648,7 +20684,12 @@
             "default": "info"
           },
           "verdict": {
-            "$ref": "#/components/schemas/PolicyEnforcementMode"
+            "enum": [
+              "allow",
+              "block"
+            ],
+            "title": "Verdict",
+            "type": "string"
           }
         },
         "required": [
@@ -21072,8 +21113,6 @@
           "default_decision": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Default Decision",
@@ -22642,8 +22681,6 @@
           "highest_verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Highest Verdict",
@@ -22685,6 +22722,7 @@
             "type": "boolean"
           },
           "should_warn": {
+            "const": false,
             "title": "Should Warn",
             "type": "boolean"
           },
@@ -22963,9 +23001,7 @@
           "default_action": {
             "enum": [
               "allow",
-              "warn",
-              "block",
-              "quarantine"
+              "block"
             ],
             "title": "Default Action",
             "type": "string"
@@ -26119,6 +26155,10 @@
           "guard_verdict": {
             "anyOf": [
               {
+                "enum": [
+                  "allow",
+                  "block"
+                ],
                 "type": "string"
               },
               {
@@ -26503,6 +26543,10 @@
       "RuntimePolicyView": {
         "properties": {
           "defaultaction": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Defaultaction",
             "type": "string"
           },
@@ -26817,8 +26861,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -31793,6 +31835,10 @@
           "guard_verdict": {
             "anyOf": [
               {
+                "enum": [
+                  "allow",
+                  "block"
+                ],
                 "type": "string"
               },
               {
@@ -31808,9 +31854,7 @@
           "outcome": {
             "enum": [
               "allow",
-              "review",
-              "quarantine",
-              "deny"
+              "block"
             ],
             "title": "Outcome",
             "type": "string"
@@ -32019,6 +32063,10 @@
           "guard_verdict": {
             "anyOf": [
               {
+                "enum": [
+                  "allow",
+                  "block"
+                ],
                 "type": "string"
               },
               {
@@ -32063,9 +32111,7 @@
           "verdict": {
             "enum": [
               "allow",
-              "review",
-              "quarantine",
-              "deny"
+              "block"
             ],
             "title": "Verdict",
             "type": "string"
@@ -32168,9 +32214,7 @@
           "action": {
             "enum": [
               "allow",
-              "review",
-              "quarantine",
-              "deny"
+              "block"
             ],
             "title": "Action",
             "type": "string"
@@ -32242,6 +32286,10 @@
           "guard_verdict": {
             "anyOf": [
               {
+                "enum": [
+                  "allow",
+                  "block"
+                ],
                 "type": "string"
               },
               {
@@ -32294,8 +32342,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -32366,7 +32412,7 @@
       },
       "app__api__history__ReviewRequest": {
         "additionalProperties": false,
-        "description": "Request body for reviewing a quarantined scan record.",
+        "description": "Request body for reviewing a blocked or legacy quarantined scan record.",
         "properties": {
           "action": {
             "enum": [
@@ -34033,8 +34079,6 @@
           "default_decision": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Default Decision",
@@ -34363,6 +34407,7 @@
             "type": "boolean"
           },
           "should_warn": {
+            "const": false,
             "title": "Should Warn",
             "type": "boolean"
           },
@@ -34373,8 +34418,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -34509,8 +34552,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -35112,6 +35153,10 @@
           "guard_verdict": {
             "anyOf": [
               {
+                "enum": [
+                  "allow",
+                  "block"
+                ],
                 "type": "string"
               },
               {
@@ -35181,6 +35226,7 @@
             "type": "boolean"
           },
           "should_warn": {
+            "const": false,
             "title": "Should Warn",
             "type": "boolean"
           },
@@ -35195,8 +35241,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -35346,6 +35390,7 @@
             "type": "boolean"
           },
           "should_warn": {
+            "const": false,
             "title": "Should Warn",
             "type": "boolean"
           },
@@ -35360,8 +35405,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -35440,6 +35483,7 @@
             "type": "boolean"
           },
           "should_warn": {
+            "const": false,
             "title": "Should Warn",
             "type": "boolean"
           },
@@ -35454,8 +35498,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -35618,6 +35660,7 @@
             "type": "boolean"
           },
           "should_warn": {
+            "const": false,
             "title": "Should Warn",
             "type": "boolean"
           },
@@ -35632,8 +35675,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -35766,6 +35807,7 @@
             "type": "boolean"
           },
           "should_warn": {
+            "const": false,
             "title": "Should Warn",
             "type": "boolean"
           },
@@ -35780,8 +35822,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -35926,6 +35966,7 @@
             "type": "boolean"
           },
           "should_warn": {
+            "const": false,
             "title": "Should Warn",
             "type": "boolean"
           },
@@ -35940,8 +35981,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -36000,6 +36039,7 @@
             "type": "boolean"
           },
           "should_warn": {
+            "const": false,
             "title": "Should Warn",
             "type": "boolean"
           },
@@ -36008,6 +36048,10 @@
             "type": "string"
           },
           "verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Verdict",
             "type": "string"
           }
@@ -36091,6 +36135,10 @@
             "type": "string"
           },
           "policy_verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Policy Verdict",
             "type": "string"
           },
@@ -36114,6 +36162,7 @@
             "type": "boolean"
           },
           "should_warn": {
+            "const": false,
             "title": "Should Warn",
             "type": "boolean"
           },
@@ -36144,6 +36193,10 @@
             "type": "boolean"
           },
           "policy_verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
             "title": "Policy Verdict",
             "type": "string"
           },
@@ -37249,8 +37302,6 @@
           "verdict": {
             "enum": [
               "allow",
-              "warn",
-              "quarantine",
               "block"
             ],
             "title": "Verdict",
@@ -55073,7 +55124,7 @@
     },
     "/history/{scan_id}/review": {
       "post": {
-        "description": "Review a quarantined scan record and update its verdict + review status.\n\nOnly scans with verdict == \"quarantine\" are eligible for review.",
+        "description": "Review a blocked or legacy quarantined record without releasing its block.\n\nReview status is operational metadata; approval does not change the final verdict.",
         "operationId": "review_scan_record_history__scan_id__review_post",
         "parameters": [
           {
@@ -55445,7 +55496,7 @@
     },
     "/integrations/claude-code/evaluate": {
       "post": {
-        "description": "Accepts a Claude Code tool call or prompt payload. Runs secret scanning on the incoming content before routing through ClaudeCodeAdapter.execute() backed by the IronClaw policy engine. Returns a verdict (allow/warn/quarantine/block) with full reasoning, secret scan results, and an auditable decision trail.",
+        "description": "Accepts a Claude Code tool call or prompt payload. Runs secret scanning on the incoming content before routing through ClaudeCodeAdapter.execute() backed by the IronClaw policy engine. Returns an allow/block verdict with full reasoning, secret scan results, and an auditable decision trail.",
         "operationId": "evaluate_claude_code_integrations_claude_code_evaluate_post",
         "requestBody": {
           "content": {
@@ -55881,7 +55932,7 @@
     },
     "/integrations/gemini-cli/evaluate": {
       "post": {
-        "description": "Accepts a Gemini CLI prompt, workflow step, command, or tool-plan payload. Runs secret scanning before policy evaluation and returns a deterministic allow/warn/quarantine/block verdict with a full audit trail.",
+        "description": "Accepts a Gemini CLI prompt, workflow step, command, or tool-plan payload. Runs secret scanning before policy evaluation and returns a deterministic allow/block verdict with a full audit trail.",
         "operationId": "evaluate_gemini_cli_integrations_gemini_cli_evaluate_post",
         "requestBody": {
           "content": {
@@ -56563,7 +56614,7 @@
     },
     "/integrations/openclaw/evaluate": {
       "post": {
-        "description": "Accepts an OpenClaw builder or workflow action payload. Runs pre-flight secret scanning on the incoming content before routing through the IronClaw policy engine. Returns a verdict (allow/warn/quarantine/block) with the OpenClaw-specific should_hold flag, full reasoning, secret scan results, and an auditable decision trail.",
+        "description": "Accepts an OpenClaw builder or workflow action payload. Runs pre-flight secret scanning on the incoming content before routing through the IronClaw policy engine. Returns an allow/block verdict with the OpenClaw-specific should_hold flag, full reasoning, secret scan results, and an auditable decision trail.",
         "operationId": "evaluate_openclaw_integrations_openclaw_evaluate_post",
         "requestBody": {
           "content": {
@@ -58069,7 +58120,7 @@
             "APIKeyHeader": []
           }
         ],
-        "summary": "Dispatch notification for a policy block or quarantine decision",
+        "summary": "Dispatch notification for an allow or block policy decision",
         "tags": [
           "notifications",
           "notifications"
@@ -60922,7 +60973,7 @@
     },
     "/threat/detect": {
       "post": {
-        "description": "Single entry point for all IronClaw threat detection calls. Accepts a DetectionRequest with any combination of text, url, domain, hashes, or ioc_values. Runs the full ThreatDetectionEngine pipeline: observable extraction → IOC resolution → correlation signal generation → composite scoring → verdict (allow/monitor/review/block). Persists the result to threat_detections and emits telemetry asynchronously. REVIEW and BLOCK verdicts trigger the alert bridge.",
+        "description": "Single entry point for all IronClaw threat detection calls. Accepts a DetectionRequest with any combination of text, url, domain, hashes, or ioc_values. Runs the full ThreatDetectionEngine pipeline: observable extraction → IOC resolution → correlation signal generation → composite scoring → verdict (allow/block). Persists the result to threat_detections and emits telemetry asynchronously. BLOCK verdicts trigger the alert bridge.",
         "operationId": "threat_detection_detect",
         "requestBody": {
           "content": {
@@ -60943,7 +60994,7 @@
                 }
               }
             },
-            "description": "Detection completed — verdict in [allow, monitor, review, block]"
+            "description": "Detection completed — verdict in [allow, block]"
           },
           "400": {
             "description": "Invalid request — no observable payload provided"
@@ -61206,7 +61257,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/DetectionVerdict"
+                  "$ref": "#/components/schemas/HistoricalDetectionVerdict"
                 },
                 {
                   "type": "null"

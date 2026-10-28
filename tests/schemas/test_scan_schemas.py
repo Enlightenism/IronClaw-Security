@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import ValidationError
 import pytest
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.schemas.scan import (
     BatchScanRequest,
     BatchScanResponse,
@@ -88,10 +89,16 @@ _BASE_RESPONSE = dict(
 )
 
 
-@pytest.mark.parametrize("verdict", ["allow", "warn", "quarantine", "block"])
+@pytest.mark.parametrize("verdict", ["allow", "block"])
 def test_scan_response_valid_verdicts(verdict):
     r = ScanResponse(**{**_BASE_RESPONSE, "verdict": verdict})
     assert r.verdict == verdict
+
+
+@pytest.mark.parametrize("verdict", ["warn", "quarantine"])
+def test_scan_response_rejects_legacy_verdicts(verdict):
+    with pytest.raises(ValidationError):
+        ScanResponse(**{**_BASE_RESPONSE, "verdict": verdict})
 
 
 def test_scan_response_invalid_verdict_rejected():
@@ -159,6 +166,12 @@ def test_scan_verdict_invalid_verdict_rejected():
         ScanVerdict(verdict="skip", risk_score=10, summary="x")
 
 
+@pytest.mark.parametrize("verdict", ["warn", "quarantine"])
+def test_scan_verdict_rejects_legacy_verdicts(verdict):
+    with pytest.raises(ValidationError):
+        ScanVerdict(verdict=verdict, risk_score=10, summary="x")
+
+
 def test_scan_verdict_risk_score_out_of_range_rejected():
     with pytest.raises(ValidationError):
         ScanVerdict(verdict="allow", risk_score=200, summary="x")
@@ -170,9 +183,15 @@ def test_scan_verdict_risk_score_out_of_range_rejected():
 
 
 def test_scan_summary_minimal():
-    s = ScanSummary(verdict="warn", risk_score=42, target_type="prompt", summary="ok")
-    assert s.verdict == "warn"
+    s = ScanSummary(verdict="block", risk_score=42, target_type="prompt", summary="ok")
+    assert s.verdict == "block"
     assert s.risk_score == 42
+
+
+@pytest.mark.parametrize("verdict", ["warn", "quarantine"])
+def test_scan_summary_rejects_legacy_verdicts(verdict):
+    with pytest.raises(ValidationError):
+        ScanSummary(verdict=verdict, risk_score=42, target_type="prompt", summary="ok")
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +208,24 @@ def test_scan_history_item_auto_timestamp():
 def test_scan_history_item_explicit_timestamp():
     item = ScanHistoryItem(**{**_BASE_RESPONSE, "timestamp": "2026-06-01T12:00:00+00:00"})
     assert item.timestamp == "2026-06-01T12:00:00+00:00"
+
+
+@pytest.mark.parametrize("legacy_verdict", ["warn", "quarantine"])
+def test_scan_history_item_normalizes_legacy_stored_verdicts(legacy_verdict):
+    item = ScanHistoryItem(
+        **{
+            **_BASE_RESPONSE,
+            "verdict": legacy_verdict,
+            "risk_score": 5,
+            "quarantine_reason": "Stored legacy verdict.",
+            "review_status": "pending",
+        }
+    )
+    assert item.verdict == "block"
+    assert item.risk_score >= RISK_THRESHOLD_BLOCK_MIN
+    assert item.untrusted is True
+    assert item.quarantine_reason == "Stored legacy verdict."
+    assert item.review_status == "pending"
 
 
 # ---------------------------------------------------------------------------

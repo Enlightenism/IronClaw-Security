@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.services.action_guard import analyze_action
 
 
@@ -12,13 +13,15 @@ def test_analyze_action_allows_safe_file_write() -> None:
         session_id="session-safe-001",
     )
 
-    assert result["verdict"] in {"allow", "warn"}
+    assert result["verdict"] in {"allow", "block"}
     assert result["risk_score"] >= 0
+    assert result["should_halt"] is (result["verdict"] == "block")
+    assert result["should_warn"] is False
     assert isinstance(result["matched_patterns"], list)
     assert isinstance(result["reasons"], list)
 
 
-def test_analyze_action_warns_or_higher_for_prompt_injection_attempt() -> None:
+def test_analyze_action_blocks_prompt_injection_attempt() -> None:
     result = analyze_action(
         action_type="tool_call",
         target="shell",
@@ -27,13 +30,15 @@ def test_analyze_action_warns_or_higher_for_prompt_injection_attempt() -> None:
         session_id="session-pi-001",
     )
 
-    assert result["verdict"] in {"warn", "quarantine", "block"}
-    assert result["risk_score"] >= 20
+    assert result["verdict"] == "block"
+    assert result["risk_score"] >= RISK_THRESHOLD_BLOCK_MIN
+    assert result["should_halt"] is True
+    assert result["should_warn"] is False
     assert "direct-ignore-instructions" in result["matched_patterns"]
     assert any(reason["source"] == "promptinjection" for reason in result["reasons"])
 
 
-def test_analyze_action_quarantines_or_blocks_exfiltration_sequence() -> None:
+def test_analyze_action_blocks_exfiltration_sequence() -> None:
     result = analyze_action(
         action_type="tool_call",
         target="shell",
@@ -42,9 +47,10 @@ def test_analyze_action_quarantines_or_blocks_exfiltration_sequence() -> None:
         session_id="session-risk-001",
     )
 
-    assert result["verdict"] in {"quarantine", "block"}
+    assert result["verdict"] == "block"
     assert result["should_halt"] is True
-    assert result["risk_score"] >= 40
+    assert result["should_warn"] is False
+    assert result["risk_score"] >= RISK_THRESHOLD_BLOCK_MIN
     assert any(
         pattern in result["matched_patterns"]
         for pattern in (

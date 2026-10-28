@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import logging
+import math
 import re
 import threading
 from typing import TYPE_CHECKING, Any
@@ -33,11 +34,6 @@ logger = logging.getLogger(__name__)
 _ENGINE_VERSION = "1.0.0"
 
 
-_THRESHOLD_BLOCK = 0.75
-_THRESHOLD_REVIEW = 0.50
-_THRESHOLD_MONITOR = 0.20
-
-
 _SEVERITY_WEIGHT: dict[ThreatSeverityLevel, float] = {
     ThreatSeverityLevel.CRITICAL: 1.0,
     ThreatSeverityLevel.HIGH: 0.75,
@@ -49,9 +45,7 @@ _SEVERITY_WEIGHT: dict[ThreatSeverityLevel, float] = {
 
 _VERDICT_RANK: dict[DetectionVerdict, int] = {
     DetectionVerdict.ALLOW: 0,
-    DetectionVerdict.MONITOR: 1,
-    DetectionVerdict.REVIEW: 2,
-    DetectionVerdict.BLOCK: 3,
+    DetectionVerdict.BLOCK: 1,
 }
 
 
@@ -191,13 +185,7 @@ class ThreatScoringEngine:
 
     @staticmethod
     def _verdict_from_score(score: float) -> DetectionVerdict:
-        if score >= _THRESHOLD_BLOCK:
-            return DetectionVerdict.BLOCK
-        if score >= _THRESHOLD_REVIEW:
-            return DetectionVerdict.REVIEW
-        if score >= _THRESHOLD_MONITOR:
-            return DetectionVerdict.MONITOR
-        return DetectionVerdict.ALLOW
+        return DetectionVerdict.ALLOW if math.isfinite(score) and score == 0 else DetectionVerdict.BLOCK
 
     @staticmethod
     def _severity_from_score(
@@ -258,26 +246,9 @@ class ThreatScoringEngine:
         ioc_matches: list[IOCMatch],
         correlation_signals: list[CorrelationSignal],
     ) -> DetectionVerdict:
-        if not ioc_matches:
-            return verdict
-        highest_ioc = _highest_ioc_severity(ioc_matches)
-        minimum = DetectionVerdict.MONITOR
-        if highest_ioc in {ThreatSeverityLevel.CRITICAL, ThreatSeverityLevel.HIGH}:
-            minimum = DetectionVerdict.REVIEW
-        signal_names = {_get_signal_type(sig) for sig in correlation_signals}
-        if highest_ioc == ThreatSeverityLevel.CRITICAL:
-            minimum = DetectionVerdict.BLOCK
-        elif "high_severity_cluster" in signal_names and highest_ioc in {
-            ThreatSeverityLevel.CRITICAL,
-            ThreatSeverityLevel.HIGH,
-        }:
-            minimum = DetectionVerdict.BLOCK
-        elif "attack_chain" in signal_names and highest_ioc in {
-            ThreatSeverityLevel.CRITICAL,
-            ThreatSeverityLevel.HIGH,
-        }:
-            minimum = _max_verdict(minimum, DetectionVerdict.BLOCK)
-        return _max_verdict(verdict, minimum)
+        if ioc_matches or correlation_signals:
+            return DetectionVerdict.BLOCK
+        return verdict
 
     @staticmethod
     def _elevate_severity_for_enrichment(

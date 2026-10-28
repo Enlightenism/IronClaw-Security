@@ -163,11 +163,12 @@ def _normalize_record(record: Mapping[str, Any]) -> dict[str, Any]:
     # (no action needed — dict(record) already carries them)
 
     verdict = str(normalized.get("verdict") or "").strip().lower()
+    requires_review = verdict in {"block", "quarantine"}
     if normalized.get("review_status") is None:
-        normalized["review_status"] = "pending" if verdict == "quarantine" else "none"
+        normalized["review_status"] = "pending" if requires_review else "none"
 
     if normalized.get("untrusted") is None:
-        normalized["untrusted"] = verdict == "quarantine"
+        normalized["untrusted"] = requires_review
     else:
         normalized["untrusted"] = bool(normalized.get("untrusted"))
 
@@ -247,7 +248,7 @@ def review_scan(scan_id: str, action: str) -> dict[str, Any] | None:
         raise KeyError(scan_id)
 
     verdict = str(item.get("verdict") or "").strip().lower()
-    if verdict != "quarantine":
+    if verdict not in {"block", "quarantine"}:
         return None
 
     approved = str(action).strip().lower() == "approve"
@@ -261,8 +262,8 @@ def review_scan(scan_id: str, action: str) -> dict[str, Any] | None:
 
     updates = {
         "review_status": "approved" if approved else "rejected",
-        "untrusted": not approved,
-        "verdict": "allow" if approved else "block",
+        "untrusted": True,
+        "verdict": "block",
         "summary": summary,
     }
     return update_scan_by_id(scan_id, updates)
@@ -272,8 +273,8 @@ def apply_review_action(item: Mapping[str, Any], action: str) -> dict[str, Any]:
     approved = str(action).strip().lower() == "approve"
     updated = dict(item)
     updated["review_status"] = "approved" if approved else "rejected"
-    updated["untrusted"] = not approved
-    updated["verdict"] = "allow" if approved else "block"
+    updated["untrusted"] = True
+    updated["verdict"] = "block"
     summary = str(updated.get("summary") or "").strip()
     review_suffix = f"Review action: {'approve' if approved else 'reject'}."
     if summary:

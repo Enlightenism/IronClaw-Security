@@ -81,8 +81,8 @@ class _SecretServiceStub:
             },
         )
         return _Result(
-            verdict="review",
-            blocked=False,
+            verdict="block",
+            blocked=True,
             reasons=[{"label": "arguments-scanned"}],
             redacted_text="arguments-redacted",
         )
@@ -219,8 +219,8 @@ def test_secrets_api_inspect_routes_arguments_requests_to_arguments_scanner(monk
 
     assert response.status_code == 200
     body = response.json()
-    assert body["verdict"] == "review"
-    assert body["blocked"] is False
+    assert body["verdict"] == "block"
+    assert body["blocked"] is True
     assert body["redacted_text"] == "arguments-redacted"
     assert len(service.calls) == 1
     assert service.calls[0]["method"] == "inspect_arguments"
@@ -313,8 +313,8 @@ def test_secrets_api_inspect_arguments_endpoint(monkeypatch) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["verdict"] == "review"
-    assert body["blocked"] is False
+    assert body["verdict"] == "block"
+    assert body["blocked"] is True
     assert len(service.calls) == 1
     assert service.calls[0]["method"] == "inspect_arguments"
     assert service.calls[0]["context"] == "tool_args"

@@ -11,7 +11,7 @@ from app.services.verdict_enforcer import EnforcedVerdict, enforce_verdict
 router = APIRouter(prefix="/decision", tags=["action-decision"])
 
 
-DecisionOutcome = Literal["allow", "review", "quarantine", "deny"]
+DecisionOutcome = Literal["allow", "block"]
 DecisionState = Literal["approved", "queuedforreview", "quarantined", "denied"]
 
 
@@ -51,7 +51,7 @@ class ActionDecisionResponse(BaseModel):
     reasons: list[DecisionReasonView] = Field(default_factory=list)
     promptinjection: dict[str, Any] = Field(default_factory=dict)
     # Guard telemetry — propagated from enforce_verdict to review records
-    guard_verdict: str | None = None
+    guard_verdict: DecisionOutcome | None = None
     guard_risk_score: int | None = None
     guard_confidence: float | None = None
     guard_latency_ms: float | None = None
@@ -62,14 +62,9 @@ class ActionDecisionResponse(BaseModel):
     enforced_at: str | None = None
 
 
-def _guard_verdict_to_enforcer_verdict(verdict: str) -> str:
+def _guard_verdict_to_enforcer_verdict(verdict: str) -> DecisionOutcome:
     """Map actionguard verdicts to verdict_enforcer VerdictType."""
-    return {
-        "allow": "allow",
-        "review": "warn",
-        "quarantine": "quarantine",
-        "deny": "block",
-    }.get(verdict, "block")
+    return "allow" if verdict == "allow" else "block"
 
 
 def decideaction(
@@ -106,11 +101,11 @@ def decideaction(
         action_type=actiontype,
         target=target,
         content=content,
-        verdict=enforcer_verdict,  # type: ignore[arg-type]
+        verdict=enforcer_verdict,
         summary=guard.get("reason", ""),
         risk_score=int(guard.get("adjustedriskscore", riskscore)),
         should_halt=not guard.get("allowed", True),
-        should_warn=bool(guard.get("requiresreview")),
+        should_warn=False,
         matched_patterns=matched_patterns,
         categories=categories,
         decision_source="actiondecision",
@@ -128,27 +123,13 @@ def decideaction(
         haltedbyboundary = False
         requiresreview = False
         reason = "Decision engine approved execution."
-    elif final_verdict == "warn":
-        outcome = "review"
-        state = "queuedforreview"
-        shouldexecute = True
-        haltedbyboundary = False
-        requiresreview = True
-        reason = "Decision engine queued the action for review."
-    elif final_verdict == "quarantine":
-        outcome = "quarantine"
-        state = "quarantined"
-        shouldexecute = False
-        haltedbyboundary = True
-        requiresreview = False
-        reason = "Decision engine quarantined execution."
     else:
-        outcome = "deny"
-        state = "denied"
+        outcome = "block"
+        requiresreview = bool(guard.get("requiresreview"))
+        state = "queuedforreview" if requiresreview else "denied"
         shouldexecute = False
         haltedbyboundary = True
-        requiresreview = False
-        reason = "Decision engine denied execution."
+        reason = "Decision engine blocked the action and queued it for review." if requiresreview else "Decision engine blocked execution."
 
     return {
         "actiontype": actiontype,
@@ -165,7 +146,7 @@ def decideaction(
         "reasons": enforced["reasons"],
         "promptinjection": guard["promptinjection"],
         # Guard telemetry — now populated via enforce_verdict, flows to review.py
-        "guard_verdict": enforced["guard_verdict"],
+        "guard_verdict": (None if enforced["guard_verdict"] is None else "allow" if enforced["guard_verdict"] == "allow" else "block"),
         "guard_risk_score": enforced["guard_risk_score"],
         "guard_confidence": enforced["guard_confidence"],
         "guard_latency_ms": enforced["guard_latency_ms"],

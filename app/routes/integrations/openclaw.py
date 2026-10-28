@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
@@ -210,7 +210,7 @@ class OpenClawEvaluateResponse(BaseModel):
     adapter_name: str
     platform: str
     mode: str
-    verdict: str
+    verdict: Literal["allow", "block"]
     should_allow: bool
     should_warn: bool
     should_quarantine: bool
@@ -280,7 +280,7 @@ class OpenClawManifestResponse(BaseModel):
     description=(
         "Accepts an OpenClaw builder or workflow action payload. Runs pre-flight secret "
         "scanning on the incoming content before routing through the IronClaw policy engine. "
-        "Returns a verdict (allow/warn/quarantine/block) with the OpenClaw-specific "
+        "Returns an allow/block verdict with the OpenClaw-specific "
         "should_hold flag, full reasoning, secret scan results, and an auditable decision trail."
     ),
 )
@@ -313,7 +313,7 @@ async def evaluate_openclaw(
             verdict="block",
             should_allow=False,
             should_warn=False,
-            should_quarantine=True,
+            should_quarantine=False,
             should_block=True,
             should_hold=True,
             risk_score=100,
@@ -389,6 +389,7 @@ async def evaluate_openclaw(
             detail=f"Policy evaluation failed: {exc}",
         ) from exc
 
+    verdict: Literal["allow", "block"] = "allow" if response.verdict == "allow" else "block"
     audit_trail = _build_audit_trail(
         trace_id=trace_id,
         decision_id=response.decision_id,
@@ -401,8 +402,8 @@ async def evaluate_openclaw(
         risk_score_input=body.risk_score,
         risk_score_final=response.risk_score,
         risk_level=response.risk_level,
-        verdict=response.verdict,
-        should_hold=response.should_hold,
+        verdict=verdict,
+        should_hold=verdict == "block",
         matched_rule_count=len(response.matched_rules),
         evaluated_at=response.reviewed_at,
         metadata=body.metadata,
@@ -414,12 +415,12 @@ async def evaluate_openclaw(
         adapter_name=response.adapter_name,
         platform=response.platform,
         mode=response.mode,
-        verdict=response.verdict,
-        should_allow=response.should_allow,
-        should_warn=response.should_warn,
-        should_quarantine=response.should_quarantine,
-        should_block=response.should_block,
-        should_hold=response.should_hold,
+        verdict=verdict,
+        should_allow=verdict == "allow",
+        should_warn=False,
+        should_quarantine=False,
+        should_block=verdict == "block",
+        should_hold=verdict == "block",
         risk_score=response.risk_score,
         risk_level=response.risk_level,
         summary=response.summary,
@@ -512,8 +513,8 @@ async def openclaw_manifest() -> OpenClawManifestResponse:
         "total_rules": len(engine.rules),
         "verdicts": {
             "block": [r.rule_id for r in engine.rules if r.verdict == "block"],
-            "quarantine": [r.rule_id for r in engine.rules if r.verdict == "quarantine"],
-            "warn": [r.rule_id for r in engine.rules if r.verdict == "warn"],
+            "quarantine": [],
+            "warn": [],
             "allow": [r.rule_id for r in engine.rules if r.verdict == "allow"],
         },
         "tags": sorted({tag for rule in engine.rules for tag in rule.tags}),

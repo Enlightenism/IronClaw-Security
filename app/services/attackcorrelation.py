@@ -8,6 +8,8 @@ from hashlib import sha1
 from statistics import mean
 from typing import Any
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
+
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
@@ -840,26 +842,16 @@ class AttackCorrelationService:
 
         for session in session_risk:
             score = session["risk_score"]
-            if score >= 85:
+            if score > RISK_THRESHOLD_ALLOW_MAX:
+                block_score = max(score, RISK_THRESHOLD_BLOCK_MIN)
                 actions.append(
                     self._action(
-                        action_type="review",
-                        priority=_priority_from_score(score),
+                        action_type="block",
+                        priority=_priority_from_score(block_score),
                         target=f"session:{session['session_id']}",
-                        reason=session["summary"],
-                        risk_score=score,
-                        severity=session["severity"],
-                    ),
-                )
-            if score >= 90:
-                actions.append(
-                    self._action(
-                        action_type="quarantine",
-                        priority="p1",
-                        target=f"session:{session['session_id']}",
-                        reason="Session exceeds critical correlation risk threshold.",
-                        risk_score=score,
-                        severity="critical",
+                        reason=("Session risk exceeds the configured allow maximum; blocking is recommended."),
+                        risk_score=block_score,
+                        severity=_severity_from_score(block_score),
                     ),
                 )
 
@@ -895,10 +887,11 @@ class AttackCorrelationService:
         unique_actions = self._dedupe_actions(actions)
         return {
             "total_actions": len(unique_actions),
-            "review_actions": sum(1 for a in unique_actions if a["action_type"] == "review"),
-            "quarantine_actions": sum(1 for a in unique_actions if a["action_type"] == "quarantine"),
-            "incident_actions": sum(1 for a in unique_actions if a["action_type"] == "incident"),
-            "remediation_actions": sum(1 for a in unique_actions if a["action_type"] == "remediation"),
+            "block_actions": sum(1 for action in unique_actions if action["action_type"] == "block"),
+            "review_actions": sum(1 for action in unique_actions if action["action_type"] == "review"),
+            "quarantine_actions": sum(1 for action in unique_actions if action["action_type"] == "quarantine"),
+            "incident_actions": sum(1 for action in unique_actions if action["action_type"] == "incident"),
+            "remediation_actions": sum(1 for action in unique_actions if action["action_type"] == "remediation"),
             "items": unique_actions,
         }
 
@@ -916,6 +909,8 @@ class AttackCorrelationService:
         highest_signal = max((s.risk_score for s in signals), default=0)
         highest_session = max((i["risk_score"] for i in session_risk), default=0)
         overall = max(highest_signal, highest_session)
+        if escalation.get("block_actions", 0):
+            overall = max(overall, RISK_THRESHOLD_BLOCK_MIN)
         band = _risk_band(overall)
         return {
             "overall_risk_score": overall,
@@ -953,7 +948,7 @@ class AttackCorrelationService:
             "signals_last_24h": len(recent),
             "campaign_count": len(campaigns),
             "incident_link_count": len(incident_links),
-            "sessions_over_70": sum(1 for i in session_risk if i["risk_score"] >= 70),
+            "sessions_over_70": sum(1 for item in session_risk if item["risk_score"] >= RISK_THRESHOLD_BLOCK_MIN),
             "source_counts": dict(source_counts),
             "signal_type_counts": dict(type_counts),
             "severity_counts": dict(severity_counts),

@@ -5,7 +5,13 @@ from typing import cast
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.action.execute import router as action_execute_router
+from app.api.action.execute import (
+    _normalize_policy_verdict,
+    _normalize_response_action,
+)
+from app.api.action.execute import (
+    router as action_execute_router,
+)
 from app.facade import guardandexecuteaction, guardandexecuteraw
 from app.models.action_execute import ExecuteRequest
 from app.services.action_execute_service import ExecutorResult
@@ -13,9 +19,9 @@ from app.services.action_execute_service import ExecutorResult
 
 def test_guardandexecuteaction_returns_typed_response():
     request = ExecuteRequest(
-        action_type="http_fetch",
-        target="https://example.com",
-        content="Fetch the public homepage for analysis.",
+        action_type="file_edit",
+        target="notes/output.txt",
+        content="Update a harmless local note.",
         risk_score=0,
         client_id="test-guard-facade-001",
         session_id="sess-guard-facade-001",
@@ -57,7 +63,7 @@ def test_guardandexecuteraw_blockshighriskrequest():
     assert response["should_execute"] is False
     assert response["halted_by_boundary"] is True
     assert response["executor_result"] is None
-    assert response["policy_verdict"] in {"block", "quarantine"}
+    assert response["policy_verdict"] == "block"
     assert response["risk_score"] == 95
     assert response["reason"]
     assert response["reasons"]
@@ -66,9 +72,9 @@ def test_guardandexecuteraw_blockshighriskrequest():
 
 def test_guardandexecuteraw_usesdefaultfilepath():
     response = guardandexecuteraw(
-        action_type="http_fetch",
-        target="https://example.com/docs",
-        content="Fetch a public document.",
+        action_type="file_edit",
+        target="notes/output.txt",
+        content="Update a local note.",
         risk_score=3,
         client_id="test-guard-facade-003",
         session_id="sess-guard-facade-003",
@@ -102,5 +108,16 @@ def test_action_execute_route_uses_real_facade_import_and_contract():
     assert response.status_code == 200
     body = response.json()
     assert body["executionstate"] in {"completed", "queuedforreview", "denied"}
-    assert body["responseaction"] in {"allow", "warn", "quarantine", "block", "review"}
-    assert body["policyverdict"] in {"allow", "warn", "quarantine", "block"}
+    assert body["responseaction"] in {"allow", "block"}
+    assert body["policyverdict"] in {"allow", "block"}
+
+
+def test_action_execute_normalizers_fail_closed() -> None:
+    for raw_verdict in (None, "warn", "quarantine", "review", "invalid"):
+        assert _normalize_policy_verdict(raw_verdict) == "block"
+
+    assert _normalize_policy_verdict("allow") == "allow"
+    assert _normalize_response_action("warn", "allow") == "block"
+    assert _normalize_response_action("", "allow") == "block"
+    assert _normalize_response_action(None, "block") == "block"
+    assert _normalize_response_action(None, "allow") == "allow"

@@ -84,6 +84,8 @@ def test_hermes_end_to_end_paid_flow_and_contract() -> None:
     manifest_payload = manifest.json()
     assert manifest_payload["platform"] == "hermes"
     assert manifest_payload["adapter_name"] == "ironclaw-hermes"
+    assert manifest_payload["policy_bindings"]["verdicts"]["warn"] == []
+    assert manifest_payload["policy_bindings"]["verdicts"]["quarantine"] == []
     assert "workflow_step" in manifest_payload["supported_action_types"]
     assert any(cap["name"] == "secret-scan" for cap in manifest_payload["capabilities"])
 
@@ -104,6 +106,9 @@ def test_hermes_end_to_end_paid_flow_and_contract() -> None:
     evaluate_payload = evaluate.json()
     assert evaluate_payload["verdict"] == "block"
     assert evaluate_payload["should_block"] is True
+    assert evaluate_payload["should_warn"] is False
+    assert evaluate_payload["should_quarantine"] is False
+    assert evaluate_payload["should_review"] is True
     assert evaluate_payload["secret_scan"]["scanned"] is True
     assert evaluate_payload["audit_trail"]["secret_scan_triggered"] is True
 

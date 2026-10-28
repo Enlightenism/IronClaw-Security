@@ -62,8 +62,8 @@ class SecurityAuditEventStore:
                         request_id="req-001",
                         trace_id="trace-001",
                         integration_id="claude-router-proxy",
-                        verdict="quarantine",
-                        summary="Prompt-injection pattern detected and quarantined before execution.",
+                        verdict="block",
+                        summary="Prompt-injection pattern detected and blocked before execution.",
                         metadata={
                             "category": "prompt-injection",
                             "source": "scan",
@@ -100,8 +100,8 @@ class SecurityAuditEventStore:
                         request_id="req-003",
                         trace_id="trace-003",
                         integration_id="sandbox-pipeline",
-                        verdict="warn",
-                        summary="Suspicious output routed into sandbox-backed review flow.",
+                        verdict="block",
+                        summary="Suspicious output blocked and routed into sandbox-backed review flow.",
                         metadata={
                             "category": "response-review",
                             "source": "sandbox",

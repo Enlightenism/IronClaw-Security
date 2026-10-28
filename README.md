@@ -141,10 +141,12 @@ One locked, shipping mission:
   model-based malicious-content classification with deterministic rule
   enforcement.
 - **Return one final verdict** — no ambiguity, no silent pass-through:
-  - `allow` — safe, released.
-  - `warn` — risky, surfaced with caution.
-  - `quarantine` — isolated, not released by default.
-  - `block` — denied. Hard stop.
+  - `allow` — no suspicious signals or scan errors; Prompt Guard returns
+    `BENIGN` when enabled.
+  - `block` — any suspicious signal, matched rule, malicious classifier result,
+    or scan error; denied without release.
+- **Operational isolation** — blocked artifacts may be quarantined for review;
+  quarantine is a workflow state, not a final verdict.
 
 ---
 
@@ -162,13 +164,14 @@ IronClaw's prompt injection defense operates at multiple layers simultaneously:
 
 - **Pattern-based heuristics** scan inbound content for known injection
   signatures, role-override attempts, instruction-smuggling patterns, and
-  jailbreak constructs before the content is released.
-- **Local Prompt Guard classification** can add a malicious-content signal to
-  the rule-based assessment when `GUARD_ENABLED=true`.
-- **Risk scoring** assigns a 0–100 score to every artifact. Scores above
-  configurable thresholds route to quarantine or block automatically.
+  jailbreak constructs; any match blocks the artifact.
+- **Local Prompt Guard classification** runs when `GUARD_ENABLED=true`; a
+  malicious result or classifier failure blocks the scan.
+- **Risk scoring** assigns a 0–100 score to every artifact. A block score is at
+  least `RISK_THRESHOLD_BLOCK_MIN`; score bands do not create additional
+  verdicts.
 - **Policy enforcement** applies organization-level rules on top of the brain
-  verdict — no single point of failure.
+  verdict; suspicious matches block at every severity.
 - **Sandbox isolation** means even content that passes initial checks is never
   released directly — it is evaluated inside a controlled runtime boundary
   first.
@@ -207,7 +210,7 @@ Prompt Guard Classifier │ ← Malicious-content classification
 └─────────────────────────────────┘ │ ▼ ┌─────────────────────────────────┐ │
 Policy Enforcer │ ← Org-level policy rules applied
 └─────────────────────────────────┘ │ ▼ ┌─────────────────────────────────┐ │
-Verdict Enforcer │ ← Final decision: allow/warn/quarantine/block
+Verdict Enforcer │ ← Final decision: allow/block
 └─────────────────────────────────┘ │ ▼ VERDICT
 
 Every single agent output traverses every single layer. There is no bypass path.
@@ -217,15 +220,13 @@ There is no silent pass-through.
 
 ## Verdicts
 
-| Verdict      | Risk score range     | Behavior                                           |
-| ------------ | -------------------- | -------------------------------------------------- |
-| `allow`      | 0–29                 | Content released into the protected flow           |
-| `warn`       | 30–69 (configurable) | Content surfaced with risk signal — caller decides |
-| `quarantine` | 30–69 (configurable) | Content isolated, not released, pending review     |
-| `block`      | 70–100               | Content denied. Hard stop. No release.             |
+| Verdict | Condition | Behavior |
+| --- | --- | --- |
+| `allow` | No patterns, suspicious signals, or scan errors; Prompt Guard is `BENIGN` when enabled | Content released into the protected flow |
+| `block` | Any suspicious signal, matched rule, malicious Prompt Guard result, or scan error | Content denied; risk score is at least `RISK_THRESHOLD_BLOCK_MIN` |
 
-Thresholds are fully configurable via environment variables. The verdict engine
-has no hardcoded safe defaults that can be silently misconfigured.
+Risk thresholds are configured in `app/config.py` and may be set through
+environment variables. They affect scoring, not the number of verdicts.
 
 ---
 
@@ -326,8 +327,7 @@ security control plane for AI-native tooling.
   response.
 - `app/services/guard_security_brain.py` — local Prompt Guard security evaluation.
 - `app/services/policy.py` — policy evaluation and rule enforcement.
-- `app/services/verdict_enforcer.py` — final allow / warn / quarantine / block
-  enforcement.
+- `app/services/verdict_enforcer.py` — final allow / block enforcement.
 - `app/services/securityorchestrator.py` — unified orchestration and control
   flow.
 - `app/services/threat_detection_engine.py` — correlation, scoring, and

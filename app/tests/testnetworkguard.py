@@ -79,7 +79,7 @@ def test_network_guard_allows_safe_outbound_request() -> None:
     assert len(policy_engine.calls) == 1
 
 
-def test_network_guard_reviews_unknown_destination() -> None:
+def test_network_guard_blocks_unknown_destination() -> None:
     policy_engine = _PolicyEngineStub(
         _Decision(
             verdict="review",
@@ -101,9 +101,10 @@ def test_network_guard_reviews_unknown_destination() -> None:
         metadata={"method": "GET"},
     )
 
-    assert result.verdict == "review"
-    assert result.allowed is True
+    assert result.verdict == "block"
+    assert result.allowed is False
     assert result.should_review is True
+    assert result.should_block is True
 
 
 def test_network_guard_blocks_sensitive_exfiltration_attempt() -> None:
@@ -133,7 +134,7 @@ def test_network_guard_blocks_sensitive_exfiltration_attempt() -> None:
     assert result.should_block is True
 
 
-def test_network_guard_quarantines_known_malicious_destination() -> None:
+def test_network_guard_blocks_known_malicious_destination() -> None:
     policy_engine = _PolicyEngineStub(
         _Decision(
             verdict="quarantine",
@@ -156,10 +157,10 @@ def test_network_guard_quarantines_known_malicious_destination() -> None:
         metadata={"threatintel_match": True},
     )
 
-    assert result.verdict == "quarantine"
+    assert result.verdict == "block"
     assert result.allowed is False
     assert result.should_block is True
-    assert result.should_quarantine is True
+    assert result.should_quarantine is False
 
 
 def test_network_guard_passes_context_to_policy_engine() -> None:
@@ -209,7 +210,9 @@ def test_network_guard_handles_missing_destination() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 
@@ -234,7 +237,9 @@ def test_network_guard_handles_blank_destination() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 
@@ -259,7 +264,9 @@ def test_network_guard_handles_missing_tool_name() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 

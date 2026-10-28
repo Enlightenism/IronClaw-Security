@@ -312,12 +312,12 @@ def test_policy_set_update_orm_compat():
 # PolicyVerdict — risk_score bounds + auto-timestamp with timezone
 # ---------------------------------------------------------------------------
 
-_BASE_VERDICT = dict(verdict=PolicyEnforcementMode.allow)
+_BASE_VERDICT = dict(verdict="allow")
 
 
 def test_policy_verdict_minimal():
     v = PolicyVerdict(**_BASE_VERDICT)
-    assert v.verdict == PolicyEnforcementMode.allow
+    assert v.verdict == "allow"
     assert v.risk_score == 0
     assert v.severity == PolicySeverity.info
     assert v.matched_rules == []
@@ -360,10 +360,16 @@ def test_policy_verdict_risk_score_above_100_rejected():
         PolicyVerdict(**{**_BASE_VERDICT, "risk_score": 101})
 
 
-@pytest.mark.parametrize("mode", list(PolicyEnforcementMode))
-def test_policy_verdict_all_enforcement_modes(mode):
-    v = PolicyVerdict(verdict=mode)
-    assert v.verdict == mode
+@pytest.mark.parametrize("verdict", ["allow", "block"])
+def test_policy_verdict_accepts_binary_values(verdict):
+    v = PolicyVerdict(verdict=verdict)
+    assert v.verdict == verdict
+
+
+@pytest.mark.parametrize("verdict", ["warn", "quarantine", "audit"])
+def test_policy_verdict_rejects_nonbinary_values(verdict):
+    with pytest.raises(ValidationError):
+        PolicyVerdict(verdict=verdict)
 
 
 def test_policy_verdict_with_matched_rules():
@@ -381,12 +387,12 @@ def test_policy_verdict_orm_compat():
 # PolicyEvaluationResult — backwards compatibility
 # ---------------------------------------------------------------------------
 
-_BASE_EVAL = dict(verdict=PolicyEnforcementMode.warn)
+_BASE_EVAL = dict(verdict="block")
 
 
 def test_policy_evaluation_result_minimal():
     r = PolicyEvaluationResult(**_BASE_EVAL)
-    assert r.verdict == PolicyEnforcementMode.warn
+    assert r.verdict == "block"
     assert r.matched_rules == []
     assert r.severity == PolicySeverity.info
     assert r.risk_score == 0
@@ -426,6 +432,12 @@ def test_policy_evaluation_result_risk_score_above_100_rejected():
 
 def test_policy_evaluation_result_orm_compat():
     assert PolicyEvaluationResult.model_config.get("from_attributes") is True
+
+
+@pytest.mark.parametrize("verdict", ["warn", "quarantine", "audit"])
+def test_policy_evaluation_result_rejects_nonbinary_values(verdict):
+    with pytest.raises(ValidationError):
+        PolicyEvaluationResult(verdict=verdict)
 
 
 # ---------------------------------------------------------------------------

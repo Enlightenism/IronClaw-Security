@@ -141,12 +141,16 @@ def _normalize_policyverdict(record: dict[str, Any], executionstate: str) -> str
         return raw_verdict.strip()
 
     normalized_state = executionstate.lower()
-    if normalized_state in {"denied", "blocked"}:
+    if normalized_state in {
+        "denied",
+        "blocked",
+        "quarantined",
+        "dryrun",
+        "queued",
+        "queuedforreview",
+        "review",
+    }:
         return "block"
-    if normalized_state in {"quarantined"}:
-        return "quarantine"
-    if normalized_state in {"dryrun", "queued", "queuedforreview", "review"}:
-        return "review"
     return "allow"
 
 

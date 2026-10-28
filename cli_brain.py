@@ -13,8 +13,6 @@ _DEFAULT_API_BASE = "http://127.0.0.1:8011"
 
 _VERDICT_EXIT_CODES: dict[str, int] = {
     "allow": 0,
-    "warn": 2,
-    "quarantine": 3,
     "block": 4,
 }
 
@@ -147,7 +145,7 @@ def main() -> None:
         "--exit-on-verdict",
         action="store_true",
         dest="exit_on_verdict",
-        help=("Exit with a non-zero code based on verdict: allow=0, warn=2, quarantine=3, block=4."),
+        help="Exit with a non-zero code based on verdict: allow=0, block=4.",
     )
 
     args = parser.parse_args()

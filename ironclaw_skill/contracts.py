@@ -4,6 +4,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+
 
 def _normalize_optional_text(value: str | None) -> str | None:
     if value is None:
@@ -227,7 +229,7 @@ class SkillDecisionMetadata(SkillBaseModel):
 
 
 class SkillResponsePayload(SkillBaseModel):
-    verdict: Literal["allow", "review", "block", "error"]
+    verdict: Literal["allow", "block"]
     summary: str = Field(min_length=1, max_length=4000)
     should_halt: bool = False
     should_warn: bool = False
@@ -243,8 +245,12 @@ class SkillResponsePayload(SkillBaseModel):
 
     @model_validator(mode="after")
     def _sync_allowed_field(self) -> SkillResponsePayload:
-        if self.allowed is None:
-            self.allowed = self.verdict == "allow"
+        is_allowed = self.verdict == "allow"
+        object.__setattr__(self, "allowed", is_allowed)
+        object.__setattr__(self, "should_halt", not is_allowed)
+        object.__setattr__(self, "should_warn", False)
+        if not is_allowed and (self.metadata.risk_score is None or self.metadata.risk_score < RISK_THRESHOLD_BLOCK_MIN):
+            self.metadata.risk_score = RISK_THRESHOLD_BLOCK_MIN
         return self
 
 
@@ -264,7 +270,7 @@ class SkillResponseEnvelope(SkillBaseModel):
 def build_skill_success_response(
     *,
     operation: Literal["scan", "action_policy", "action_decision", "execute"],
-    verdict: Literal["allow", "review", "block"],
+    verdict: Literal["allow", "block"],
     summary: str,
     should_halt: bool = False,
     should_warn: bool = False,
@@ -312,10 +318,10 @@ def build_skill_error_response(
         request_id=request_id,
         error_code=error_code,
         payload=SkillResponsePayload(
-            verdict="error",
+            verdict="block",
             summary=summary,
             should_halt=True,
-            should_warn=True,
+            should_warn=False,
             allowed=False,
             reasons=reasons or [],
             raw_result=raw_result,

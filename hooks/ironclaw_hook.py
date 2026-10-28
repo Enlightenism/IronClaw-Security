@@ -107,11 +107,7 @@ def http_post_json(url, payload, timeout=5):
 def policy_guard_bundle(bundle):
     """Call /policy/guard-bundle with the constructed bundle."""
     if not bundle:
-        return {
-            "highest_verdict": "allow",
-            "should_halt": False,
-            "should_warn": False,
-        }
+        raise ValueError("Cannot evaluate an empty policy bundle.")
 
     return http_post_json(IRONCLAW_POLICY_URL, bundle)
 
@@ -126,34 +122,43 @@ def main():
     payload = read_stdin()
     text = extract_text(payload)
 
-    # If we have nothing, just continue
-    if not text and not payload:
-        print(json.dumps({"continue": True}))
-        return
-
     # First try the bundle-based guard
     try:
         bundle = build_prompt_bundle(payload)
+        if not bundle:
+            raise ValueError("No scannable prompt bundle was produced.")
         policy_result = policy_guard_bundle(bundle)
     except Exception as e:
-        # If policy endpoint is unavailable, fall back to previous behavior
         try:
             result = scan_text(text or "")
         except Exception as scan_err:
             print(
                 json.dumps(
                     {
-                        "continue": True,
+                        "continue": False,
                         "suppressOutput": False,
-                        "decision_reason": f"IronClaw unavailable: {e}; fallback scan error: {scan_err}",
+                        "stopReason": f"IronClaw unavailable: {e}; fallback scan error: {scan_err}",
                     }
                 )
             )
             return
-        verdict = result.get("verdict", "allow")
+        if not isinstance(result, dict):
+            print(
+                json.dumps(
+                    {
+                        "continue": False,
+                        "suppressOutput": False,
+                        "stopReason": "IronClaw fallback scan returned an invalid response; blocked by policy.",
+                    }
+                )
+            )
+            return
+
+        verdict = result.get("verdict")
         summary = result.get("summary", "")
-        matched = result.get("matched_patterns", [])
-        if verdict == "block":
+        matched = result.get("matched_patterns") or []
+        has_errors = bool(result.get("error") or result.get("errors") or result.get("failed_checks"))
+        if verdict != "allow" or matched or has_errors:
             print(
                 json.dumps(
                     {
@@ -169,22 +174,35 @@ def main():
                 {
                     "continue": True,
                     "suppressOutput": False,
-                    "decision_reason": f"IronClaw verdict={verdict}. {summary}",
+                    "decision_reason": f"IronClaw explicitly allowed this action. {summary}",
                 }
             )
         )
         return
 
-    highest_verdict = policy_result.get("highest_verdict", "block")
+    if not isinstance(policy_result, dict):
+        print(
+            json.dumps(
+                {
+                    "continue": False,
+                    "suppressOutput": False,
+                    "stopReason": "IronClaw policy returned an invalid response; blocked by policy.",
+                }
+            )
+        )
+        return
+
+    highest_verdict = policy_result.get("highest_verdict")
     should_halt = policy_result.get("should_halt", True)
     should_warn = policy_result.get("should_warn", True)
+    has_errors = bool(policy_result.get("error") or policy_result.get("errors") or policy_result.get("failed_checks"))
 
     # Try to surface the most relevant summary
     user_ctx = policy_result.get("user_prompt") or {}
     model_ctx = policy_result.get("model_output") or {}
     summary = user_ctx.get("summary") or model_ctx.get("summary") or f"Bundle verdict={highest_verdict}"
 
-    if should_halt or highest_verdict in ("block", "quarantine"):
+    if highest_verdict != "allow" or should_halt is not False or should_warn is not False or has_errors:
         print(
             json.dumps(
                 {
@@ -196,10 +214,7 @@ def main():
         )
         return
 
-    # Allowed, but possibly warn
     decision_reason = f"IronClaw bundle verdict={highest_verdict}. {summary}"
-    if should_warn:
-        decision_reason = "[WARN] " + decision_reason
 
     print(
         json.dumps(

@@ -151,6 +151,8 @@ def test_malicious_prompt_is_blocked_after_policy_allows():
 
     assert result["allowed"] is False
     assert result["verdict"] == "block"
+    assert result["policy"]["allowed"] is False
+    assert result["policy"]["verdict"] == "block"
     assert "prompt_guard:malicious" in result["policy"]["matchedrules"]
     assert result["result"]["label"] == "MALICIOUS"
     assert client.classify_calls == ["summarize this repository safely"]
@@ -177,21 +179,23 @@ def test_policy_block_prevents_prompt_guard_classification():
     assert client.classify_calls == []
 
 
-def test_review_verdict_prevents_prompt_guard_classification():
+def test_nonbinary_policy_verdict_fails_closed():
     brain, enforcer, client = _build_brain(
         _PolicyDecision(
-            allowed=False,
-            verdict="review",
-            matched_rules=["policy:review"],
-            reasons=[{"label": "Review", "details": "Needs analyst approval"}],
+            allowed=True,
+            verdict="quarantine",
+            matched_rules=["policy:quarantine"],
+            reasons=[{"label": "Blocked", "details": "Non-binary policy outcome"}],
         ),
     )
 
     result = brain.evaluate_request(**_request_payload())
 
     assert result["allowed"] is False
-    assert result["verdict"] == "review"
-    assert result["policy"]["matchedrules"] == ["policy:review"]
+    assert result["verdict"] == "block"
+    assert result["policy"]["allowed"] is False
+    assert result["policy"]["verdict"] == "block"
+    assert result["policy"]["matchedrules"] == ["policy:quarantine"]
     assert client.classify_calls == []
 
 
@@ -369,7 +373,7 @@ def test_reason_and_rule_deduplication_in_policy_response():
     brain, enforcer, client = _build_brain(
         _PolicyDecision(
             allowed=False,
-            verdict="review",
+            verdict="block",
             matched_rules=["dup-rule", "dup-rule"],
             reasons=[
                 {"label": "Same", "details": "duplicate"},

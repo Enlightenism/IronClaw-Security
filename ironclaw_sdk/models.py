@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-ScanVerdict = Literal["allow", "warn", "quarantine", "block"]
+ScanVerdict = Literal["allow", "block"]
 
 SandboxLane = Literal[
     "none",
@@ -234,6 +234,12 @@ class GuardBundleResponse(BaseModel):
     retrieved_doc: GuardBundleSlotResult | dict[str, Any] | None = None
     tool_output: GuardBundleSlotResult | dict[str, Any] | None = None
     model_output: GuardBundleSlotResult | dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _normalize_verdict_flags(self) -> GuardBundleResponse:
+        self.should_halt = self.highest_verdict == "block"
+        self.should_warn = False
+        return self
 
 
 # ------------------------------------------------------------------

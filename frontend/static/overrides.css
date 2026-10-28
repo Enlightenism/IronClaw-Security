@@ -3,10 +3,10 @@
    Token overrides and IronClaw-specific custom properties.
    All tokens follow [data-theme="dark"] pattern matching base.html.
    Zero layout rules — layout lives exclusively in base.html inline styles.
-   Risk bands mirror settings.py thresholds:
-     allow:       0–29   (risk_threshold_allow_max = 29)
-     quarantine: 30–69   (risk_threshold_quarantine_min = 30)
-     block:      70–100  (risk_threshold_block_min = 70)
+   Final verdicts are allow/block only. The block risk floor is configured in
+   app/config.py (RISK_THRESHOLD_BLOCK_MIN). Score and severity colors are
+   presentation only. Legacy warn/quarantine tokens remain for historical
+   display and operational isolation status; quarantine is not a verdict.
    ============================================================================= */
 
 /* ── Light mode (default) ──────────────────────────────────────────────────── */
@@ -14,10 +14,9 @@
 [data-theme="light"] {
 
   /* -- Verdict colors --------------------------------------------------------
-     allow       → green  — safe, permitted
-     warn        → amber  — passed but flagged, proceed with caution
-     quarantine  → orange — held for review, not executed
-     block       → red    — hard stop, denied
+     allow       → green — safe, permitted
+     block       → red   — hard stop, denied
+     Legacy warn/quarantine colors below support historical display only.
   --------------------------------------------------------------------------- */
   --verdict-allow:                #2e7d32;
   --verdict-allow-bg:             #e8f5e9;
@@ -40,10 +39,7 @@
   --verdict-block-text:           #7f0000;
 
   /* -- Risk score bands ------------------------------------------------------
-     low:       0–29   (maps to allow threshold)
-     medium:   30–59   (lower half of quarantine band)
-     high:     60–79   (upper quarantine + entry into block band)
-     critical: 80–100  (deep block territory)
+     Severity colors are presentation only and do not define final verdicts.
   --------------------------------------------------------------------------- */
   --risk-low:                     #388e3c;
   --risk-low-bg:                  #f1f8e9;
@@ -92,7 +88,7 @@
      pending     → blue   — awaiting human decision
      approved    → green  — operator approved
      rejected    → red    — operator rejected
-     quarantined → orange — held, pending escalation
+     quarantined → orange — isolated for operational review
   --------------------------------------------------------------------------- */
   --status-pending:               #1565c0;
   --status-pending-bg:            #e3f2fd;
@@ -115,7 +111,7 @@
   --status-quarantined-text:      #e65100;
 
   /* -- Resolution badge tokens -----------------------------------------------
-     allow / deny / quarantine / needsreview
+     allow / deny / needsreview; quarantine is an operational isolation status
   --------------------------------------------------------------------------- */
   --resolution-allow:             var(--verdict-allow);
   --resolution-allow-bg:          var(--verdict-allow-bg);
@@ -189,7 +185,7 @@
 /* ── Dark mode ─────────────────────────────────────────────────────────────── */
 [data-theme="dark"] {
 
-  /* -- Verdict colors -------------------------------------------------------- */
+  /* -- Final verdict and legacy display colors ------------------------------ */
   --verdict-allow:                #66bb6a;
   --verdict-allow-bg:             #1b2e1b;
   --verdict-allow-border:         #2e7d32;
@@ -210,7 +206,7 @@
   --verdict-block-border:         #b71c1c;
   --verdict-block-text:           #ef9a9a;
 
-  /* -- Risk score bands ------------------------------------------------------ */
+  /* -- Presentation-only risk score bands ----------------------------------- */
   --risk-low:                     #66bb6a;
   --risk-low-bg:                  #1a2e1a;
   --risk-low-border:              #388e3c;

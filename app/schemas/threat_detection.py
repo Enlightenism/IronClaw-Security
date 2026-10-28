@@ -13,6 +13,11 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 class DetectionVerdict(StrEnum):
     ALLOW = "allow"
+    BLOCK = "block"
+
+
+class HistoricalDetectionVerdict(StrEnum):
+    ALLOW = "allow"
     MONITOR = "monitor"
     REVIEW = "review"
     BLOCK = "block"
@@ -267,9 +272,15 @@ class DetectionResult(BaseModel):
     assessed_at: str = Field(description="ISO 8601 UTC timestamp of detection.")
     detection_engine_version: str = Field(default="1.0.0")
 
+    @model_validator(mode="after")
+    def block_on_suspicious_signal(self) -> DetectionResult:
+        if self.score > 0 or self.ioc_matches or self.correlation_signals:
+            self.verdict = DetectionVerdict.BLOCK
+        return self
+
     @property
     def is_threat(self) -> bool:
-        return self.verdict in (DetectionVerdict.REVIEW, DetectionVerdict.BLOCK)
+        return self.verdict == DetectionVerdict.BLOCK
 
     @property
     def requires_block(self) -> bool:
@@ -298,7 +309,7 @@ class DetectionResult(BaseModel):
 
 class ThreatAlert(BaseModel):
     """
-    Structured alert emitted when a DetectionResult verdict is REVIEW or BLOCK.
+    Structured alert emitted when a DetectionResult verdict is BLOCK.
     Bridges into incidents.py and notifications.py.
     """
 
@@ -410,7 +421,7 @@ class HuntMatch(BaseModel):
     org_id: str | None = None
     agent_id: str | None = None
     session_id: str | None = None
-    verdict: DetectionVerdict
+    verdict: HistoricalDetectionVerdict
     score: float = Field(ge=0.0, le=1.0)
     severity: ThreatSeverityLevel
     matched_ioc_value: str | None = None
@@ -690,7 +701,7 @@ class DetectionSummary(BaseModel):
     org_id: str | None = None
     agent_id: str | None = None
     session_id: str | None = None
-    verdict: DetectionVerdict
+    verdict: HistoricalDetectionVerdict
     score: float
     severity: ThreatSeverityLevel
     ioc_match_count: int
@@ -712,6 +723,7 @@ __all__ = [
     "DetectionVerdict",
     "FeedRefreshRequest",
     "FeedRefreshResult",
+    "HistoricalDetectionVerdict",
     "HuntMatch",
     "HuntQuery",
     "HuntResult",

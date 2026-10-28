@@ -1,6 +1,16 @@
 from __future__ import annotations
 
-from app.execute import ExecuteRequest, ExecuteResponse, guardandexecuteaction, guardandexecuteraw
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+from app.execute import (
+    ExecuteRequest,
+    ExecuteResponse,
+    _normalize_executionstate,
+    _normalize_policyverdict,
+    _normalize_responseaction,
+    _normalize_responsestatus,
+    guardandexecuteaction,
+    guardandexecuteraw,
+)
 from app.orchestrator.secureruntimepipeline import initialize_secureruntimepipeline
 
 
@@ -19,6 +29,8 @@ def test_guard_and_execute_action_returns_typed_response() -> None:
 
     assert isinstance(response, ExecuteResponse)
     assert response.executionstate == "executed"
+    assert response.policyverdict == "allow"
+    assert response.responseaction == "allow"
     assert response.responsestatus in {"completed", "queuedforreview", "denied"}
     assert response.responsestatus != "200"
 
@@ -36,6 +48,9 @@ def test_guard_and_execute_raw_blocks_high_risk_request() -> None:
     )
 
     assert result.executionstate == "denied"
+    assert result.policyverdict == "block"
+    assert result.responseaction == "block"
+    assert result.riskscore >= RISK_THRESHOLD_BLOCK_MIN
     assert result.shouldexecute is False
     assert result.haltedbyboundary is True
 
@@ -71,3 +86,13 @@ def test_guard_and_execute_action_surfaces_prompt_injection_summary() -> None:
     assert response.promptinjection["flagged"] is True
     assert isinstance(response.reasons, list)
     assert response.reasons
+
+
+def test_guard_and_execute_normalizers_fail_closed() -> None:
+    for raw_verdict in (None, "warn", "quarantine", "review", "invalid"):
+        assert _normalize_policyverdict(raw_verdict) == "block"
+
+    assert _normalize_responseaction("warn", "allow") == "block"
+    assert _normalize_responseaction(None, "block") == "block"
+    assert _normalize_executionstate(None) == "denied"
+    assert _normalize_responsestatus(None) == "denied"

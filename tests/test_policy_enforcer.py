@@ -1,5 +1,7 @@
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.policy_enforcer import (
     PolicyInput,
+    PolicyRule,
     enforce_policy,
     evaluate_policy,
     initialize_policy_engine,
@@ -21,8 +23,8 @@ def test_summarize_policy_engine_returns_expected_shape():
     assert isinstance(summary, dict)
     assert summary["total_rules"] >= 1
     assert summary["block_rules"] >= 1
-    assert summary["quarantine_rules"] >= 0
-    assert summary["warn_rules"] >= 0
+    assert summary["quarantine_rules"] == 0
+    assert summary["warn_rules"] == 0
     assert summary["allow_rules"] >= 0
 
 
@@ -59,7 +61,35 @@ def test_credential_exfiltration_attempt_is_blocked():
     assert any(match.rule_id == "tool-credential-exfiltration" for match in decision.matched_rules)
 
 
-def test_external_write_is_quarantined():
+def test_low_severity_matched_rule_is_blocked():
+    engine = initialize_policy_engine()
+    engine.rules.append(
+        PolicyRule(
+            rule_id="low-severity-match",
+            name="Low severity match",
+            description="A matched low-severity rule still blocks.",
+            action_types=("message",),
+            content_patterns=("low-severity-marker",),
+            verdict="allow",
+            risk_level="low",
+        ),
+    )
+
+    decision = enforce_policy(
+        engine,
+        action_type="message",
+        target="chat",
+        content="low-severity-marker",
+        risk_score=0,
+    )
+
+    assert decision.verdict == "block"
+    assert decision.allow_execution is False
+    assert decision.risk_score >= RISK_THRESHOLD_BLOCK_MIN
+    assert any(match.rule_id == "low-severity-match" for match in decision.matched_rules)
+
+
+def test_external_write_is_blocked():
     engine = initialize_policy_engine()
 
     decision = enforce_policy(
@@ -70,12 +100,13 @@ def test_external_write_is_quarantined():
         risk_score=75,
     )
 
-    assert decision.verdict == "quarantine"
+    assert decision.verdict == "block"
     assert decision.allow_execution is False
     assert decision.requires_review is True
+    assert decision.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
 
-def test_review_bypass_attempt_warns():
+def test_review_bypass_attempt_is_blocked():
     engine = initialize_policy_engine()
 
     decision = enforce_policy(
@@ -86,8 +117,8 @@ def test_review_bypass_attempt_warns():
         risk_score=65,
     )
 
-    assert decision.verdict == "warn"
-    assert decision.allow_execution is True
+    assert decision.verdict == "block"
+    assert decision.allow_execution is False
     assert decision.requires_review is True
 
 
@@ -108,7 +139,7 @@ def test_safe_request_is_allowed():
     assert decision.reasons == ["No policy violations detected."]
 
 
-def test_monitor_mode_does_not_block_execution():
+def test_monitor_mode_does_not_allow_blocked_execution():
     engine = initialize_policy_engine(mode="monitor")
 
     decision = enforce_policy(
@@ -120,7 +151,7 @@ def test_monitor_mode_does_not_block_execution():
     )
 
     assert decision.verdict == "block"
-    assert decision.allow_execution is True
+    assert decision.allow_execution is False
     assert decision.mode == "monitor"
 
 
@@ -135,6 +166,6 @@ def test_evaluate_policy_accepts_policy_input_object():
 
     decision = evaluate_policy(engine, policy_input, risk_score=70)
 
-    assert decision.verdict == "quarantine"
-    assert decision.risk_score >= 70
+    assert decision.verdict == "block"
+    assert decision.risk_score >= RISK_THRESHOLD_BLOCK_MIN
     assert len(decision.matched_rules) >= 1

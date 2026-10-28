@@ -11,10 +11,11 @@ from app.core.policy_engine import (
     PolicyInput,
     PolicyVerdict,
     _compute_risk_score,
+    _resolve_action,
     evaluate,
     invalidate_policy_cache,
 )
-from app.core.verdicts import ALLOW, BLOCK, QUARANTINE, WARN
+from app.core.verdicts import ALLOW, BLOCK
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -246,7 +247,7 @@ class TestEvaluateBuiltinInjection:
         builtin_hits = [r for r in verdict.matched_rules if r.rule_id.startswith("builtin:")]
         assert builtin_hits == []
 
-    def test_builtin_medium_severity_maps_to_warn(self):
+    def test_builtin_medium_severity_maps_to_block(self):
         hit = _mk_registry_hit(
             "builtin-si-001",
             "Hash separator",
@@ -260,7 +261,8 @@ class TestEvaluateBuiltinInjection:
                 verdict = evaluate(_prompt("## new instructions"))
         sep_hits = [r for r in verdict.matched_rules if r.rule_id == "builtin:builtin-si-001"]
         assert sep_hits
-        assert sep_hits[0].action == WARN
+        assert verdict.action == BLOCK
+        assert sep_hits[0].action == BLOCK
 
     def test_builtin_critical_severity_maps_to_block(self):
         hit = _mk_registry_hit(
@@ -303,40 +305,40 @@ class TestEvaluateBuiltinInjection:
 
 
 class TestEvaluateKeywordWarn:
-    def test_keyword_warn_returns_warn(self):
+    def test_keyword_warn_returns_block(self):
         rules = [_mk_rule("keyword_warn", "sensitive")]
         with _patch_db(rules), _patch_registry_empty():
             invalidate_policy_cache()
             verdict = evaluate(_prompt("This contains sensitive data."))
-        assert verdict.action == WARN
+        assert verdict.action == BLOCK
 
-    def test_keyword_warn_matched_rule_action_is_warn(self):
+    def test_keyword_warn_matched_rule_action_is_block(self):
         rules = [_mk_rule("keyword_warn", "private key")]
         with _patch_db(rules), _patch_registry_empty():
             invalidate_policy_cache()
             verdict = evaluate(_prompt("Here is the private key: abc123"))
-        assert any(r.action == WARN for r in verdict.matched_rules)
+        assert any(r.action == BLOCK for r in verdict.matched_rules)
 
 
 # ---------------------------------------------------------------------------
-# evaluate() — data_exfiltration_pattern → quarantine
+# evaluate() — data_exfiltration_pattern → block
 # ---------------------------------------------------------------------------
 
 
 class TestEvaluateDataExfiltration:
-    def test_data_exfil_pattern_returns_quarantine(self):
+    def test_data_exfil_pattern_returns_block(self):
         rules = [_mk_rule("data_exfiltration_pattern", r"ssn\s*:\s*\d{3}-\d{2}-\d{4}")]
         with _patch_db(rules), _patch_registry_empty():
             invalidate_policy_cache()
             verdict = evaluate(_prompt("User ssn: 123-45-6789"))
-        assert verdict.action == QUARANTINE
+        assert verdict.action == BLOCK
 
-    def test_data_exfil_matched_rule_action_is_quarantine(self):
+    def test_data_exfil_matched_rule_action_is_block(self):
         rules = [_mk_rule("data_exfiltration_pattern", r"ssn\s*:\s*\d{3}-\d{2}-\d{4}")]
         with _patch_db(rules), _patch_registry_empty():
             invalidate_policy_cache()
             verdict = evaluate(_prompt("ssn: 987-65-4321"))
-        assert any(r.action == QUARANTINE for r in verdict.matched_rules)
+        assert any(r.action == BLOCK for r in verdict.matched_rules)
 
 
 # ---------------------------------------------------------------------------
@@ -443,8 +445,8 @@ class TestComputeRiskScore:
 
     def test_partial_contributions_average_correctly(self):
         rules = [
-            MatchedRule("r1", "n1", "keyword_warn", WARN, 0.4, "content", "a"),
-            MatchedRule("r2", "n2", "keyword_warn", WARN, 0.4, "content", "b"),
+            MatchedRule("r1", "n1", "keyword_warn", BLOCK, 0.4, "content", "a"),
+            MatchedRule("r2", "n2", "keyword_warn", BLOCK, 0.4, "content", "b"),
         ]
         score = _compute_risk_score(rules)
         assert score == pytest.approx(0.4, abs=1e-4)
@@ -574,11 +576,23 @@ class TestPolicyVerdictFields:
 
 
 # ---------------------------------------------------------------------------
-# Priority resolution: warn + block → block wins
+# Any matched non-allow rule resolves to block
 # ---------------------------------------------------------------------------
 
 
 class TestPriorityResolution:
+    def test_any_matched_rule_resolves_to_block(self):
+        rule = MatchedRule(
+            rule_id="allow-rule",
+            rule_name="Legacy allow rule",
+            rule_type="legacy_allow",
+            action=ALLOW,
+            risk_contribution=0.0,
+            matched_field="content",
+            matched_value="matched",
+        )
+        assert _resolve_action([rule]) == BLOCK
+
     def test_block_wins_over_warn(self):
         rules = [
             _mk_rule("keyword_warn", "sensitive", rule_id="warn-rule"),
@@ -599,7 +613,7 @@ class TestPriorityResolution:
             verdict = evaluate(_prompt("ssn: 123-45-6789 and drop table now"))
         assert verdict.action == BLOCK
 
-    def test_quarantine_wins_over_warn(self):
+    def test_warn_and_quarantine_rules_resolve_to_block(self):
         rules = [
             _mk_rule("keyword_warn", "sensitive", rule_id="warn-rule"),
             _mk_rule("data_exfiltration_pattern", r"ssn\s*:\s*\d{3}-\d{2}-\d{4}", rule_id="exfil-rule"),
@@ -607,7 +621,7 @@ class TestPriorityResolution:
         with _patch_db(rules), _patch_registry_empty():
             invalidate_policy_cache()
             verdict = evaluate(_prompt("sensitive ssn: 123-45-6789"))
-        assert verdict.action == QUARANTINE
+        assert verdict.action == BLOCK
 
     def test_matched_rules_contains_all_hits_not_just_winner(self):
         rules = [
@@ -698,20 +712,20 @@ class TestTrustGateLowScore:
             verdict = evaluate(_prompt("clean content", agent_id="agent-low-trust"))
         assert any(r.rule_type == "trust_score_warn" for r in verdict.matched_rules)
 
-    def test_low_trust_score_returns_warn_on_clean_content(self):
+    def test_low_trust_score_returns_block_on_clean_content(self):
         profile = _mk_trust_profile(trust_score=0.10, is_suspended=False)
         with _patch_db([]), _patch_trust(profile), _patch_registry_empty():
             invalidate_policy_cache()
             verdict = evaluate(_prompt("clean content", agent_id="agent-low-trust"))
-        assert verdict.action == WARN
+        assert verdict.action == BLOCK
 
-    def test_low_trust_score_warn_rule_action_is_warn(self):
+    def test_low_trust_score_warn_rule_action_is_block(self):
         profile = _mk_trust_profile(trust_score=0.20, is_suspended=False)
         with _patch_db([]), _patch_trust(profile), _patch_registry_empty():
             invalidate_policy_cache()
             verdict = evaluate(_prompt("clean content", agent_id="agent-low-trust"))
         warn_hits = [r for r in verdict.matched_rules if r.rule_type == "trust_score_warn"]
-        assert all(r.action == WARN for r in warn_hits)
+        assert all(r.action == BLOCK for r in warn_hits)
 
     def test_low_trust_score_block_rule_still_wins(self):
         profile = _mk_trust_profile(trust_score=0.10, is_suspended=False)

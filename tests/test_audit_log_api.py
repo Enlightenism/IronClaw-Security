@@ -216,7 +216,7 @@ def test_audit_events_can_be_filtered_by_request():
         trace_id="trace-audit-004",
         target="shell",
         action_type="tool_call",
-        verdict="quarantine",
+        verdict="block",
         risk_score=85,
     )
 
@@ -231,7 +231,7 @@ def test_audit_events_can_be_filtered_by_request():
     assert len(data) == 1
     assert data[0]["request_id"] == "req-audit-004"
     assert data[0]["trace_id"] == "trace-audit-004"
-    assert data[0]["verdict"] == "quarantine"
+    assert data[0]["verdict"] == "block"
 
 
 def test_audit_events_can_be_filtered_by_trace():

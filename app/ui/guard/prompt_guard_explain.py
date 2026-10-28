@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.services.guard_security_brain import GuardSecurityVerdict
 from app.ui.guard.prompt_guard_policy import build_prompt_guard_policy_view
 from app.ui.guard.prompt_guard_simulator import (
@@ -100,16 +101,14 @@ def _build_operator_guidance(
     else:
         guidance.append("No active rule matched; review manually if the prompt still looks suspicious.")
 
-    if verdict in ("block", "quarantine"):
-        guidance.append("Keep enforcement in place unless a documented exception or allowlist entry justifies release.")
-        guidance.append("If this is a legitimate workflow, route it to the review queue before changing policy.")
-    elif verdict == "warn":
-        guidance.append("Monitor for repeated attempts and escalate to review if the same pattern appears again.")
+    if verdict == "block":
+        guidance.append("Keep the block in place unless an authorized policy change permits the action.")
+        guidance.append("Investigate the matched signal and remediate the underlying risk before retrying.")
     else:
-        guidance.append("Allow the prompt, but continue passive monitoring for repeated low-risk patterns.")
+        guidance.append("The prompt passed active checks; continue normal monitoring.")
 
-    if risk_score >= 85:
-        guidance.append("Treat this as critical-risk behavior and preserve an audit trail for investigation.")
+    if risk_score >= RISK_THRESHOLD_BLOCK_MIN:
+        guidance.append("Treat this as high-risk behavior and preserve an audit trail for investigation.")
 
     return guidance
 

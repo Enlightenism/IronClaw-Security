@@ -1,19 +1,24 @@
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.secureruntimepipeline import SecureRuntimePipeline, getactionexecutepipeline
 from app.service import ActionExecuteResult, ExecutionReason, executeguardedaction
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
 ResponseStatus = Literal["completed", "queuedforreview", "denied"]
 ExecutionState = Literal["executed", "denied", "queuedforreview"]
-PolicyVerdict = Literal["allow", "warn", "quarantine", "block"]
+ResponseAction = Literal["allow", "block"]
+PolicyVerdict = Literal["allow", "block"]
 
 
 class ExecuteRequest(BaseModel):
@@ -39,7 +44,7 @@ class ExecuteReasonView(BaseModel):
 class ExecuteResponse(BaseModel):
     executionid: str | None = None
     executionstate: ExecutionState
-    responseaction: str
+    responseaction: ResponseAction
     responsestatus: ResponseStatus
     traceid: str | None = None
     requestid: str | None = None
@@ -58,10 +63,10 @@ class ExecuteResponse(BaseModel):
 
 
 def _normalize_responsestatus(value: str | None) -> ResponseStatus:
-    if not value:
-        return "completed"
+    if not isinstance(value, str) or not value.strip():
+        return "denied"
 
-    lowered = str(value).lower()
+    lowered = value.strip().lower()
     if lowered in {"completed", "done", "ok", "success"}:
         return "completed"
     if lowered in {"queuedforreview", "queued", "pending_review", "review"}:
@@ -75,29 +80,79 @@ def _normalize_responsestatus(value: str | None) -> ResponseStatus:
 
 
 def _normalize_executionstate(value: str | None) -> ExecutionState:
-    if not value:
-        return "executed"
+    if not isinstance(value, str) or not value.strip():
+        return "denied"
 
-    lowered = str(value).lower()
+    lowered = value.strip().lower()
     if lowered in {"executed", "completed", "succeeded"}:
         return "executed"
     if lowered in {"queuedforreview", "queued", "pending_review", "review"}:
         return "queuedforreview"
     if lowered in {"denied", "blocked", "forbidden", "failed"}:
         return "denied"
-    return "executed"
+    return "denied"
 
 
 def _normalize_policyverdict(value: str | None) -> PolicyVerdict:
-    if not value:
-        return "allow"
+    return "allow" if isinstance(value, str) and value.strip().lower() == "allow" else "block"
 
-    lowered = str(value).lower()
-    if lowered in {"allow", "warn", "quarantine", "block"}:
-        return lowered  # type: ignore[return-value]
-    if lowered in {"deny", "denied", "forbidden"}:
+
+def _normalize_responseaction(value: str | None, verdict: PolicyVerdict) -> ResponseAction:
+    if verdict == "block":
         return "block"
-    return "allow"
+    if value is None:
+        return "allow"
+    return "allow" if isinstance(value, str) and value.strip().lower() == "allow" else "block"
+
+
+def _normalize_actionexecuteresult(result: ActionExecuteResult) -> ActionExecuteResult:
+    raw_policyverdict = result.policyverdict
+    policyverdict = _normalize_policyverdict(raw_policyverdict)
+    raw_responseaction = result.responseaction
+    responseaction = _normalize_responseaction(raw_responseaction, policyverdict)
+    invalid_result = not isinstance(raw_policyverdict, str) or raw_policyverdict.strip().lower() not in {"allow", "block"} or (raw_responseaction is not None and (not isinstance(raw_responseaction, str) or raw_responseaction.strip().lower() not in {"allow", "block"}))
+    if responseaction == "block":
+        policyverdict = "block"
+    raw_haltedbyboundary = result.haltedbyboundary
+    if raw_haltedbyboundary is not False:
+        policyverdict = "block"
+        responseaction = "block"
+
+    raw_riskscore = result.riskscore
+    if isinstance(raw_riskscore, int) and not isinstance(raw_riskscore, bool) and 0 <= raw_riskscore <= 100:
+        riskscore = raw_riskscore
+        invalid_riskscore = False
+    else:
+        logger.error("app.execute: invalid risk score; blocking action")
+        riskscore = RISK_THRESHOLD_BLOCK_MIN
+        policyverdict = "block"
+        responseaction = "block"
+        invalid_result = True
+        invalid_riskscore = True
+    if riskscore > RISK_THRESHOLD_ALLOW_MAX:
+        policyverdict = "block"
+        responseaction = "block"
+    if policyverdict == "block":
+        riskscore = max(riskscore, RISK_THRESHOLD_BLOCK_MIN)
+
+    responsestatus = _normalize_responsestatus(result.responsestatus)
+    executionstate = _normalize_executionstate(result.executionstate)
+    haltedbyboundary = raw_haltedbyboundary is not False or policyverdict == "block" or responseaction == "block"
+    shouldexecute = result.shouldexecute is True and policyverdict == "allow" and responseaction == "allow" and responsestatus == "completed" and executionstate == "executed" and not haltedbyboundary
+
+    if invalid_result:
+        logger.error("app.execute: invalid execution result; blocking action")
+        result.reason = "Invalid execution result; action blocked."
+    elif policyverdict == "block" and isinstance(raw_policyverdict, str) and raw_policyverdict.strip().lower() == "allow":
+        result.reason = "Invalid risk score; action blocked." if invalid_riskscore else "Execution boundary or risk policy blocked the action."
+    result.policyverdict = policyverdict
+    result.responseaction = responseaction
+    result.riskscore = riskscore
+    result.responsestatus = responsestatus
+    result.executionstate = executionstate
+    result.haltedbyboundary = haltedbyboundary
+    result.shouldexecute = shouldexecute
+    return result
 
 
 def _normalize_reason(reason: ExecutionReason | dict | str) -> ExecuteReasonView:
@@ -143,7 +198,7 @@ def guardandexecuteraw(
     filepath: str | None = None,
     pipeline: SecureRuntimePipeline | None = None,
 ) -> ActionExecuteResult:
-    return executeguardedaction(
+    result = executeguardedaction(
         actiontype=actiontype,
         target=target,
         content=content,
@@ -153,6 +208,7 @@ def guardandexecuteraw(
         filepath=filepath,
         pipeline=pipeline,
     )
+    return _normalize_actionexecuteresult(result)
 
 
 def guardandexecuteaction(
@@ -170,18 +226,45 @@ def guardandexecuteaction(
         pipeline=pipeline,
     )
 
+    policyverdict = _normalize_policyverdict(result.policyverdict)
+    responseaction = _normalize_responseaction(result.responseaction, policyverdict)
+    if responseaction == "block":
+        policyverdict = "block"
+    raw_haltedbyboundary = result.haltedbyboundary
+    if raw_haltedbyboundary is not False:
+        policyverdict = "block"
+        responseaction = "block"
+
+    raw_riskscore = result.riskscore
+    if isinstance(raw_riskscore, int) and not isinstance(raw_riskscore, bool) and 0 <= raw_riskscore <= 100:
+        riskscore = raw_riskscore
+    else:
+        policyverdict = "block"
+        responseaction = "block"
+        riskscore = RISK_THRESHOLD_BLOCK_MIN
+    if riskscore > RISK_THRESHOLD_ALLOW_MAX:
+        policyverdict = "block"
+        responseaction = "block"
+    if policyverdict == "block":
+        riskscore = max(riskscore, RISK_THRESHOLD_BLOCK_MIN)
+
+    responsestatus = _normalize_responsestatus(result.responsestatus)
+    executionstate = _normalize_executionstate(result.executionstate)
+    haltedbyboundary = raw_haltedbyboundary is not False or policyverdict == "block" or responseaction == "block"
+    shouldexecute = result.shouldexecute is True and policyverdict == "allow" and responseaction == "allow" and responsestatus == "completed" and executionstate == "executed" and not haltedbyboundary
+
     return ExecuteResponse(
         executionid=result.executionid,
-        executionstate=_normalize_executionstate(result.executionstate),
-        responseaction=result.responseaction,
-        responsestatus=_normalize_responsestatus(result.responsestatus),
+        executionstate=executionstate,
+        responseaction=responseaction,
+        responsestatus=responsestatus,
         traceid=result.traceid,
         requestid=result.requestid,
         decisionid=result.decisionid,
-        policyverdict=_normalize_policyverdict(result.policyverdict),
-        riskscore=result.riskscore,
-        shouldexecute=result.shouldexecute,
-        haltedbyboundary=result.haltedbyboundary,
+        policyverdict=policyverdict,
+        riskscore=riskscore,
+        shouldexecute=shouldexecute,
+        haltedbyboundary=haltedbyboundary,
         reviewitemid=result.reviewitemid,
         executorname=result.executorname,
         executorresult=result.executorresult,

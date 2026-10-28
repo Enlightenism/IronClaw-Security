@@ -9,14 +9,25 @@ import uuid
 
 import httpx
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.core.settings import get_settings
 
 _log = logging.getLogger(__name__)
 
 # ── Verdict / status literals mirroring backend contracts ────────────────────
-Verdict = Literal["allow", "block", "quarantine", "warn"]
+Verdict = Literal["allow", "block"]
 ReviewStatus = Literal["not_required", "pending", "approved", "rejected"]
 DecisionStatus = Literal["allowed", "blocked", "quarantined", "warned", "error"]
+
+
+def _normalize_verdict(value: Any) -> Verdict:
+    return "allow" if value == "allow" else "block"
+
+
+def _normalize_risk_score(value: Any, verdict: Verdict) -> int:
+    score = int(value or 0)
+    return max(score, RISK_THRESHOLD_BLOCK_MIN) if verdict == "block" else score
+
 
 # ── Timeout configuration ─────────────────────────────────────────────────────
 _DEFAULT_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
@@ -451,10 +462,11 @@ async def list_scan_history(
 
 
 def _parse_scan_result(d: dict[str, Any]) -> ScanResult:
+    verdict = _normalize_verdict(d.get("verdict"))
     return ScanResult(
         scan_id=str(d.get("scan_id") or d.get("id") or ""),
-        verdict=str(d.get("verdict") or "allow"),
-        risk_score=int(d.get("risk_score") or 0),
+        verdict=verdict,
+        risk_score=_normalize_risk_score(d.get("risk_score"), verdict),
         threat_types=list(d.get("threat_types") or []),
         reasons=list(d.get("reasons") or []),
         review_status=str(d.get("review_status") or "not_required"),
@@ -487,11 +499,12 @@ async def submit_guard_check(
             r = await c.post("/api/v1/guard", json=payload)
             _raise_for_status(r)
             d = r.json()
+            verdict = _normalize_verdict(d.get("verdict"))
             return GuardDecision(
                 decision_id=str(d.get("decision_id") or d.get("id") or ""),
-                status=str(d.get("status") or "allowed"),
-                verdict=str(d.get("verdict") or "allow"),
-                risk_score=int(d.get("risk_score") or 0),
+                status=str(d.get("status") or ("allowed" if verdict == "allow" else "blocked")),
+                verdict=verdict,
+                risk_score=_normalize_risk_score(d.get("risk_score"), verdict),
                 reasons=list(d.get("reasons") or []),
                 blocked_actions=list(d.get("blocked_actions") or []),
                 review_required=bool(d.get("review_required") or False),
@@ -528,10 +541,11 @@ async def evaluate_action(
             r = await c.post("/api/v1/action/guard", json=payload)
             _raise_for_status(r)
             d = r.json()
+            verdict = _normalize_verdict(d.get("verdict"))
             return ActionDecision(
                 action_id=str(d.get("action_id") or d.get("id") or ""),
-                allowed=bool(d.get("allowed") if d.get("allowed") is not None else True),
-                verdict=str(d.get("verdict") or "allow"),
+                allowed=verdict == "allow",
+                verdict=verdict,
                 policy_id=d.get("policy_id"),
                 reasons=list(d.get("reasons") or []),
                 metadata=dict(d.get("metadata") or {}),
@@ -606,8 +620,11 @@ def _parse_review_item(d: dict[str, Any]) -> ReviewItem:
         review_id=str(d.get("review_id") or d.get("id") or ""),
         scan_id=str(d.get("scan_id") or ""),
         status=str(d.get("status") or "pending"),
-        risk_score=int(d.get("risk_score") or 0),
-        verdict=str(d.get("verdict") or "quarantine"),
+        risk_score=_normalize_risk_score(
+            d.get("risk_score"),
+            _normalize_verdict(d.get("verdict")),
+        ),
+        verdict=_normalize_verdict(d.get("verdict")),
         created_at=d.get("created_at"),
         updated_at=d.get("updated_at"),
         reviewed_by=d.get("reviewed_by"),

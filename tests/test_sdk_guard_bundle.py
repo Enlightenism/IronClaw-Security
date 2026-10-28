@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+from pydantic import ValidationError
 import pytest
 import respx
 
@@ -73,11 +74,12 @@ def test_guard_bundle_response_should_halt_false() -> None:
 def test_guard_bundle_response_should_halt_true() -> None:
     resp = GuardBundleResponse(
         highest_verdict="block",
-        should_halt=True,
-        should_warn=False,
+        should_halt=False,
+        should_warn=True,
         user_prompt=GuardBundleSlotResult(**_BLOCK_SLOT),
     )
     assert resp.should_halt is True
+    assert resp.should_warn is False
     assert resp.highest_verdict == "block"
 
 
@@ -138,37 +140,25 @@ def test_guard_bundle_block_round_trip(client: IronclawClient) -> None:
 
 
 # ------------------------------------------------------------------
-# Round-trip: warn path
+# Legacy outcomes are rejected
 # ------------------------------------------------------------------
 
 
-@respx.mock
-def test_guard_bundle_warn_round_trip(client: IronclawClient) -> None:
-    warn_slot = {
-        "verdict": "warn",
-        "summary": "Borderline content.",
-        "risk_score": 45,
-        "matched_patterns": ["sensitive_topic"],
-        "scan_id": "scan-warn-001",
-        "explanation": None,
-    }
-    payload = {
-        "highest_verdict": "warn",
-        "should_halt": False,
-        "should_warn": True,
-        "model_output": warn_slot,
-        "user_prompt": None,
-        "retrieved_doc": None,
-        "tool_output": None,
-    }
-    respx.post(_URL).mock(return_value=httpx.Response(200, json=payload))
+@pytest.mark.parametrize("verdict", ["warn", "quarantine"])
+def test_guard_bundle_rejects_legacy_verdicts(verdict: str) -> None:
+    with pytest.raises(ValidationError):
+        GuardBundleSlotResult(
+            verdict=verdict,
+            summary="Legacy outcome.",
+            risk_score=45,
+        )
 
-    req = GuardBundleRequest(model_output="This might be borderline.")
-    resp = client.guard_bundle(req)
-
-    assert resp.should_warn is True
-    assert resp.should_halt is False
-    assert resp.highest_verdict == "warn"
+    with pytest.raises(ValidationError):
+        GuardBundleResponse(
+            highest_verdict=verdict,
+            should_halt=False,
+            should_warn=False,
+        )
 
 
 # ------------------------------------------------------------------

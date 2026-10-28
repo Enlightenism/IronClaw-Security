@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import PurePath
-from typing import Any
+from typing import Any, Literal
+
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 
 HIGH_RISK_EXTENSIONS = {
     ".exe",
@@ -66,7 +68,7 @@ MEDIUM_RISK_PATTERNS = {
 class ArtifactAnalysis:
     detected: bool
     risk_score: int
-    verdict: str
+    verdict: Literal["allow", "block"]
     confidence: str
     artifact_name: str
     artifact_path: str
@@ -158,11 +160,9 @@ def _score_patterns(signal_text: str) -> tuple[int, list[str]]:
     return min(100, score), matched
 
 
-def _derive_verdict(score: int) -> tuple[str, str]:
-    if score >= 70:
-        return "quarantine", "high"
-    if score >= 35:
-        return "warn", "medium"
+def _derive_verdict(score: int) -> tuple[Literal["allow", "block"], str]:
+    if score > RISK_THRESHOLD_ALLOW_MAX:
+        return "block", "high" if score >= RISK_THRESHOLD_BLOCK_MIN else "medium"
     return "allow", "low"
 
 
@@ -178,10 +178,14 @@ def analyze_artifact(payload: Mapping[str, Any]) -> ArtifactAnalysis:
 
     total_risk = min(100, base_risk + extension_score + pattern_score)
     verdict, confidence = _derive_verdict(total_risk)
+    if extension_reasons or matched_patterns:
+        verdict = "block"
+    if verdict == "block":
+        total_risk = max(total_risk, RISK_THRESHOLD_BLOCK_MIN)
 
     failed_checks = list(extension_reasons)
     if matched_patterns:
-        failed_checks.append("artifact content indicators triggered review")
+        failed_checks.append("artifact content indicators triggered a block")
 
     if any(pattern in {"macro", "payload", "download and execute"} for pattern in matched_patterns):
         failed_checks.append("artifact shows active execution behavior")
@@ -192,7 +196,7 @@ def analyze_artifact(payload: Mapping[str, Any]) -> ArtifactAnalysis:
     reason = extension_reasons[0] if extension_reasons else matched_patterns[0] if matched_patterns else "no artifact threats detected"
 
     return ArtifactAnalysis(
-        detected=total_risk >= 35,
+        detected=verdict == "block",
         risk_score=total_risk,
         verdict=verdict,
         confidence=confidence,

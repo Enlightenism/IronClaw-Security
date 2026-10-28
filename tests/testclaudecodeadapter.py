@@ -163,7 +163,7 @@ def test_review_verdict_prevents_claude_runtime_call():
     result = adapter.execute(**_request_payload())
 
     assert result["allowed"] is False
-    assert result["verdict"] == "review"
+    assert result["verdict"] == "block"
     assert result["policy"]["matchedrules"] == ["policy:review"]
     assert len(runtime.execute_calls) == 0
 

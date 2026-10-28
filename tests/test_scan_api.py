@@ -25,7 +25,7 @@ from app.services.review_queue_service import reset_review_queue  # noqa: E402
 _VALID_API_KEY = os.environ["IRONCLAW_API_KEY"]
 _AUTH_HEADERS = {"X-API-Key": _VALID_API_KEY}
 
-_VALID_VERDICTS = {"allow", "warn", "quarantine", "block"}
+_VALID_VERDICTS = {"allow", "block"}
 
 
 # ---------------------------------------------------------------------------

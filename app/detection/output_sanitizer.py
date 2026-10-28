@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 import re
-from typing import Any
+from typing import Any, Literal
 
 SECRET_PATTERNS: dict[str, str] = {
     "openai_api_key": r"\bsk-[A-Za-z0-9]{20,}\b",
@@ -31,7 +31,7 @@ class OutputSanitizationResult:
     sanitized_text: str
     modified: bool
     risk_score: int
-    verdict: str
+    verdict: Literal["allow", "block"]
     reason: str
     redacted_items: list[str] = field(default_factory=list)
     failed_checks: list[str] = field(default_factory=list)
@@ -97,10 +97,10 @@ def sanitize_output(payload: Any) -> OutputSanitizationResult:
     risk_score = min(100, secret_hits * 30 + dangerous_hits * 20)
 
     if secret_hits > 0:
-        verdict = "quarantine"
+        verdict = "block"
         reason = "sensitive secret material detected in output"
     elif dangerous_hits > 0:
-        verdict = "warn"
+        verdict = "block"
         reason = "dangerous executable or exfiltration-style output detected"
     else:
         verdict = "allow"

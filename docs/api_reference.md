@@ -20,10 +20,11 @@ Every scan response includes a `verdict` field. Possible values:
 
 | Verdict | Description |
 |---------|-------------|
-| `allow` | Input is safe — no policy violations detected |
-| `warn` | Input is suspicious — logged and flagged, execution not blocked |
-| `quarantine` | Input is held for human review before any action is taken |
-| `block` | Input is rejected — execution is stopped |
+| `allow` | All applicable checks completed without a suspicious signal or error |
+| `block` | A suspicious signal, matched rule, malicious classifier result, or scan error was detected |
+
+Quarantine is an operational isolation/review state, not a final verdict.
+Historical records may retain legacy verdict values.
 
 ---
 
@@ -75,7 +76,7 @@ Inspect a single prompt, tool call, or content string and return a verdict.
 ```json
 {
   "scan_id": "uuid",
-  "verdict": "allow | warn | quarantine | block",
+  "verdict": "allow | block",
   "reason": "string",
   "rule_id": "string | null",
   "confidence": 0.0,
@@ -113,7 +114,7 @@ Inspect multiple items in a single request.
   "results": [
     {
       "scan_id": "uuid",
-      "verdict": "allow | warn | quarantine | block",
+      "verdict": "allow | block",
       "reason": "string",
       "confidence": 0.0,
       "timestamp": "ISO 8601"
@@ -277,7 +278,8 @@ Query stored telemetry events.
 
 #### `GET /review/`
 
-List all items currently in the review queue (items that received a `quarantine` verdict).
+List items held in the operational review queue. Quarantine describes isolation
+for review; it is not a final verdict.
 
 **Response `200`**
 ```json
@@ -300,7 +302,8 @@ List all items currently in the review queue (items that received a `quarantine`
 
 #### `POST /review/{review_id}/approve`
 
-Approve a quarantined item. Allows the held action to proceed.
+Record approval of an item held for operational review. Review status is
+separate from the original scan verdict; re-evaluate an action before execution.
 
 **Response `200`**
 ```json
@@ -311,7 +314,7 @@ Approve a quarantined item. Allows the held action to proceed.
 
 #### `POST /review/{review_id}/reject`
 
-Reject a quarantined item. Permanently blocks the held action.
+Record rejection of an item held for operational review.
 
 **Response `200`**
 ```json
@@ -357,7 +360,8 @@ Retrieve scan history with filtering and pagination.
 
 #### `GET /incidents/`
 
-List security incidents — scans that escalated beyond a `warn` verdict and triggered an incident record.
+List security incidents created from blocked scans that meet configured
+incident criteria.
 
 **Response `200`**
 ```json

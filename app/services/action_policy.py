@@ -7,7 +7,7 @@ from app.services.action_guard import ActionType, VerdictType
 
 logger = logging.getLogger(__name__)
 
-PolicyMode = Literal["allow", "review", "block"]
+PolicyMode = Literal["allow", "block"]
 
 DEFAULT_POLICY_SET_KEY = "ironclaw_default"
 
@@ -393,11 +393,11 @@ def _build_review_decision(
     return _build_policy_decision(
         action_type=action_type,
         target=target,
-        policy_mode="review",
-        verdict="warn",
+        policy_mode="block",
+        verdict="block",
         summary=summary,
-        should_halt=False,
-        should_warn=True,
+        should_halt=True,
+        should_warn=False,
         client_id=client_id,
         session_id=session_id,
         reasons=[
@@ -504,7 +504,7 @@ def evaluate_action_policy(
         decision = _build_review_decision(
             action_type=action_type,
             target=target,
-            summary="Action type requires elevated review before execution.",
+            summary="Action type is blocked by policy due to elevated execution risk.",
             client_id=client_id,
             session_id=session_id,
             label="Elevated action type",
@@ -524,7 +524,7 @@ def evaluate_action_policy(
         decision = _build_review_decision(
             action_type=action_type,
             target=target,
-            summary="Target requires elevated review before execution.",
+            summary="Target is blocked by policy due to an elevated risk indicator.",
             client_id=client_id,
             session_id=session_id,
             label="Elevated target",

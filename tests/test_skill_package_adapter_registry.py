@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from ironclaw_skill.adapter_claude import (
     ClaudeAdapterError,
     adapt_claude_request,
@@ -520,8 +521,8 @@ class TestBuildClaudeResponses:
         assert r["scan_id"] == "sid-1"
 
     def test_success_risk_score_propagated(self):
-        r = build_claude_success_response(operation="scan", verdict="review", summary="check", risk_score=42)
-        assert r["risk_score"] == 42
+        r = build_claude_success_response(operation="scan", verdict="block", summary="check", risk_score=42)
+        assert r["risk_score"] == RISK_THRESHOLD_BLOCK_MIN
 
     def test_success_request_id_propagated(self):
         r = build_claude_success_response(operation="scan", verdict="allow", summary="ok", request_id="req-1")
@@ -781,7 +782,7 @@ class TestBuildOpenClawResponses:
         assert r["result"]["scan_id"] == "sid-2"
 
     def test_success_risk_score_propagated(self):
-        r = build_openclaw_success_response(operation="scan", verdict="review", summary="check", risk_score=77)
+        r = build_openclaw_success_response(operation="scan", verdict="block", summary="check", risk_score=77)
         assert r["result"]["risk_score"] == 77
 
     def test_success_request_id_propagated(self):

@@ -6,7 +6,11 @@ This document describes the architectural trust model, enforcement layers, and r
 
 ## Design Philosophy
 
-IronClaw operates on a **fail-closed** principle: when in doubt, quarantine or block. Every action taken by an agent, tool, or LLM is treated as untrusted until it passes inspection. Trust is earned at the infrastructure level — not assumed at the prompt level.
+IronClaw operates on a **fail-closed** principle: when in doubt, block. Blocked
+artifacts may also be isolated for review, but quarantine is an operational
+workflow state rather than a verdict. Every action taken by an agent, tool, or
+LLM is treated as untrusted until it passes inspection. Trust is earned at the
+infrastructure level — not assumed at the prompt level.
 
 The system is designed to answer one question at every decision point:
 
@@ -39,23 +43,15 @@ Every scan passes through all applicable layers before a verdict is issued.
 
 ## Verdict Pipeline
 
-Each scan produces exactly one verdict. The pipeline evaluates layers in order and escalates as violations are found:
+Each scan produces exactly one final verdict: `allow` or `block`. Pattern,
+heuristic, policy, tool-validation, and data-leakage signals block at every
+severity. When Prompt Guard is enabled, it must run successfully and return
+`BENIGN`; a malicious result or classifier failure blocks. An allow is issued
+only when all applicable checks complete without a match or error. A block has
+a risk score at or above `RISK_THRESHOLD_BLOCK_MIN`.
 
-Input
-│ ▼ Prompt Injection Check
-│ violation → block
-▼ Data Leakage / PII Check
-│ violation → block or quarantine
-▼ Policy Rule Evaluation
-│ rule match → allow / warn / quarantine / block
-▼ Tool Call Validation (if context = tool_call)
-│ blocked tool or invalid args → block
-▼ Confidence Threshold Check
-│ low confidence + high risk → quarantine
-▼ Verdict Issued
-
-
-The first layer to produce a `block` short-circuits the pipeline. `quarantine` escalates to the review queue. `warn` continues but is logged as a flagged event. `allow` clears the full pipeline.
+Blocked artifacts may be isolated in a review workflow. That operational state
+does not create another verdict.
 
 ---
 
@@ -79,7 +75,7 @@ Outbound content (agent outputs, tool results) is scanned for:
 - **Credentials** — API keys, tokens, passwords, private keys
 - **Sensitive business data** — patterns defined in policy rules
 
-Detected leakage receives a `quarantine` or `block` verdict depending on severity.
+Any detected leakage receives a `block` verdict, regardless of severity.
 
 ---
 
@@ -87,7 +83,8 @@ Detected leakage receives a `quarantine` or `block` verdict depending on severit
 
 Policies are composable rule sets stored in Supabase and loaded at startup (with hot-reload support). Each policy contains:
 
-- **Rules** — conditions (pattern, semantic, context, agent_id) and resulting verdict
+- **Rules** — conditions (pattern, semantic, context, agent_id); any matched
+  detection rule results in `block`
 - **Scope** — global, per-agent, or per-session
 - **Priority** — rules are evaluated in priority order; first match wins
 
@@ -102,7 +99,9 @@ When `context = tool_call`, IronClaw applies additional validation:
 - **Tool allowlist** — only explicitly permitted tools may be invoked
 - **Argument schema validation** — tool arguments are validated against defined schemas
 - **Privilege escalation detection** — argument patterns that attempt to exceed declared tool scope are flagged
-- **Blocked tool patterns** — tools that match high-risk name patterns (e.g., shell execution, filesystem traversal) require explicit policy allow rules
+- **Blocked tool patterns** — tools that match suspicious high-risk patterns
+  (e.g., shell execution, filesystem traversal) are blocked; allowlists do not
+  override a detected signal
 
 ---
 
@@ -119,9 +118,11 @@ Code execution and tool dispatch occur inside runtime boundaries:
 
 ## Review Workflow
 
-Items receiving a `quarantine` verdict are not executed. They are placed in the review queue and held until a human reviewer takes action:
+Blocked items may be placed in operational quarantine and held in the review
+queue. Quarantine is not a verdict; review status is recorded separately:
 
-- **Approve** — the held action is released and may proceed
+- **Approve** — records the review decision; a subsequent action must pass the
+  applicable guard checks before execution
 - **Reject** — the held action is permanently blocked and logged as a security incident
 
 Review decisions are audited with reviewer identity and timestamp.
@@ -144,7 +145,8 @@ IronClaw emits a real-time event stream via the `/telemetry/` endpoint. Events i
 
 - `scan.completed` — every scan result
 - `verdict.block` — every blocked action
-- `verdict.quarantine` — every quarantine event
+- `verdict.quarantine` — retained for historical and compatibility records; it
+  is not a new verdict
 - `review.approved` / `review.rejected` — review decisions
 - `incident.created` — new incidents
 - `policy.updated` — policy changes
@@ -155,14 +157,9 @@ Telemetry is designed for ingestion into observability pipelines (Datadog, Grafa
 
 ## Incident Management
 
-Scans that escalate to `block` or `quarantine` and meet severity thresholds are promoted to incidents. Incidents carry a severity classification:
-
-| Severity | Trigger |
-|----------|---------|
-| `low` | Single warn escalation |
-| `medium` | Repeated warns from same agent or session |
-| `high` | Block verdict with high-confidence rule match |
-| `critical` | Block verdict matching known attack signature |
+Blocked scans that meet configured incident criteria are promoted to incidents.
+Incident severity is independent of the final allow/block verdict and continues
+to describe the detected signal and its impact.
 
 Incidents remain open until explicitly resolved by a reviewer.
 

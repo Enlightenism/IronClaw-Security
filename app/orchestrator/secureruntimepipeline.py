@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from app.detection.downloadanalyzer import build_download_analyzer
 
@@ -45,6 +45,16 @@ def _as_dict(value: Any) -> dict[str, Any]:
         if isinstance(dumped, dict):
             return dict(dumped)
     return {}
+
+
+def _decision_value(decision: Any, *names: str, default: Any = None) -> Any:
+    payload = _as_dict(decision)
+    for name in names:
+        if hasattr(decision, name):
+            return getattr(decision, name)
+        if name in payload:
+            return payload[name]
+    return default
 
 
 def _normalize_reason(
@@ -153,7 +163,7 @@ def _merge_reasons(
 @dataclass(slots=True, frozen=True)
 class SecureRuntimeDecision:
     executionstate: str
-    policyverdict: str
+    policyverdict: Literal["allow", "block"]
     responseaction: str
     responsestatus: str
     shouldexecute: bool
@@ -240,7 +250,7 @@ class SecureRuntimePipeline:
         *,
         session_id: str,
         tool_name: str,
-        verdict: str,
+        verdict: Literal["allow", "block"],
         allowed: bool,
         should_review: bool,
         should_block: bool,
@@ -274,34 +284,34 @@ class SecureRuntimePipeline:
             result = self._build_guarded_result(
                 session_id=session_id,
                 tool_name=tool_name,
-                verdict="quarantine",
+                verdict="block",
                 allowed=False,
                 should_review=False,
                 should_block=True,
-                should_quarantine=True,
+                should_quarantine=False,
                 risk_delta=0,
                 matched_rules=["secureruntimepipeline:missing_session_id"],
                 sandbox_decision=None,
                 tool_decision=None,
             )
-            self._emit_telemetry({"event": "quarantine", "reason": "missing_session_id", "session_id": session_id})
+            self._emit_telemetry({"event": "block", "reason": "missing_session_id", "session_id": session_id})
             return result
 
         if not tool_name:
             result = self._build_guarded_result(
                 session_id=session_id,
                 tool_name=tool_name,
-                verdict="quarantine",
+                verdict="block",
                 allowed=False,
                 should_review=False,
                 should_block=True,
-                should_quarantine=True,
+                should_quarantine=False,
                 risk_delta=0,
                 matched_rules=["secureruntimepipeline:missing_tool_name"],
                 sandbox_decision=None,
                 tool_decision=None,
             )
-            self._emit_telemetry({"event": "quarantine", "reason": "missing_tool_name", "session_id": session_id})
+            self._emit_telemetry({"event": "block", "reason": "missing_tool_name", "session_id": session_id})
             return result
 
         cwd = kwargs.get("cwd")
@@ -311,29 +321,113 @@ class SecureRuntimePipeline:
         sandbox_decision = self._call_sandbox_router(session_id=session_id, tool_name=tool_name, **kwargs)
         sandbox_verdict = ""
         sandbox_allowed = True
+        sandbox_should_review = False
+        sandbox_block_signal = False
         sandbox_rules: list[str] = []
         sandbox_risk_delta = 0
         if sandbox_decision is not None:
-            sandbox_verdict = _text(getattr(sandbox_decision, "verdict", "")).lower()
-            sandbox_allowed = bool(getattr(sandbox_decision, "allowed", True))
-            sandbox_rules = list(getattr(sandbox_decision, "matched_rules", None) or [])
-            sandbox_risk_delta = _int(getattr(sandbox_decision, "risk_delta", 0))
+            sandbox_verdict = _text(
+                _decision_value(sandbox_decision, "verdict", default=""),
+            ).lower()
+            sandbox_allowed = (
+                _decision_value(
+                    sandbox_decision,
+                    "allowed",
+                    default=False,
+                )
+                is True
+            )
+            sandbox_rules = list(
+                _decision_value(
+                    sandbox_decision,
+                    "matched_rules",
+                    "matchedrules",
+                    default=[],
+                )
+                or [],
+            )
+            sandbox_risk_delta = _int(
+                _decision_value(
+                    sandbox_decision,
+                    "risk_delta",
+                    "riskdelta",
+                    default=0,
+                ),
+            )
+            sandbox_should_review = (
+                bool(
+                    _decision_value(
+                        sandbox_decision,
+                        "should_review",
+                        "shouldreview",
+                        "requires_review",
+                        "requiresreview",
+                        default=False,
+                    ),
+                )
+                or sandbox_verdict == "review"
+            )
+            sandbox_block_signal = (
+                sandbox_verdict != "allow"
+                or not sandbox_allowed
+                or sandbox_should_review
+                or bool(
+                    _decision_value(
+                        sandbox_decision,
+                        "should_block",
+                        "shouldblock",
+                        default=False,
+                    ),
+                )
+                or bool(
+                    _decision_value(
+                        sandbox_decision,
+                        "should_warn",
+                        "shouldwarn",
+                        default=False,
+                    ),
+                )
+                or bool(
+                    _decision_value(
+                        sandbox_decision,
+                        "should_quarantine",
+                        "shouldquarantine",
+                        default=False,
+                    ),
+                )
+            )
 
-        if sandbox_verdict in ("block", "quarantine"):
+        if sandbox_block_signal:
             result = self._build_guarded_result(
                 session_id=session_id,
                 tool_name=tool_name,
-                verdict=sandbox_verdict,
+                verdict="block",
                 allowed=False,
-                should_review=False,
+                should_review=sandbox_should_review,
                 should_block=True,
-                should_quarantine=sandbox_verdict == "quarantine",
+                should_quarantine=False,
                 risk_delta=sandbox_risk_delta,
                 matched_rules=sandbox_rules,
                 sandbox_decision=sandbox_decision,
                 tool_decision=None,
             )
-            self._emit_telemetry({"event": sandbox_verdict, "source": "sandbox_router", "session_id": session_id})
+            self._emit_telemetry(
+                {
+                    "event": "review" if sandbox_should_review else "block",
+                    "source": "sandbox_router",
+                    "session_id": session_id,
+                },
+            )
+            if sandbox_should_review:
+                self._enqueue_review(
+                    {
+                        "session_id": session_id,
+                        "tool_name": tool_name,
+                        "verdict": "block",
+                        "risk_delta": sandbox_risk_delta,
+                        "matched_rules": sandbox_rules,
+                    },
+                )
             return result
 
         class _Request:
@@ -353,12 +447,78 @@ class SecureRuntimePipeline:
         tool_rules: list[str] = []
         tool_risk_delta = 0
         tool_should_review = False
+        tool_block_signal = False
         if tool_decision is not None:
-            tool_verdict = _text(getattr(tool_decision, "verdict", "")).lower()
-            tool_allowed = bool(getattr(tool_decision, "allowed", True))
-            tool_rules = list(getattr(tool_decision, "matched_rules", None) or [])
-            tool_risk_delta = _int(getattr(tool_decision, "risk_delta", 0))
-            tool_should_review = bool(getattr(tool_decision, "should_review", False))
+            tool_verdict = _text(
+                _decision_value(tool_decision, "verdict", default=""),
+            ).lower()
+            tool_allowed = (
+                _decision_value(
+                    tool_decision,
+                    "allowed",
+                    default=False,
+                )
+                is True
+            )
+            tool_rules = list(
+                _decision_value(
+                    tool_decision,
+                    "matched_rules",
+                    "matchedrules",
+                    default=[],
+                )
+                or [],
+            )
+            tool_risk_delta = _int(
+                _decision_value(
+                    tool_decision,
+                    "risk_delta",
+                    "riskdelta",
+                    default=0,
+                ),
+            )
+            tool_should_review = (
+                bool(
+                    _decision_value(
+                        tool_decision,
+                        "should_review",
+                        "shouldreview",
+                        "requires_review",
+                        "requiresreview",
+                        default=False,
+                    ),
+                )
+                or tool_verdict == "review"
+            )
+            tool_block_signal = (
+                tool_verdict != "allow"
+                or not tool_allowed
+                or tool_should_review
+                or bool(
+                    _decision_value(
+                        tool_decision,
+                        "should_block",
+                        "shouldblock",
+                        default=False,
+                    ),
+                )
+                or bool(
+                    _decision_value(
+                        tool_decision,
+                        "should_warn",
+                        "shouldwarn",
+                        default=False,
+                    ),
+                )
+                or bool(
+                    _decision_value(
+                        tool_decision,
+                        "should_quarantine",
+                        "shouldquarantine",
+                        default=False,
+                    ),
+                )
+            )
 
         # Deduplicate matched_rules, order-preserving
         seen_rules: set[str] = set()
@@ -370,29 +530,12 @@ class SecureRuntimePipeline:
 
         total_risk_delta = sandbox_risk_delta + tool_risk_delta
 
-        if tool_verdict in ("block", "quarantine"):
-            verdict = tool_verdict
-            allowed = False
-            should_block = True
-            should_quarantine = tool_verdict == "quarantine"
-            should_review = False
-            enqueue = False
-        elif tool_verdict == "review" or tool_should_review:
-            verdict = "review"
-            allowed = tool_allowed
-            should_block = False
-            should_quarantine = False
-            should_review = True
-            enqueue = True
-        else:
-            verdict = sandbox_verdict if sandbox_verdict and sandbox_verdict != "allow" else (tool_verdict or "allow")
-            if verdict == "":
-                verdict = "allow"
-            allowed = sandbox_allowed and tool_allowed
-            should_block = not allowed and verdict == "block"
-            should_quarantine = not allowed and verdict == "quarantine"
-            should_review = False
-            enqueue = False
+        allowed = not tool_block_signal
+        verdict: Literal["allow", "block"] = "allow" if allowed else "block"
+        should_block = verdict == "block"
+        should_quarantine = False
+        should_review = tool_should_review
+        enqueue = should_review and should_block
 
         result = self._build_guarded_result(
             session_id=session_id,
@@ -408,14 +551,20 @@ class SecureRuntimePipeline:
             tool_decision=tool_decision,
         )
 
-        self._emit_telemetry({"event": verdict, "session_id": session_id, "tool_name": tool_name})
+        self._emit_telemetry(
+            {
+                "event": "review" if should_review else verdict,
+                "session_id": session_id,
+                "tool_name": tool_name,
+            },
+        )
 
         if enqueue:
             self._enqueue_review(
                 {
                     "session_id": session_id,
                     "tool_name": tool_name,
-                    "verdict": verdict,
+                    "verdict": "block",
                     "risk_delta": total_risk_delta,
                     "matched_rules": matched_rules,
                 }
@@ -434,15 +583,23 @@ class SecureRuntimePipeline:
         downloadanalysis: dict[str, Any],
         outputsanitization: dict[str, Any],
         degradedmode: bool = False,
-    ) -> str:
-        if outputsanitization.get("blocked"):
+    ) -> Literal["allow", "block"]:
+        detectors = (promptscan, hostilecontext, downloadanalysis, outputsanitization)
+        legacy_flags = (
+            "shouldblock",
+            "should_block",
+            "shouldwarn",
+            "should_warn",
+            "shouldreview",
+            "should_review",
+            "shouldquarantine",
+            "should_quarantine",
+        )
+        if degradedmode or any(
+            detector.get("blocked") or detector.get("flagged") or detector.get("is_malicious") or detector.get("degraded") or detector.get("error") or any(detector.get(flag) for flag in legacy_flags) or ("verdict" in detector and _text(detector.get("verdict")).lower() != "allow")
+            for detector in detectors
+        ):
             return "block"
-        if any(d.get("shouldquarantine") for d in (promptscan, hostilecontext, downloadanalysis)):
-            return "block"
-        if degradedmode:
-            return "review"
-        if any(d.get("shouldreview") for d in (promptscan, hostilecontext, downloadanalysis)):
-            return "review"
         return "allow"
 
     def _event_severity_for_detectors(
@@ -478,7 +635,7 @@ class SecureRuntimePipeline:
 class _GuardedRuntimeResult:
     session_id: str
     tool_name: str
-    verdict: str
+    verdict: Literal["allow", "block"]
     allowed: bool
     should_review: bool
     should_block: bool

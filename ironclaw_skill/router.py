@@ -136,10 +136,10 @@ class IronClawSkillRouter:
 
         return build_skill_success_response(
             operation="scan",
-            verdict="review",
-            summary="Scan request accepted by router placeholder. Runtime scan integration is not wired yet.",
-            should_halt=False,
-            should_warn=True,
+            verdict="block",
+            summary="Scan blocked because runtime scan integration is not wired yet.",
+            should_halt=True,
+            should_warn=False,
             request_id=request.context.request_id,
             decision_source="runtime",
             matched_patterns=[],
@@ -163,10 +163,10 @@ class IronClawSkillRouter:
 
         return build_skill_success_response(
             operation="action_policy",
-            verdict="review",
-            summary="Action policy request accepted by router placeholder. Runtime policy enforcement is not wired yet.",
-            should_halt=False,
-            should_warn=True,
+            verdict="block",
+            summary="Action blocked because runtime policy enforcement is not wired yet.",
+            should_halt=True,
+            should_warn=False,
             request_id=request.context.request_id,
             decision_source="policy",
             matched_patterns=[request.input.action_type],
@@ -191,25 +191,18 @@ class IronClawSkillRouter:
             raise IronClawSkillRouterError("Invalid request provided to action decision handler.")
 
         high_risk_actions = {"shell_command", "system_change", "file_delete"}
-        verdict: Literal["allow", "review", "block"]
-        should_halt = False
-        should_warn = False
+        verdict: Literal["allow", "block"] = "block"
         risk_score = 35
 
         if request.input.action_type in high_risk_actions:
-            verdict = "review"
-            should_warn = True
             risk_score = 72
-        else:
-            verdict = "allow"
-            risk_score = 20
 
         return build_skill_success_response(
             operation="action_decision",
             verdict=verdict,
-            summary="Action decision evaluated by router placeholder using conservative pre-runtime defaults.",
-            should_halt=should_halt,
-            should_warn=should_warn,
+            summary="Action blocked because policy evaluation is not connected.",
+            should_halt=True,
+            should_warn=False,
             request_id=request.context.request_id,
             decision_source="combined",
             matched_patterns=[request.input.action_type],
@@ -238,7 +231,7 @@ class IronClawSkillRouter:
             verdict="block",
             summary="Execution blocked by router placeholder because guarded runtime execution is not wired yet.",
             should_halt=True,
-            should_warn=True,
+            should_warn=False,
             request_id=request.context.request_id,
             decision_source="runtime",
             matched_patterns=[request.input.action.action_type],

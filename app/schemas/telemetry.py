@@ -105,6 +105,13 @@ class TelemetryEventType(StrEnum):
 
 class TelemetryVerdict(StrEnum):
     ALLOW = "allow"
+    BLOCK = "block"
+
+
+class TelemetryStoredVerdict(StrEnum):
+    """Verdict values accepted when reading historical telemetry records."""
+
+    ALLOW = "allow"
     WARN = "warn"
     QUARANTINE = "quarantine"
     BLOCK = "block"
@@ -132,7 +139,7 @@ class TelemetryEvent(BaseModel):
     org_id: str | None = None
     agent_id: str | None = None
     session_id: str | None = None
-    verdict: TelemetryVerdict | None = None
+    verdict: TelemetryStoredVerdict | None = None
     severity: TelemetrySeverity | None = None
     tags: list[str] = Field(default_factory=list)
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -175,7 +182,7 @@ class TelemetryQueryParams(BaseModel):
     org_id: str | None = None
     agent_id: str | None = None
     session_id: str | None = None
-    verdict: TelemetryVerdict | None = None
+    verdict: TelemetryStoredVerdict | None = None
     severity: TelemetrySeverity | None = None
     since: datetime | None = None
     until: datetime | None = None

@@ -115,7 +115,10 @@ def _normalize_record(row: dict[str, Any]) -> dict[str, Any]:
         "review_status": review_status,
         "reviewer": _clean_text(row.get("reviewer")),
         "reviewed_at": row.get("reviewed_at") or row.get("reviewedat"),
-        "untrusted": _normalize_bool(row.get("untrusted"), default=verdict == "quarantine"),
+        "untrusted": _normalize_bool(
+            row.get("untrusted"),
+            default=verdict in {"block", "quarantine"},
+        ),
         "sandbox_lane": _clean_text(row.get("sandbox_lane") or row.get("sandboxlane")) or "none",
         "timestamp": row.get("timestamp"),
         "max_severity": _clean_text(row.get("max_severity") or row.get("maxseverity")),

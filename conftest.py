@@ -7,11 +7,6 @@ from typing import Any
 from fastapi.testclient import TestClient
 import pytest
 
-import app.api.stripe_webhooks as stripe_webhooks
-import app.core.install_keys as install_keys_module
-import app.core.unit_wallet as unit_wallet_module
-from app.supabaseclient import reset_supabase_client
-
 # Patch env BEFORE any app import so get_settings() cache warms with test-safe values.
 # Keep the suite in fail-closed memory mode so tests cannot accidentally reach
 # a real Supabase deployment or retain stale singleton state between cases.
@@ -51,7 +46,11 @@ def _seed_test_environment() -> None:
 
 _seed_test_environment()
 
+import app.api.stripe_webhooks as stripe_webhooks  # noqa: E402
+import app.core.install_keys as install_keys_module  # noqa: E402
 from app.core.settings import get_settings  # noqa: E402
+import app.core.unit_wallet as unit_wallet_module  # noqa: E402
+from app.supabaseclient import reset_supabase_client  # noqa: E402
 
 get_settings.cache_clear()
 _settings = get_settings()

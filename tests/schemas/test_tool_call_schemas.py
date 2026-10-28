@@ -42,21 +42,19 @@ def test_tool_call_risk_level_invalid():
 def test_tool_call_verdict_values():
     assert set(ToolCallVerdict) == {
         ToolCallVerdict.allow,
-        ToolCallVerdict.warn,
-        ToolCallVerdict.quarantine,
         ToolCallVerdict.block,
-        ToolCallVerdict.audit,
     }
 
 
-@pytest.mark.parametrize("value", ["allow", "warn", "quarantine", "block", "audit"])
+@pytest.mark.parametrize("value", ["allow", "block"])
 def test_tool_call_verdict_from_string(value):
     assert ToolCallVerdict(value).value == value
 
 
-def test_tool_call_verdict_invalid():
+@pytest.mark.parametrize("value", ["pass", "warn", "quarantine", "audit"])
+def test_tool_call_verdict_rejects_nonbinary_values(value):
     with pytest.raises(ValueError):
-        ToolCallVerdict("pass")
+        ToolCallVerdict(value)
 
 
 @pytest.mark.parametrize("member", list(ToolCallRiskLevel))

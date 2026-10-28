@@ -4,15 +4,21 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 import json
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.agent_profile import AgentProfile, build_agent_profile
 from app.orchestrator.coordination_state import (
     CoordinationEvent,
     CoordinationSnapshot,
     apply_execution_plan,
 )
-from app.orchestrator.execution_plan import ExecutionPlan
+from app.orchestrator.execution_plan import (
+    ExecutionPlan,
+    normalize_plan_verdict,
+    normalized_plan_risk_score,
+)
 from app.orchestrator.orchestrator import IronClawOrchestrator
 from app.orchestrator.task_router import RoutedTaskResult, route_and_plan
 
@@ -27,7 +33,7 @@ class RuntimeSessionEvent:
     file_path: str
     action_type: str
     target: str
-    verdict: str
+    verdict: Literal["allow", "block"]
     lane: str
     summary: str
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
@@ -66,13 +72,7 @@ class RuntimeSession:
 
 
 def _status_from_plan(plan: ExecutionPlan) -> RuntimeSessionStatus:
-    if plan.verdict == "block":
-        return "blocked"
-    if plan.verdict == "quarantine":
-        return "quarantined"
-    if plan.verdict == "warn":
-        return "review"
-    return "active"
+    return "blocked" if normalize_plan_verdict(plan) == "block" else "active"
 
 
 def _build_runtime_event(result: RoutedTaskResult, session_id: str) -> RuntimeSessionEvent:
@@ -84,10 +84,10 @@ def _build_runtime_event(result: RoutedTaskResult, session_id: str) -> RuntimeSe
         file_path=result.task.file_path,
         action_type=result.task.action_type,
         target=result.task.target,
-        verdict=plan.verdict,
+        verdict=normalize_plan_verdict(plan),
         lane=plan.lane,
         summary=plan.summary,
-        risk_score=plan.risk_score,
+        risk_score=normalized_plan_risk_score(plan),
         matched_patterns=plan.matched_patterns,
         scan_id=plan.scan_id,
     )
@@ -159,15 +159,10 @@ def execute_routed_task_in_session(
 def coordination_events_from_session(session: RuntimeSession) -> list[CoordinationEvent]:
     events: list[CoordinationEvent] = []
     for event in session.event_log:
-        if event.verdict == "block":
+        verdict = "allow" if event.verdict == "allow" else "block"
+        if verdict == "block":
             status = "blocked"
             priority = "critical"
-        elif event.verdict == "quarantine":
-            status = "quarantined"
-            priority = "high"
-        elif event.verdict == "warn":
-            status = "review"
-            priority = "normal"
         else:
             status = "observing"
             priority = "low"
@@ -176,11 +171,11 @@ def coordination_events_from_session(session: RuntimeSession) -> list[Coordinati
             CoordinationEvent(
                 agent_id=event.agent_id,
                 file_path=event.file_path,
-                verdict=event.verdict,
+                verdict=verdict,
                 status=status,  # type: ignore[arg-type]
                 priority=priority,  # type: ignore[arg-type]
                 summary=event.summary,
-                risk_score=event.risk_score,
+                risk_score=(max(event.risk_score, RISK_THRESHOLD_BLOCK_MIN) if verdict == "block" else event.risk_score),
                 matched_patterns=event.matched_patterns,
                 scan_id=event.scan_id,
                 created_at=event.created_at,

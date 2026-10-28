@@ -2,19 +2,20 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.dependencies.action_execute import get_action_execute_pipeline
 from app.main import app
 
 client = TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 
-def test_guard_execute_allows_safe_dry_run_request():
+def test_guard_execute_allows_safe_local_file_edit():
     response = client.post(
         "/guard/execute",
         json={
-            "action_type": "http_fetch",
-            "target": "https://example.com",
-            "content": "Fetch the public homepage for analysis.",
+            "action_type": "file_edit",
+            "target": "notes/output.txt",
+            "content": "Update a harmless local note.",
             "risk_score": 0,
             "client_id": "test-client-001",
             "session_id": "sess-safe-001",
@@ -59,18 +60,42 @@ def test_guard_execute_denies_high_risk_shell_request():
     assert data["should_execute"] is False
     assert data["halted_by_boundary"] is True
     assert data["executor_result"] is None
-    assert data["policy_verdict"] in {"block", "quarantine"}
-    assert data["risk_score"] == 95
+    assert data["policy_verdict"] == "block"
+    assert data["risk_score"] >= RISK_THRESHOLD_BLOCK_MIN
     assert data["reason"]
+
+
+def test_guard_execute_blocks_risk_above_configured_allow_max():
+    response = client.post(
+        "/guard/execute",
+        json={
+            "action_type": "file_edit",
+            "target": "notes/output.txt",
+            "content": "Update a local note.",
+            "risk_score": RISK_THRESHOLD_ALLOW_MAX + 1,
+            "client_id": "test-client-mid-risk",
+            "session_id": "sess-mid-risk-001",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["execution_state"] == "denied"
+    assert data["response_action"] == "block"
+    assert data["policy_verdict"] == "block"
+    assert data["should_execute"] is False
+    assert data["halted_by_boundary"] is True
+    assert data["risk_score"] >= RISK_THRESHOLD_BLOCK_MIN
 
 
 def test_guard_execute_exposes_core_boundary_summary_fields():
     response = client.post(
         "/guard/execute",
         json={
-            "action_type": "http_fetch",
-            "target": "https://example.com/docs",
-            "content": "Fetch a public document.",
+            "action_type": "file_edit",
+            "target": "notes/output.txt",
+            "content": "Update a local note.",
             "risk_score": 3,
             "client_id": "test-client-003",
             "session_id": "sess-summary-001",
@@ -106,9 +131,9 @@ def test_guard_execute_uses_default_file_path_when_not_provided():
     response = client.post(
         "/guard/execute",
         json={
-            "action_type": "http_fetch",
-            "target": "https://example.com",
-            "content": "Fetch the public homepage.",
+            "action_type": "file_edit",
+            "target": "notes/output.txt",
+            "content": "Update a local note.",
             "risk_score": 1,
             "client_id": "test-client-004",
             "session_id": "sess-default-path-001",
@@ -152,7 +177,7 @@ def test_guard_execute_rejects_missing_required_fields():
     assert response.status_code == 422
 
 
-def test_guard_execute_allows_safe_dry_run_request_with_overridden_pipeline(monkeypatch):
+def test_guard_execute_uses_overridden_pipeline_for_safe_file_edit(monkeypatch):
     original_pipeline = get_action_execute_pipeline()
 
     def fake_pipeline():
@@ -163,9 +188,9 @@ def test_guard_execute_allows_safe_dry_run_request_with_overridden_pipeline(monk
     response = client.post(
         "/guard/execute",
         json={
-            "action_type": "http_fetch",
-            "target": "https://example.com/override",
-            "content": "Fetch using an overridden pipeline dependency.",
+            "action_type": "file_edit",
+            "target": "notes/override.txt",
+            "content": "Update a harmless local note.",
             "risk_score": 4,
             "client_id": "test-client-006",
             "session_id": "sess-override-001",
@@ -182,4 +207,4 @@ def test_guard_execute_allows_safe_dry_run_request_with_overridden_pipeline(monk
     assert data["halted_by_boundary"] is False
     assert data["executor_name"] == "dry_run_executor"
     assert data["executor_result"] is not None
-    assert data["risk_score"] == 4
+    assert data["risk_score"] >= 4

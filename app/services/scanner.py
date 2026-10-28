@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from typing import Any
 import unicodedata
 
+from app.config import (
+    GUARD_ENABLED,
+    GUARD_MODEL_PATH,
+    GUARD_THRESHOLD,
+    RISK_THRESHOLD_BLOCK_MIN,
+)
 from app.services.heuristics import heuristic_prompt_injection_score
+from app.services.prompt_guard import classify_prompt_guard
 from app.services.rules import ALL_RULE_GROUPS
 from app.services.telemetry import append_telemetry_event
 
@@ -267,7 +275,13 @@ def scan_text(text: str) -> list[str]:
     return matches
 
 
-def _build_summary(verdict: str, matched_patterns: list[str]) -> str:
+def _build_summary(
+    verdict: str,
+    matched_patterns: list[str],
+    failed_checks: list[str] | None = None,
+) -> str:
+    if failed_checks:
+        return "Scan failed; request blocked."
     if matched_patterns:
         return f"Detected {len(matched_patterns)} risky pattern(s)."
     return "No risky patterns detected."
@@ -283,38 +297,7 @@ def _build_risk_score(matched_patterns: list[str], heuristic_score: int) -> int:
 
 
 def _decide_verdict(matched_patterns: list[str], risk_score: int) -> str:
-    if not matched_patterns:
-        return "allow"
-
-    severities = get_rule_severities(matched_patterns)
-
-    if any(sev in {"high", "critical"} for sev in severities):
-        return "block"
-
-    if "powershell_download_execute_combo" in matched_patterns:
-        return "block"
-
-    if "shell_download_execute_combo" in matched_patterns:
-        return "block"
-
-    exfiltration_ids = {
-        "exfil_aws_s3_cp",
-        "exfil_aws_s3_sync",
-        "exfil_az_copy",
-        "exfil_gcloud_storage_cp",
-        "exfil_rclone",
-        "exfil_curl_upload",
-    }
-    if any(match in exfiltration_ids for match in matched_patterns):
-        return "block"
-
-    if "heuristic_prompt_injection_score" in matched_patterns:
-        return "quarantine"
-
-    if any(sev == "medium" for sev in severities):
-        return "warn"
-
-    return "allow"
+    return "block" if matched_patterns else "allow"
 
 
 def _choose_sandbox_lane(matched_patterns: list[str]) -> str:
@@ -338,12 +321,22 @@ def _choose_sandbox_lane(matched_patterns: list[str]) -> str:
     return "none"
 
 
-def _build_quarantine_reason(verdict: str, matched_patterns: list[str]) -> str | None:
-    if verdict != "quarantine":
+def _build_quarantine_reason(
+    verdict: str,
+    matched_patterns: list[str],
+    failed_checks: list[str] | None = None,
+) -> str | None:
+    if verdict != "block":
         return None
+    if failed_checks:
+        if "prompt_guard_unavailable" in failed_checks:
+            return "prompt_guard_unavailable"
+        return failed_checks[0]
+    if "prompt_guard_malicious" in matched_patterns:
+        return "Blocked by Prompt Guard due to malicious classification."
     if "heuristic_prompt_injection_score" in matched_patterns:
-        return "Quarantined due to prompt injection heuristic match."
-    return "Detection requires review."
+        return "Blocked due to prompt injection heuristic match."
+    return "Blocked due to detected risky pattern(s)."
 
 
 def _build_rule_details(matched_patterns: list[str]) -> list[dict[str, Any]]:
@@ -379,29 +372,68 @@ def _primary_category(matched_patterns: list[str]) -> str | None:
     return None
 
 
-def _build_explanation(matched_patterns: list[str], verdict: str) -> str:
+def _build_explanation(
+    matched_patterns: list[str],
+    verdict: str,
+    failed_checks: list[str] | None = None,
+) -> str:
+    if failed_checks:
+        return f"Scan failed ({', '.join(failed_checks)}); final verdict: {verdict}."
     count = len(matched_patterns)
     return f"Matched {count} pattern(s); final verdict: {verdict}."
 
 
 def perform_scan(target_type: str, target_value: str) -> dict[str, Any]:
-    normalized = _normalize_text(target_value)
-    heuristic_score = heuristic_prompt_injection_score(normalized)
-    matched_patterns = scan_text(target_value)
+    failed_checks: list[str] = []
+    normalized = target_value
+    heuristic_score = 0
+    matched_patterns: list[str] = []
 
-    risk_score = _build_risk_score(matched_patterns, heuristic_score)
-    verdict = _decide_verdict(matched_patterns, risk_score)
-    summary = _build_summary(verdict, matched_patterns)
+    try:
+        normalized = _normalize_text(target_value)
+        heuristic_score = heuristic_prompt_injection_score(normalized)
+        matched_patterns = scan_text(target_value)
+    except Exception:  # noqa: BLE001
+        logger.exception("scanner: text scan failed; blocking request")
+        failed_checks.append("scan_failed")
+
+    if GUARD_ENABLED:
+        try:
+            prompt_guard_result = classify_prompt_guard(
+                target_value,
+                model_path=GUARD_MODEL_PATH,
+                threshold=GUARD_THRESHOLD,
+            )
+            if not math.isfinite(prompt_guard_result.malicious_score) or not (0.0 <= prompt_guard_result.malicious_score <= 1.0):
+                raise ValueError("Prompt Guard returned an invalid malicious score.")
+            if prompt_guard_result.malicious_score >= GUARD_THRESHOLD or prompt_guard_result.label != "BENIGN":
+                if "prompt_guard_malicious" not in matched_patterns:
+                    matched_patterns.append("prompt_guard_malicious")
+        except Exception:  # noqa: BLE001
+            logger.exception("scanner: Prompt Guard unavailable; blocking request")
+            failed_checks.append("prompt_guard_unavailable")
+
+    try:
+        risk_score = _build_risk_score(matched_patterns, heuristic_score)
+    except Exception:  # noqa: BLE001
+        logger.exception("scanner: risk scoring failed; blocking request")
+        failed_checks.append("risk_scoring_failed")
+        risk_score = 0
+
+    verdict = "block" if failed_checks else _decide_verdict(matched_patterns, risk_score)
+    if verdict == "block":
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
+    summary = _build_summary(verdict, matched_patterns, failed_checks)
 
     sandbox_lane = _choose_sandbox_lane(matched_patterns)
-    quarantine_reason = _build_quarantine_reason(verdict, matched_patterns)
-    review_status = "pending" if verdict == "quarantine" else "none"
-    untrusted = verdict == "quarantine"
+    quarantine_reason = _build_quarantine_reason(verdict, matched_patterns, failed_checks)
+    review_status = "none"
+    untrusted = verdict == "block"
 
     rule_details = _build_rule_details(matched_patterns)
     max_sev = _max_severity(matched_patterns)
     primary_cat = _primary_category(matched_patterns)
-    explanation = _build_explanation(matched_patterns, verdict)
+    explanation = _build_explanation(matched_patterns, verdict, failed_checks)
 
     append_telemetry_event(
         "scan_performed",
@@ -415,9 +447,9 @@ def perform_scan(target_type: str, target_value: str) -> dict[str, Any]:
         },
     )
 
-    if verdict in {"block", "quarantine"}:
+    if verdict == "block":
         append_telemetry_event(
-            f"scan_{verdict}",
+            "scan_block",
             {
                 "target_type": target_type,
                 "matched_patterns": matched_patterns,
@@ -428,6 +460,7 @@ def perform_scan(target_type: str, target_value: str) -> dict[str, Any]:
                 "heuristic_score": heuristic_score,
                 "sandbox_lane": sandbox_lane,
                 "quarantine_reason": quarantine_reason,
+                "failed_checks": failed_checks,
             },
         )
 
@@ -440,7 +473,7 @@ def perform_scan(target_type: str, target_value: str) -> dict[str, Any]:
         "risk_score": risk_score,
         "risky_files": [],
         "checks_loaded": [],
-        "failed_checks": [],
+        "failed_checks": failed_checks,
         "quarantine_reason": quarantine_reason,
         "review_status": review_status,
         "untrusted": untrusted,

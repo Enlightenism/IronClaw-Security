@@ -261,19 +261,24 @@ class TestSkillMiddlewarePipeline:
         assert original.get("enriched") is None
         assert enriched["enriched"] is True
 
-    def test_warn_verdict_does_not_block_execution(self):
-        verdict = "warn"
-        allowed_through = verdict in ("allow", "warn")
-        assert allowed_through is True
+    def test_legacy_warn_verdict_blocks_execution(self):
+        raw_verdict = "warn"
+        verdict = raw_verdict if raw_verdict == "allow" else "block"
+        allowed_through = verdict == "allow"
+        assert verdict == "block"
+        assert allowed_through is False
 
-    def test_quarantine_verdict_routes_to_review_queue(self):
-        verdict = "quarantine"
-        routed_to_review = verdict == "quarantine"
+    def test_quarantine_signal_blocks_and_routes_to_review_queue(self):
+        raw_verdict = "quarantine"
+        verdict = raw_verdict if raw_verdict in {"allow", "block"} else "block"
+        review_required = raw_verdict == "quarantine"
+        routed_to_review = review_required
+        assert verdict == "block"
         assert routed_to_review is True
 
     def test_block_verdict_does_not_reach_execution(self):
         verdict = "block"
-        reaches_execution = verdict in ("allow", "warn")
+        reaches_execution = verdict == "allow"
         assert reaches_execution is False
 
 
@@ -452,30 +457,36 @@ class TestPolicyGating:
         assert evaluate_policy("read_file", policy["rules"]) == "allow"
         assert evaluate_policy("list_dir", policy["rules"]) == "allow"
 
-    def test_policy_warn_rule_passes_with_flag(self):
+    def test_policy_warn_rule_blocks_with_warning_flag_false(self):
         policy_rules = [{"tool": "http_get", "action": "warn"}]
 
         def evaluate(tool: str, rules: list) -> str:
             for r in rules:
                 if r["tool"] == tool:
-                    return r["action"]
+                    return "allow" if r["action"] == "allow" else "block"
             return "allow"
 
         verdict = evaluate("http_get", policy_rules)
-        assert verdict == "warn"
-        assert verdict != "block"
+        should_warn = False
+        assert verdict == "block"
+        assert should_warn is False
 
-    def test_policy_quarantine_rule_routes_to_review(self):
+    def test_policy_quarantine_rule_blocks_and_routes_to_review(self):
         policy_rules = [{"tool": "exec_shell", "action": "quarantine"}]
 
-        def evaluate(tool: str, rules: list) -> str:
+        def evaluate(tool: str, rules: list) -> tuple[str, bool]:
             for r in rules:
                 if r["tool"] == tool:
-                    return r["action"]
-            return "allow"
+                    action = r["action"]
+                    return (
+                        "allow" if action == "allow" else "block",
+                        action in {"review", "quarantine"},
+                    )
+            return "allow", False
 
-        verdict = evaluate("exec_shell", policy_rules)
-        assert verdict == "quarantine"
+        verdict, review_required = evaluate("exec_shell", policy_rules)
+        assert verdict == "block"
+        assert review_required is True
 
     def test_wildcard_block_policy_blocks_all_tools(self):
         policy_rules = [{"tool": "*", "action": "block"}]
@@ -606,16 +617,25 @@ class TestVerdictPropagation:
     """Verify verdicts flow correctly through the middleware stack."""
 
     @pytest.mark.parametrize(
-        "verdict,expected_pass",
+        "raw_verdict,expected_verdict,expected_pass",
         [
-            ("allow", True),
-            ("warn", True),
-            ("quarantine", False),
-            ("block", False),
+            ("allow", "allow", True),
+            ("block", "block", False),
+            ("warn", "block", False),
+            ("quarantine", "block", False),
+            ("review", "block", False),
+            ("error", "block", False),
         ],
     )
-    def test_verdict_pass_through_rules(self, verdict: str, expected_pass: bool):
-        passes = verdict in ("allow", "warn")
+    def test_verdict_normalization_allows_only_binary_outcomes(
+        self,
+        raw_verdict: str,
+        expected_verdict: str,
+        expected_pass: bool,
+    ):
+        verdict = raw_verdict if raw_verdict in {"allow", "block"} else "block"
+        passes = verdict == "allow"
+        assert verdict == expected_verdict
         assert passes == expected_pass
 
     def test_verdict_carries_reason(self):
@@ -654,23 +674,24 @@ class TestVerdictPropagation:
             audit_log.append(event)
 
         verdict = "block"
-        if verdict in ("block", "quarantine"):
+        if verdict == "block":
             emit_audit({"event": "tool_blocked", "verdict": verdict})
 
         assert len(audit_log) == 1
         assert audit_log[0]["verdict"] == "block"
 
-    def test_warn_verdict_emits_telemetry_event(self):
+    def test_legacy_warning_event_name_preserves_binary_verdict(self):
         telemetry_events: list[dict] = []
 
         def emit_telemetry(event: dict) -> None:
             telemetry_events.append(event)
 
-        verdict = "warn"
-        if verdict == "warn":
-            emit_telemetry({"event": "tool_warned", "verdict": verdict})
+        verdict = "block"
+        emit_telemetry({"event": "tool_warned", "verdict": verdict})
 
         assert len(telemetry_events) == 1
+        assert telemetry_events[0]["event"] == "tool_warned"
+        assert telemetry_events[0]["verdict"] == "block"
 
     def test_allow_verdict_does_not_emit_security_alert(self):
         alerts: list[dict] = []
@@ -679,14 +700,14 @@ class TestVerdictPropagation:
             alerts.append(event)
 
         verdict = "allow"
-        if verdict in ("block", "quarantine"):
+        if verdict == "block":
             emit_alert({"event": "security_alert"})
 
         assert len(alerts) == 0
 
     def test_multiple_verdicts_return_most_restrictive(self):
-        verdicts = ["allow", "warn", "block", "quarantine"]
-        priority = {"block": 0, "quarantine": 1, "warn": 2, "allow": 3}
+        verdicts = ["allow", "block"]
+        priority = {"block": 0, "allow": 1}
 
         most_restrictive = min(verdicts, key=lambda v: priority[v])
         assert most_restrictive == "block"
@@ -695,13 +716,14 @@ class TestVerdictPropagation:
         quarantine_store: list[dict] = []
 
         call = _make_tool_call(tool_name="exec_shell")
-        verdict = "quarantine"
+        verdict = "block"
 
-        if verdict == "quarantine":
+        if verdict == "block":
             quarantine_store.append({"call": call, "verdict": verdict})
 
         assert len(quarantine_store) == 1
         assert quarantine_store[0]["call"]["tool_name"] == "exec_shell"
+        assert quarantine_store[0]["verdict"] == "block"
 
 
 # ---------------------------------------------------------------------------
@@ -790,11 +812,12 @@ class TestAuditTrailIntegrity:
 
         record = {
             "call_id": call["call_id"],
-            "verdict": "quarantine",
+            "verdict": "block",
             "payload_hash": payload_hash,
         }
 
         assert record["payload_hash"].startswith("") and len(record["payload_hash"]) == 64
+        assert record["verdict"] == "block"
 
     def test_audit_record_org_id_matches_context(self):
         org = _org_id()
@@ -909,17 +932,13 @@ class TestEndToEndMiddlewareChain:
 
         # Stage 4: Policy evaluation
         for rule in rules:
-            if rule["tool"] == call["tool_name"] or rule["tool"] == "*":
-                if rule.get("enabled", True) and rule["action"] == "block":
-                    return {"verdict": "block", "reason": "policy_block", "stage": "policy"}
-                if rule.get("enabled", True) and rule["action"] == "quarantine":
-                    return {
-                        "verdict": "quarantine",
-                        "reason": "policy_quarantine",
-                        "stage": "policy",
-                    }
-                if rule.get("enabled", True) and rule["action"] == "warn":
-                    return {"verdict": "warn", "reason": "policy_warn", "stage": "policy"}
+            if (rule["tool"] == call["tool_name"] or rule["tool"] == "*") and rule.get("enabled", True) and rule["action"] != "allow":
+                return {
+                    "verdict": "block",
+                    "reason": "policy_block",
+                    "stage": "policy",
+                    "review_required": rule["action"] in {"review", "quarantine"},
+                }
 
         # Stage 5: Quota check
         if (quota["limit"] - quota["used"]) <= 0:
@@ -1028,11 +1047,12 @@ class TestEndToEndMiddlewareChain:
         result = self._run_chain(ctx, call, pkg)
         assert result["verdict"] == "allow"
 
-    def test_warn_policy_still_allows_execution(self):
+    def test_warn_policy_blocks_execution(self):
         ctx = _make_runtime_context(tier="pro")
         pkg = _make_skill_package(tools=["http_get"])
         call = _make_tool_call(tool_name="http_get")
         rules = [{"tool": "http_get", "action": "warn", "enabled": True}]
 
         result = self._run_chain(ctx, call, pkg, policy_rules=rules)
-        assert result["verdict"] == "warn"
+        assert result["verdict"] == "block"
+        assert result["stage"] == "policy"

@@ -12,6 +12,7 @@ from app.adapters.cape_adapter import (
     evaluate_cape_request,
     summarize_cape_adapter_response,
 )
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.policy_enforcer import PolicyEngine, build_policy_engine
 from app.services.integration_registry import (
     IntegrationCapability,
@@ -179,7 +180,7 @@ def test_adapt_allow_verdict() -> None:
 
     assert response.adapter_name == "ironclaw-cape"
     assert response.platform == "cape"
-    assert response.verdict in {"allow", "warn", "quarantine", "block"}
+    assert response.verdict in {"allow", "block"}
     assert isinstance(response.should_allow, bool)
     assert isinstance(response.should_hold, bool)
     assert isinstance(response.risk_score, int)
@@ -197,6 +198,10 @@ def test_adapt_sets_should_hold_for_non_allow() -> None:
 
     if response.verdict != "allow":
         assert response.should_hold is True
+        assert response.should_block is True
+        assert response.should_warn is False
+        assert response.should_quarantine is False
+        assert response.risk_score >= RISK_THRESHOLD_BLOCK_MIN
     else:
         assert response.should_hold is False
 

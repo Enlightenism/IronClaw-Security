@@ -5,9 +5,9 @@ from typing import Any, Literal
 from typing_extensions import TypedDict
 
 ExecutionState = Literal["executed", "denied", "held", "failed"]
-ResponseAction = Literal["allow", "warn", "quarantine", "block", "review"]
+ResponseAction = Literal["allow", "block", "review"]
 ResponseStatus = Literal["completed", "queued_for_review", "denied"]
-PolicyVerdict = Literal["allow", "warn", "quarantine", "block"]
+PolicyVerdict = Literal["allow", "block"]
 ReasonSource = Literal["policy", "scan", "ai"]
 
 

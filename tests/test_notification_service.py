@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from pydantic import ValidationError
 import pytest
 
+from app.api.notifications import PolicyBlockRequest
 from app.services.notification_service import (
     DeliveryResult,
     DispatchResult,
@@ -539,6 +541,7 @@ class TestDefaultSeverityForEvent:
             (NotificationEvent.INCIDENT_OPENED, "warning"),
             (NotificationEvent.INCIDENT_ESCALATED, "critical"),
             (NotificationEvent.INCIDENT_RESOLVED, "info"),
+            (NotificationEvent.POLICY_ALLOW, "info"),
             (NotificationEvent.POLICY_BLOCK, "critical"),
             (NotificationEvent.POLICY_QUARANTINE, "warning"),
             (NotificationEvent.REVIEW_ITEM_SUBMITTED, "info"),
@@ -706,14 +709,31 @@ class TestDispatchPolicyBlock:
         assert result.payload.source_type == "policy_decision"
         assert result.payload.metadata["verdict"] == "block"
 
-    def test_quarantine_verdict_uses_policy_quarantine_event(self, dry_engine: NotificationEngine) -> None:
+    def test_allow_verdict_uses_policy_allow_event(self, dry_engine: NotificationEngine) -> None:
         result = dispatch_policy_block(
             dry_engine,
             decision_id="dec-002",
-            verdict="quarantine",
-            summary="Quarantined for review.",
+            verdict="allow",
+            summary="Allowed by policy.",
         )
-        assert result.payload.event == NotificationEvent.POLICY_QUARANTINE
+        assert result.payload.event == NotificationEvent.POLICY_ALLOW
+        assert result.payload.severity == "info"
+        assert result.payload.metadata["verdict"] == "allow"
+
+    @pytest.mark.parametrize("verdict", ["warn", "quarantine", "unexpected"])
+    def test_non_allow_verdict_fails_closed_to_policy_block_event(
+        self,
+        dry_engine: NotificationEngine,
+        verdict: str,
+    ) -> None:
+        result = dispatch_policy_block(
+            dry_engine,
+            decision_id="dec-002",
+            verdict=verdict,
+            summary="Non-binary policy outcome.",
+        )
+        assert result.payload.event == NotificationEvent.POLICY_BLOCK
+        assert result.payload.metadata["verdict"] == "block"
 
     def test_optional_fields_propagated(self, dry_engine: NotificationEngine) -> None:
         result = dispatch_policy_block(
@@ -740,6 +760,26 @@ class TestDispatchPolicyBlock:
             channels=["slack"],
         )
         assert result.channels_attempted == ["slack"]
+
+
+@pytest.mark.parametrize("verdict", ["allow", "block"])
+def test_policy_notification_request_accepts_binary_verdicts(verdict: str) -> None:
+    request = PolicyBlockRequest(
+        decision_id="dec-api-001",
+        verdict=verdict,
+        summary="Policy decision.",
+    )
+    assert request.verdict == verdict
+
+
+@pytest.mark.parametrize("verdict", ["warn", "quarantine", "review"])
+def test_policy_notification_request_rejects_legacy_verdicts(verdict: str) -> None:
+    with pytest.raises(ValidationError):
+        PolicyBlockRequest(
+            decision_id="dec-api-002",
+            verdict=verdict,
+            summary="Legacy policy decision.",
+        )
 
 
 # ---------------------------------------------------------------------------

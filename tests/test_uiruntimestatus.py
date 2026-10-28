@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.config import (
+    RISK_THRESHOLD_ALLOW_MAX,
+    RISK_THRESHOLD_BLOCK_MIN,
+    RISK_THRESHOLD_QUARANTINE_MIN,
+)
 from app.main import app
 
 client = TestClient(app)
@@ -27,10 +32,13 @@ def test_ui_runtime_status_response_shape() -> None:
     assert runtime["realexecutionenabled"] is False
 
     thresholds = payload["thresholds"]
-    assert thresholds["allowmaxriskscore"] == 49
-    assert thresholds["reviewminriskscore"] == 50
-    assert thresholds["reviewmaxriskscore"] == 89
-    assert thresholds["blockminriskscore"] == 90
+    assert thresholds["allowmaxriskscore"] == RISK_THRESHOLD_ALLOW_MAX
+    assert thresholds["reviewminriskscore"] == RISK_THRESHOLD_QUARANTINE_MIN
+    assert thresholds["reviewmaxriskscore"] == max(
+        RISK_THRESHOLD_ALLOW_MAX,
+        RISK_THRESHOLD_BLOCK_MIN - 1,
+    )
+    assert thresholds["blockminriskscore"] == RISK_THRESHOLD_BLOCK_MIN
 
     executor = payload["executor"]
     assert executor["executorname"] == "dryrunexecutor"

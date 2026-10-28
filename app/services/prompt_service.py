@@ -3,7 +3,7 @@ from typing import Literal, TypedDict
 from app.services.guard import guard_text
 
 ContextType = Literal["user_prompt", "retrieved_doc", "tool_output", "model_output"]
-VerdictType = Literal["allow", "warn", "quarantine", "block"]
+VerdictType = Literal["allow", "block"]
 
 
 class GuardedText(TypedDict):
@@ -16,7 +16,7 @@ class GuardedText(TypedDict):
     original_text: str
     effective_text: str
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     client_id: str | None
     session_id: str | None
 
@@ -28,17 +28,15 @@ class PromptGuardBundle(TypedDict):
     model_output: GuardedText | None
     highest_verdict: VerdictType
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     client_id: str | None
     session_id: str | None
 
 
 def _verdict_rank(verdict: VerdictType) -> int:
     order: dict[VerdictType, int] = {
-        "allow": 1,
-        "warn": 2,
-        "quarantine": 3,
-        "block": 4,
+        "allow": 0,
+        "block": 1,
     }
     return order[verdict]
 
@@ -52,36 +50,15 @@ def analyze_text(
     """Run the Ironclaw scan for the given context and return a structured
     decision the agent / UI can act on.
 
-    Policy:
-
-    - allow:
-        - proceed normally
-        - should_halt = False
-        - should_warn = False
-
-    - warn:
-        - proceed, but caller should surface a warning banner or log entry
-        - should_halt = False
-        - should_warn = True
-
-    - quarantine:
-        - caller SHOULD NOT execute this automatically
-        - typically route to manual review / sandbox
-        - should_halt = True
-        - should_warn = True
-
-    - block:
-        - caller MUST NOT execute this
-        - return effective_text equal to the original so the caller can
-          decide how to replace or redact before use
-        - should_halt = True
-        - should_warn = False
+    Allow proceeds normally. A block must halt execution; effective_text stays
+    equal to the original so the caller can decide how to replace or redact it.
+    should_warn is always false.
     """
     decision = guard_text(context_type, text)
-    verdict: VerdictType = decision["verdict"]  # type: ignore[assignment]
+    verdict = decision["verdict"]
 
-    should_halt = verdict in ("block", "quarantine")
-    should_warn = verdict in ("warn", "quarantine")
+    should_halt = verdict == "block"
+    should_warn: Literal[False] = False
 
     return {
         "context_type": context_type,
@@ -117,16 +94,9 @@ def analyze_prompt_bundle(
     - and model output.
 
     highest_verdict is chosen using this precedence:
-        allow < warn < quarantine < block
+        allow < block
 
-    Bundle-level flags follow the same policy as analyze_text:
-
-    - should_halt:
-        True if the highest_verdict is 'quarantine' or 'block'
-
-    - should_warn:
-        True if the highest_verdict is 'warn' or 'quarantine'
-        (we do not warn for 'block' because the action must not proceed anyway)
+    Bundle-level should_halt is true only for block; should_warn is always false.
     """
     guarded_user_prompt = analyze_text("user_prompt", user_prompt, client_id=client_id, session_id=session_id) if user_prompt is not None else None
     guarded_retrieved_doc = analyze_text("retrieved_doc", retrieved_doc, client_id=client_id, session_id=session_id) if retrieved_doc is not None else None
@@ -152,14 +122,15 @@ def analyze_prompt_bundle(
             key=_verdict_rank,
         )
 
+    should_warn: Literal[False] = False
     return {
         "user_prompt": guarded_user_prompt,
         "retrieved_doc": guarded_retrieved_doc,
         "tool_output": guarded_tool_output,
         "model_output": guarded_model_output,
         "highest_verdict": highest_verdict,
-        "should_halt": highest_verdict in ("block", "quarantine"),
-        "should_warn": highest_verdict in ("warn", "quarantine"),
+        "should_halt": highest_verdict == "block",
+        "should_warn": should_warn,
         "client_id": client_id,
         "session_id": session_id,
     }

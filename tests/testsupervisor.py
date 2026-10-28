@@ -94,7 +94,6 @@ def test_allow_safe_supervised_request():
             verdict="allow",
             allowed=True,
             risk_delta=10,
-            matched_rules=["secureruntimepipeline:allow"],
         ),
     )
 
@@ -113,13 +112,13 @@ def test_allow_safe_supervised_request():
     assert result.should_review is False
     assert result.should_block is False
     assert result.should_quarantine is False
-    assert "secureruntimepipeline:allow" in result.matched_rules
+    assert result.matched_rules == []
     assert len(pipeline.calls) == 1
     assert len(review_queue.items) == 0
     assert len(audit_sink.events) >= 1
 
 
-def test_missing_session_id_quarantines_early():
+def test_missing_session_id_blocks_early():
     supervisor, pipeline, review_queue, audit_sink = _build()
 
     result = supervisor.evaluate(
@@ -129,8 +128,8 @@ def test_missing_session_id_quarantines_early():
     )
 
     assert result.allowed is False
-    assert result.verdict == "quarantine"
-    assert result.should_quarantine is True
+    assert result.verdict == "block"
+    assert result.should_quarantine is False
     assert result.should_block is True
     assert "supervisor:missing_session_id" in result.matched_rules
     assert len(pipeline.calls) == 0
@@ -138,7 +137,7 @@ def test_missing_session_id_quarantines_early():
     assert len(audit_sink.events) >= 1
 
 
-def test_missing_tool_name_quarantines_early():
+def test_missing_tool_name_blocks_early():
     supervisor, pipeline, review_queue, audit_sink = _build()
 
     result = supervisor.evaluate(
@@ -148,8 +147,8 @@ def test_missing_tool_name_quarantines_early():
     )
 
     assert result.allowed is False
-    assert result.verdict == "quarantine"
-    assert result.should_quarantine is True
+    assert result.verdict == "block"
+    assert result.should_quarantine is False
     assert "supervisor:missing_tool_name" in result.matched_rules
     assert len(pipeline.calls) == 0
     assert len(review_queue.items) == 0
@@ -162,7 +161,6 @@ def test_pipeline_allow_flows_through():
             verdict="allow",
             allowed=True,
             risk_delta=5,
-            matched_rules=["secureruntimepipeline:allow"],
         ),
     )
 
@@ -180,7 +178,7 @@ def test_pipeline_allow_flows_through():
     assert len(audit_sink.events) >= 1
 
 
-def test_pipeline_review_enqueues_review():
+def test_pipeline_review_blocks_and_enqueues_review():
     supervisor, pipeline, review_queue, audit_sink = _build(
         pipeline_decision=_Decision(
             verdict="review",
@@ -197,8 +195,8 @@ def test_pipeline_review_enqueues_review():
         command="python -c 'print(1)'",
     )
 
-    assert result.allowed is True
-    assert result.verdict == "review"
+    assert result.allowed is False
+    assert result.verdict == "block"
     assert result.should_review is True
     assert "secureruntimepipeline:review" in result.matched_rules
     assert len(pipeline.calls) == 1
@@ -234,7 +232,7 @@ def test_pipeline_block_blocks_request():
     assert len(audit_sink.events) >= 1
 
 
-def test_pipeline_quarantine_quarantines_request():
+def test_pipeline_quarantine_signal_blocks_request():
     supervisor, pipeline, review_queue, audit_sink = _build(
         pipeline_decision=_Decision(
             verdict="quarantine",
@@ -253,8 +251,8 @@ def test_pipeline_quarantine_quarantines_request():
     )
 
     assert result.allowed is False
-    assert result.verdict == "quarantine"
-    assert result.should_quarantine is True
+    assert result.verdict == "block"
+    assert result.should_quarantine is False
     assert result.should_block is True
     assert "secureruntimepipeline:quarantine" in result.matched_rules
     assert len(pipeline.calls) == 1
@@ -267,7 +265,6 @@ def test_normalizes_fields_before_pipeline_dispatch():
         pipeline_decision=_Decision(
             verdict="allow",
             allowed=True,
-            matched_rules=["secureruntimepipeline:allow"],
         ),
     )
 
@@ -291,7 +288,6 @@ def test_preserves_request_shape_for_network_calls():
         pipeline_decision=_Decision(
             verdict="allow",
             allowed=True,
-            matched_rules=["secureruntimepipeline:allow"],
         ),
     )
 
@@ -313,7 +309,6 @@ def test_preserves_request_shape_for_artifact_calls():
         pipeline_decision=_Decision(
             verdict="allow",
             allowed=True,
-            matched_rules=["secureruntimepipeline:allow"],
         ),
     )
 
@@ -334,7 +329,6 @@ def test_allow_helper_matches_safe_decision():
         pipeline_decision=_Decision(
             verdict="allow",
             allowed=True,
-            matched_rules=["secureruntimepipeline:allow"],
         ),
     )
 
@@ -372,7 +366,6 @@ def test_as_dict_contains_expected_shapes():
             verdict="allow",
             allowed=True,
             reasons=[{"source": "secureruntimepipeline", "label": "Safe", "details": "ok", "score": 5}],
-            matched_rules=["secureruntimepipeline:allow"],
         ),
     )
 
@@ -425,7 +418,6 @@ def test_review_queue_not_called_for_allow():
         pipeline_decision=_Decision(
             verdict="allow",
             allowed=True,
-            matched_rules=["secureruntimepipeline:allow"],
         ),
     )
 
@@ -469,7 +461,8 @@ def test_builder_accepts_submit_only_review_queue():
         network_url="https://example.com",
     )
 
-    assert result.verdict == "review"
+    assert result.verdict == "block"
+    assert result.allowed is False
     assert len(review_queue.items) == 1
     assert review_queue.items[0]["session_id"] == "sess-114"
 
@@ -488,7 +481,6 @@ def test_audit_sink_optional_method_shapes_are_supported():
             _Decision(
                 verdict="allow",
                 allowed=True,
-                matched_rules=["secureruntimepipeline:allow"],
             ),
         ),
         review_queue=_ReviewQueueStub(),

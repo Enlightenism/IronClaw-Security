@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import TypedDict, cast
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.services.action_decision import evaluate_action_execution
-from app.services.action_guard import ActionType
+from app.services.action_guard import ActionType, VerdictType
 from app.services.verdict_enforcer import EnforcedVerdict
 
 
@@ -12,7 +13,7 @@ class ActionExecuteResult(TypedDict):
     target: str
     content: str
     policy_mode: str | None
-    verdict: str
+    verdict: VerdictType
     summary: str
     risk_score: int
     matched_patterns: list[str]
@@ -52,13 +53,14 @@ def execute_guarded_action(
         session_id=session_id,
     )
 
-    if decision["should_halt"]:
+    verdict: VerdictType = "allow" if (decision["verdict"] == "allow" and not decision["should_halt"] and not decision["should_warn"]) else "block"
+    risk_score = decision["risk_score"]
+    if verdict == "block":
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
+
+    if verdict == "block":
         execution_status = "halted"
         execution_message = "Action execution was halted by guard controls."
-        executed = False
-    elif decision["should_warn"]:
-        execution_status = "review_required"
-        execution_message = "Action requires review before execution."
         executed = False
     else:
         execution_status = "allowed"
@@ -70,13 +72,13 @@ def execute_guarded_action(
         target=decision["target"],
         content=decision["content"],
         policy_mode=decision["policy_mode"],
-        verdict=decision["verdict"],
+        verdict=verdict,
         summary=decision["summary"],
-        risk_score=decision["risk_score"],
+        risk_score=risk_score,
         matched_patterns=decision["matched_patterns"],
         scan_id=decision["scan_id"],
-        should_halt=decision["should_halt"],
-        should_warn=decision["should_warn"],
+        should_halt=verdict == "block",
+        should_warn=False,
         decision_source=decision["decision_source"],
         client_id=decision["client_id"],
         session_id=decision["session_id"],

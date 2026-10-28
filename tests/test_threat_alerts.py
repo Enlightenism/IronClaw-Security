@@ -10,6 +10,7 @@ import pytest
 from app.schemas.threat_detection import (
     AlertSeverityEnum,
     DetectionVerdict,
+    HistoricalDetectionVerdict,
     HuntMatch,
     HuntResult,
     HuntStatusEnum,
@@ -25,7 +26,7 @@ from app.schemas.threat_detection import (
 def _make_hunt_match(
     *,
     event_id: str = "evt-001",
-    verdict: DetectionVerdict = DetectionVerdict.BLOCK,
+    verdict: HistoricalDetectionVerdict = HistoricalDetectionVerdict.BLOCK,
     score: float = 0.9,
     severity: ThreatSeverityLevel = ThreatSeverityLevel.HIGH,
     matched_mitre_technique: str | None = "T1059",
@@ -78,8 +79,8 @@ def _make_detection_result_mock(
     *,
     event_id: str = "det-evt-001",
     org_id: str | None = "org-test",
-    verdict: DetectionVerdict = DetectionVerdict.BLOCK,
-    score: float = 0.88,
+    verdict: DetectionVerdict | str = DetectionVerdict.BLOCK,
+    score: float | None = None,
     severity: ThreatSeverityLevel = ThreatSeverityLevel.HIGH,
     ioc_matches: list[Any] | None = None,
     correlation_signals: list[Any] | None = None,
@@ -92,7 +93,7 @@ def _make_detection_result_mock(
     mock.agent_id = "agent-x"
     mock.session_id = "session-y"
     mock.verdict = verdict
-    mock.score = score
+    mock.score = score if score is not None else (0.0 if verdict == DetectionVerdict.ALLOW else 0.88)
     mock.severity = severity
     mock.ioc_matches = ioc_matches or []
     mock.correlation_signals = correlation_signals or []
@@ -210,41 +211,40 @@ class TestPeakVerdict:
     def test_single_block_returns_block(self):
         from app.services.threat_alerts import _peak_verdict
 
-        matches = [_make_hunt_match(verdict=DetectionVerdict.BLOCK)]
+        matches = [_make_hunt_match(verdict=HistoricalDetectionVerdict.BLOCK)]
         assert _peak_verdict(matches) == DetectionVerdict.BLOCK
 
     def test_mixed_verdicts_returns_block(self):
         from app.services.threat_alerts import _peak_verdict
 
         matches = [
-            _make_hunt_match(event_id="e1", verdict=DetectionVerdict.ALLOW),
-            _make_hunt_match(event_id="e2", verdict=DetectionVerdict.REVIEW),
-            _make_hunt_match(event_id="e3", verdict=DetectionVerdict.BLOCK),
+            _make_hunt_match(event_id="e1", verdict=HistoricalDetectionVerdict.ALLOW),
+            _make_hunt_match(event_id="e2", verdict=HistoricalDetectionVerdict.REVIEW),
+            _make_hunt_match(event_id="e3", verdict=HistoricalDetectionVerdict.BLOCK),
         ]
         assert _peak_verdict(matches) == DetectionVerdict.BLOCK
 
-    def test_all_allow_returns_monitor(self):
+    def test_any_hunt_match_blocks_even_if_historical_verdict_was_allow(self):
         from app.services.threat_alerts import _peak_verdict
 
         matches = [
-            _make_hunt_match(event_id="e1", verdict=DetectionVerdict.ALLOW),
+            _make_hunt_match(event_id="e1", verdict=HistoricalDetectionVerdict.ALLOW),
         ]
-        result = _peak_verdict(matches)
-        assert result in (DetectionVerdict.ALLOW, DetectionVerdict.MONITOR)
+        assert _peak_verdict(matches) == DetectionVerdict.BLOCK
 
-    def test_empty_matches_returns_monitor(self):
+    def test_empty_matches_returns_allow(self):
         from app.services.threat_alerts import _peak_verdict
 
-        assert _peak_verdict([]) == DetectionVerdict.MONITOR
+        assert _peak_verdict([]) == DetectionVerdict.ALLOW
 
-    def test_review_beats_monitor(self):
+    def test_legacy_monitor_and_review_matches_block(self):
         from app.services.threat_alerts import _peak_verdict
 
         matches = [
-            _make_hunt_match(event_id="e1", verdict=DetectionVerdict.MONITOR),
-            _make_hunt_match(event_id="e2", verdict=DetectionVerdict.REVIEW),
+            _make_hunt_match(event_id="e1", verdict=HistoricalDetectionVerdict.MONITOR),
+            _make_hunt_match(event_id="e2", verdict=HistoricalDetectionVerdict.REVIEW),
         ]
-        assert _peak_verdict(matches) == DetectionVerdict.REVIEW
+        assert _peak_verdict(matches) == DetectionVerdict.BLOCK
 
 
 class TestPeakScore:
@@ -499,8 +499,8 @@ class TestBuildHuntThreatAlert:
         from app.services.threat_alerts import _build_hunt_threat_alert
 
         matches = [
-            _make_hunt_match(event_id="e1", verdict=DetectionVerdict.MONITOR),
-            _make_hunt_match(event_id="e2", verdict=DetectionVerdict.BLOCK),
+            _make_hunt_match(event_id="e1", verdict=HistoricalDetectionVerdict.MONITOR),
+            _make_hunt_match(event_id="e2", verdict=HistoricalDetectionVerdict.BLOCK),
         ]
         result = _make_hunt_result(matches=matches)
         alert = _build_hunt_threat_alert(result)
@@ -604,6 +604,7 @@ class TestEmitHuntAlert:
 
         assert isinstance(out, dict)
         assert out.get("emitted") is True
+        assert out.get("verdict") == "block"
 
     def test_returns_suppressed_flag_on_second_call(self):
         import app.services.threat_alerts as ta
@@ -692,7 +693,12 @@ class TestEmitHuntAlert:
         store = self._make_mock_store()
         ta._alert_store = store
 
-        matches = [_make_hunt_match(severity=ThreatSeverityLevel.CRITICAL, verdict=DetectionVerdict.BLOCK)]
+        matches = [
+            _make_hunt_match(
+                severity=ThreatSeverityLevel.CRITICAL,
+                verdict=HistoricalDetectionVerdict.BLOCK,
+            )
+        ]
         result = _make_hunt_result(matches=matches)
 
         with patch.object(ta, "_maybe_escalate_to_incident", return_value="incident-001") as mock_esc:
@@ -763,7 +769,7 @@ class TestEmitDetectionAlert:
 
         assert isinstance(out, dict)
 
-    def test_returns_dict_for_review_verdict(self):
+    def test_legacy_review_verdict_is_normalized_to_block(self):
         import app.services.threat_alerts as ta
 
         store = self._make_mock_store()
@@ -771,11 +777,12 @@ class TestEmitDetectionAlert:
 
         from app.services.threat_alerts import emit_detection_alert
 
-        det = _make_detection_result_mock(verdict=DetectionVerdict.REVIEW)
+        det = _make_detection_result_mock(verdict="review", score=0.0)
         with patch.object(ta, "_maybe_escalate_to_incident", return_value=None):
             out = emit_detection_alert(det)
 
-        assert isinstance(out, dict)
+        assert out.get("emitted") is True
+        assert out.get("verdict") == "block"
 
     def test_skips_allow_verdict(self):
         import app.services.threat_alerts as ta
@@ -790,7 +797,7 @@ class TestEmitDetectionAlert:
 
         assert out.get("emitted") is False or out.get("skipped") is True
 
-    def test_skips_monitor_verdict(self):
+    def test_legacy_monitor_verdict_is_normalized_to_block(self):
         import app.services.threat_alerts as ta
 
         store = self._make_mock_store()
@@ -798,10 +805,11 @@ class TestEmitDetectionAlert:
 
         from app.services.threat_alerts import emit_detection_alert
 
-        det = _make_detection_result_mock(verdict=DetectionVerdict.MONITOR)
-        out = emit_detection_alert(det)
+        det = _make_detection_result_mock(verdict="monitor", score=0.0)
+        with patch.object(ta, "_maybe_escalate_to_incident", return_value=None):
+            out = emit_detection_alert(det)
 
-        assert out.get("emitted") is False or out.get("skipped") is True
+        assert out.get("emitted") is True
 
     def test_store_create_alert_called_for_block(self):
         import app.services.threat_alerts as ta

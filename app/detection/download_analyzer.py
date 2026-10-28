@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import PurePath
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 HIGH_RISK_EXTENSIONS = {
@@ -78,7 +78,7 @@ HIGH_RISK_HOST_PATTERNS = {
 class DownloadAnalysis:
     detected: bool
     risk_score: int
-    verdict: str
+    verdict: Literal["allow", "block"]
     confidence: str
     url: str
     hostname: str
@@ -195,11 +195,11 @@ def _score_host(hostname: str) -> tuple[int, list[str]]:
     return score, reasons
 
 
-def _derive_verdict(score: int) -> tuple[str, str]:
+def _derive_verdict(score: int) -> tuple[Literal["allow", "block"], str]:
     if score >= 70:
-        return "quarantine", "high"
+        return "block", "high"
     if score >= 35:
-        return "warn", "medium"
+        return "block", "medium"
     return "allow", "low"
 
 
@@ -218,6 +218,8 @@ def analyze_download(payload: Mapping[str, Any]) -> DownloadAnalysis:
 
     total_risk = min(100, base_risk + extension_score + keyword_score + host_score)
     verdict, confidence = _derive_verdict(total_risk)
+    if extension_reasons or host_reasons or matched_patterns:
+        verdict = "block"
 
     failed_checks = [*extension_reasons, *host_reasons]
     if matched_patterns:
@@ -232,7 +234,7 @@ def analyze_download(payload: Mapping[str, Any]) -> DownloadAnalysis:
     reason = extension_reasons[0] if extension_reasons else host_reasons[0] if host_reasons else matched_patterns[0] if matched_patterns else "no download threats detected"
 
     return DownloadAnalysis(
-        detected=total_risk >= 35,
+        detected=verdict == "block",
         risk_score=total_risk,
         verdict=verdict,
         confidence=confidence,

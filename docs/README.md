@@ -15,7 +15,7 @@ of modeling it as a single-agent or one-off package.
 
 | File                                                           | Description                                                                                    |
 | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| [api_reference.md](./api_reference.md)                         | Full API reference — every route, request model, response model, verdict enum, and error shape |
+| [api_reference.md](./api_reference.md)                         | Full API reference — every route, request model, response model, binary verdicts, and error shape |
 | [security_model.md](./security_model.md)                       | Security architecture — trust layers, verdict pipeline, policy enforcement, sandbox, telemetry |
 | [quickstart.md](./quickstart.md)                               | Get from zero to first scan in under 5 minutes                                                 |
 | [integration_guides/sdk.md](./integration_guides/sdk.md)       | IronClaw Python SDK (`ironclaw_sdk`) — full client usage reference                             |
@@ -52,12 +52,13 @@ quickstart, and integration docs.
 Every LLM or agent action passes through IronClaw before execution. IronClaw
 returns a **verdict**:
 
-| Verdict      | Meaning                                   |
-| ------------ | ----------------------------------------- |
-| `allow`      | Safe to proceed                           |
-| `warn`       | Proceed with caution — logged and flagged |
-| `quarantine` | Held for human review before execution    |
-| `block`      | Rejected — action stopped at the gate     |
+| Verdict | Meaning |
+| --- | --- |
+| `allow` | All applicable checks completed without suspicious signals or errors |
+| `block` | A suspicious signal, matched rule, malicious classifier result, or scan error was detected |
+
+Quarantine is an operational isolation and review state, not a final verdict.
+Historical records may retain legacy verdict labels.
 
 IronClaw covers:
 
@@ -70,7 +71,8 @@ IronClaw covers:
 - **Policy enforcement** — applies configurable rule sets per agent, user, or
   context
 - **Audit logging** — every scan, verdict, and policy decision is persisted
-- **Review workflow** — quarantined items enter a human review queue
+- **Review workflow** — blocked items may be isolated for human review; the
+  review status is separate from the final verdict
 - **Telemetry** — real-time event stream for observability pipelines
 - **Sandboxed execution** — runtime boundaries enforced around code and tool
   calls

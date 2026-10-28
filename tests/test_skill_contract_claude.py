@@ -156,7 +156,7 @@ def test_adapt_claude_request_rejects_missing_bundle_for_prompt_bundle() -> None
 def test_adapt_claude_response_maps_success_envelope() -> None:
     envelope = build_skill_success_response(
         operation="scan",
-        verdict="review",
+        verdict="block",
         summary="Potential prompt injection markers found.",
         should_halt=False,
         should_warn=True,
@@ -172,10 +172,10 @@ def test_adapt_claude_response_maps_success_envelope() -> None:
     assert payload["ok"] is True
     assert payload["operation"] == "scan"
     assert payload["request_id"] == "req-response-1"
-    assert payload["verdict"] == "review"
+    assert payload["verdict"] == "block"
     assert payload["summary"] == "Potential prompt injection markers found."
-    assert payload["should_halt"] is False
-    assert payload["should_warn"] is True
+    assert payload["should_halt"] is True
+    assert payload["should_warn"] is False
     assert payload["allowed"] is False
     assert payload["scan_id"] == "scan-123"
     assert payload["decision_source"] == "scan"
@@ -212,9 +212,9 @@ def test_build_claude_error_response_returns_error_payload() -> None:
     assert payload["ok"] is False
     assert payload["operation"] == "execute"
     assert payload["error_code"] == "adapter_failure"
-    assert payload["verdict"] == "error"
+    assert payload["verdict"] == "block"
     assert payload["should_halt"] is True
-    assert payload["should_warn"] is True
+    assert payload["should_warn"] is False
     assert payload["allowed"] is False
     assert payload["request_id"] == "req-error-1"
     assert len(payload["reasons"]) == 1

@@ -215,7 +215,7 @@ def _handle_scan(args: argparse.Namespace, _registry: IntegrationRegistry, confi
     else:
         format_scan_result(response, compact=args.compact)
 
-    return 0 if response.verdict in ("allow", "warn") else 1
+    return 0 if response.verdict == "allow" else 1
 
 
 def _handle_auth_check(args: argparse.Namespace, _registry: IntegrationRegistry, config: CLIConfig) -> int:

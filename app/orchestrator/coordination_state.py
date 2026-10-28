@@ -8,7 +8,11 @@ from typing import Literal
 
 from app.orchestrator.agent_registry import AgentRegistry
 from app.orchestrator.dependency_graph import DependencyGraph
-from app.orchestrator.execution_plan import ExecutionPlan
+from app.orchestrator.execution_plan import (
+    ExecutionPlan,
+    normalize_plan_verdict,
+    normalized_plan_risk_score,
+)
 
 CoordinationStatus = Literal[
     "idle",
@@ -34,7 +38,7 @@ class AgentState:
     status: CoordinationStatus = "idle"
     priority: CoordinationPriority = "normal"
     last_summary: str = ""
-    last_verdict: str = "allow"
+    last_verdict: Literal["allow", "block"] = "allow"
     last_risk_score: int = 0
     last_scan_id: str | None = None
     last_updated_at: str | None = None
@@ -47,7 +51,7 @@ class AgentState:
 class CoordinationEvent:
     agent_id: str
     file_path: str
-    verdict: str
+    verdict: Literal["allow", "block"]
     status: CoordinationStatus
     priority: CoordinationPriority
     summary: str
@@ -74,22 +78,12 @@ class CoordinationSnapshot:
 
 
 def _priority_for_plan(plan: ExecutionPlan) -> CoordinationPriority:
-    if plan.verdict == "block":
-        return "critical"
-    if plan.verdict == "quarantine":
-        return "high"
-    if plan.verdict == "warn":
-        return "normal"
-    return "low"
+    return "critical" if normalize_plan_verdict(plan) == "block" else "low"
 
 
 def _status_for_plan(plan: ExecutionPlan) -> CoordinationStatus:
-    if plan.verdict == "block":
+    if normalize_plan_verdict(plan) == "block":
         return "blocked"
-    if plan.verdict == "quarantine":
-        return "quarantined"
-    if plan.verdict == "warn":
-        return "review"
     if plan.registry_threat_profile in {"execution_capable", "security_critical"}:
         return "observing"
     return "idle"
@@ -173,6 +167,8 @@ def apply_execution_plan(
 ) -> CoordinationSnapshot:
     updated_states: list[AgentState] = []
     matched = False
+    verdict = normalize_plan_verdict(plan)
+    risk_score = normalized_plan_risk_score(plan)
 
     for state in snapshot.states:
         if state.agent_id != plan.agent_id:
@@ -188,8 +184,8 @@ def apply_execution_plan(
                 status=_status_for_plan(plan),
                 priority=_priority_for_plan(plan),
                 last_summary=plan.summary,
-                last_verdict=plan.verdict,
-                last_risk_score=plan.risk_score,
+                last_verdict=verdict,
+                last_risk_score=risk_score,
                 last_scan_id=plan.scan_id,
                 last_updated_at=datetime.now(UTC).isoformat(),
                 upstream_agents=state.upstream_agents,
@@ -204,11 +200,11 @@ def apply_execution_plan(
     event = CoordinationEvent(
         agent_id=plan.agent_id,
         file_path=plan.file_path,
-        verdict=plan.verdict,
+        verdict=verdict,
         status=_status_for_plan(plan),
         priority=_priority_for_plan(plan),
         summary=plan.summary,
-        risk_score=plan.risk_score,
+        risk_score=risk_score,
         matched_patterns=plan.matched_patterns,
         scan_id=plan.scan_id,
     )

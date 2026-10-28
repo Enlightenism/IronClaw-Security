@@ -9,6 +9,7 @@ from typing import Any, Literal, cast
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.services.guard_security_brain import GuardMode
 from app.services.prompt_guard_client import PromptGuardClient
 from app.ui.guard.brain_status import build_guard_brain_status_view
@@ -128,15 +129,12 @@ def _estimate_posture_score_from_runtime(mode: GuardMode) -> int:
     status = brain_view.status
 
     total = max(status.total_evaluations, 1)
-    high_risk = status.blocked_count + status.quarantined_count
-    warned = status.warned_count
+    high_risk = status.blocked_count
 
     high_risk_ratio = high_risk / total
-    warned_ratio = warned / total
 
     base = 100.0
     base -= high_risk_ratio * 55.0
-    base -= warned_ratio * 25.0
 
     if mode == "disabled":
         base -= 35.0
@@ -156,7 +154,7 @@ def _build_context_snapshot(mode: GuardMode | None) -> CopilotContextSnapshot:
 
     posture_score = _estimate_posture_score_from_runtime(effective_mode)
     open_incident_count = sum(1 for incident in _INCIDENTS if incident.status == "open")
-    recent_high_risk_decisions = sum(1 for event in _REQUEST_EVENTS[-50:] if event.risk_score >= 70 or event.verdict in ("block", "quarantine"))
+    recent_high_risk_decisions = sum(1 for event in _REQUEST_EVENTS[-50:] if event.risk_score >= RISK_THRESHOLD_BLOCK_MIN or event.verdict == "block")
 
     control_summary = {
         "mode": CONTROL_FLAGS.mode,

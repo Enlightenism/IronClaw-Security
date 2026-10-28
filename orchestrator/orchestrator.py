@@ -6,12 +6,29 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.execution_plan import ExecutionPlan
 from orchestrator.policyenforcer import EnforcementContext
 from orchestrator.responsecoordinator import CoordinatedResponse, ResponseOutcome
 from orchestrator.reviewqueue import ReviewQueue, ReviewQueueItem
 from orchestrator.secureruntimepipeline import RuntimeExecutionResult, SecureRuntimePipeline
 from orchestrator.supervisor import SupervisorDecision, SupervisorStatus
+
+
+def _normalize_risk_score(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return RISK_THRESHOLD_BLOCK_MIN
+    try:
+        risk_score = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return RISK_THRESHOLD_BLOCK_MIN
+    if isinstance(value, float) and not value.is_integer():
+        return RISK_THRESHOLD_BLOCK_MIN
+    if risk_score < 0:
+        return RISK_THRESHOLD_BLOCK_MIN
+    return min(risk_score, 100)
 
 
 @dataclass(slots=True)
@@ -39,7 +56,7 @@ class OrchestrationRequest:
             action=str(payload.get("action") or "execute"),
             target=str(payload.get("target") or "runtime"),
             payload=dict(payload.get("payload") or payload.get("attributes") or {}),
-            risk_score=int(payload.get("risk_score") or 0),
+            risk_score=_normalize_risk_score(payload.get("risk_score", 0)),
             source=payload.get("source"),
             actor_id=payload.get("actor_id"),
             session_id=payload.get("session_id"),
@@ -274,32 +291,22 @@ class Orchestrator:
     def _build_coordination(self, runtime_result: RuntimeExecutionResult) -> CoordinatedResponse:
         review_required = runtime_result.status == "needs_review" or any(step.name == "human_review" for step in runtime_result.steps)
         quarantine_required = runtime_result.status == "quarantined"
-        blocked = runtime_result.status == "blocked" or not runtime_result.allowed
-
-        if quarantine_required:
-            outcome = ResponseOutcome.QUARANTINE
-        elif review_required:
-            outcome = ResponseOutcome.NEEDS_REVIEW
-        elif blocked:
-            outcome = ResponseOutcome.BLOCK
-        elif runtime_result.verdict == "warn":
-            outcome = ResponseOutcome.ALLOW_WITH_CONTROLS
-        else:
-            outcome = ResponseOutcome.ALLOW
+        blocked = not runtime_result.allowed or runtime_result.verdict != "allow" or runtime_result.status != "completed" or review_required or quarantine_required
+        outcome = ResponseOutcome.BLOCK if blocked else ResponseOutcome.ALLOW
 
         gate = {
             "status": "completed",
-            "decision": "approved" if runtime_result.allowed else "restricted",
+            "decision": "approved" if outcome == ResponseOutcome.ALLOW else "restricted",
             "actions": runtime_result.enforcement.actions,
         }
         supervisor = {
             "status": SupervisorStatus.ACTIVE.value,
-            "decision": SupervisorDecision.APPROVE.value if runtime_result.allowed else SupervisorDecision.REJECT.value,
+            "decision": SupervisorDecision.APPROVE.value if outcome == ResponseOutcome.ALLOW else SupervisorDecision.REJECT.value,
             "message": "Supervisor evaluated runtime outcome.",
         }
         session = {
             "session_id": runtime_result.enforcement.context.session_id or f"session-{uuid4().hex}",
-            "status": "active" if runtime_result.allowed else "restricted",
+            "status": "active" if outcome == ResponseOutcome.ALLOW else "restricted",
             "request_id": runtime_result.request_id,
         }
 
@@ -311,8 +318,8 @@ class Orchestrator:
             gate=gate,
             supervisor=supervisor,
             session=session,
-            allow=runtime_result.allowed and outcome not in {ResponseOutcome.BLOCK, ResponseOutcome.QUARANTINE},
-            sandbox_required=runtime_result.verdict == "warn",
+            allow=outcome == ResponseOutcome.ALLOW,
+            sandbox_required=False,
             redaction_required=False,
             quarantine_required=quarantine_required,
             review_required=review_required,
@@ -332,7 +339,7 @@ class Orchestrator:
                 "review_id": coordination.review_id or f"review-{uuid4().hex}",
                 "request_id": request.request_id,
                 "category": "runtime_execution",
-                "severity": "high" if request.risk_score >= 70 else "medium",
+                "severity": "high" if request.risk_score >= RISK_THRESHOLD_BLOCK_MIN else "medium",
                 "status": "queued",
                 "payload": {
                     "request": request.to_dict(),

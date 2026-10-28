@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 DEFAULT_FILE_PATH = "app/api/action_execute.py"
 ALLOW_VERDICT = "allow"
@@ -48,7 +48,7 @@ class ActionExecuteResult:
     trace_id: str
     request_id: str
     decision_id: str
-    policy_verdict: str
+    policy_verdict: Literal["allow", "block"]
     risk_score: int
     should_execute: bool
     halted_by_boundary: bool
@@ -124,41 +124,41 @@ def _build_reasons(summary: dict[str, Any], risk_score: int) -> list[ExecutionRe
 
 
 def _normalize_summary(summary: dict[str, Any], risk_score: int) -> dict[str, Any]:
-    policy_verdict = str(summary.get("policyverdict") or summary.get("policy_verdict") or "").lower()
+    policy_verdict = str(summary.get("policyverdict") or summary.get("policy_verdict") or "").strip().lower()
 
-    if policy_verdict in {"block", "quarantine", "deny", "denied"}:
-        return {
-            "execution_state": DENIED_STATE,
-            "response_action": ACTION_BLOCK,
-            "response_status": STATUS_DENIED,
-            "policy_verdict": BLOCK_VERDICT,
-            "should_execute": False,
-            "halted_by_boundary": True,
-            "review_item_id": summary.get("reviewitemid") or summary.get("review_item_id"),
-            "reason": str(summary.get("reason") or "Blocked by policy boundary"),
-        }
-
-    if policy_verdict in {"hold", "review", "warn"}:
+    if policy_verdict in {"hold", REVIEW_VERDICT, WARN_VERDICT}:
         return {
             "execution_state": DENIED_STATE,
             "response_action": ACTION_REVIEW,
             "response_status": STATUS_QUEUED,
-            "policy_verdict": REVIEW_VERDICT if policy_verdict == "review" else WARN_VERDICT,
+            "policy_verdict": BLOCK_VERDICT,
             "should_execute": False,
             "halted_by_boundary": True,
             "review_item_id": summary.get("reviewitemid") or summary.get("review_item_id"),
             "reason": str(summary.get("reason") or "Queued for review"),
         }
 
+    if policy_verdict == ALLOW_VERDICT:
+        return {
+            "execution_state": EXECUTED_STATE,
+            "response_action": ACTION_ALLOW,
+            "response_status": STATUS_COMPLETED,
+            "policy_verdict": ALLOW_VERDICT,
+            "should_execute": True,
+            "halted_by_boundary": False,
+            "review_item_id": summary.get("reviewitemid") or summary.get("review_item_id"),
+            "reason": str(summary.get("reason") or "Execution completed"),
+        }
+
     return {
-        "execution_state": EXECUTED_STATE,
-        "response_action": ACTION_ALLOW,
-        "response_status": STATUS_COMPLETED,
-        "policy_verdict": ALLOW_VERDICT,
-        "should_execute": True,
-        "halted_by_boundary": False,
+        "execution_state": DENIED_STATE,
+        "response_action": ACTION_BLOCK,
+        "response_status": STATUS_DENIED,
+        "policy_verdict": BLOCK_VERDICT,
+        "should_execute": False,
+        "halted_by_boundary": True,
         "review_item_id": summary.get("reviewitemid") or summary.get("review_item_id"),
-        "reason": str(summary.get("reason") or "Execution completed"),
+        "reason": str(summary.get("reason") or "Blocked by policy boundary"),
     }
 
 

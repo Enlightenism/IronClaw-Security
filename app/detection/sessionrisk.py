@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 VERDICT_RANK = {
     "allow": 1,
-    "monitor": 2,
-    "review": 3,
-    "block": 4,
+    "block": 2,
 }
 
 SEVERITY_RANK = {
@@ -17,6 +15,8 @@ SEVERITY_RANK = {
     "high": 3,
     "critical": 4,
 }
+
+SessionRiskVerdict = Literal["allow", "block"]
 
 
 @dataclass(slots=True)
@@ -41,7 +41,7 @@ class SessionRiskFactor:
 @dataclass(slots=True)
 class SessionRiskResult:
     session_id: str
-    verdict: str
+    verdict: SessionRiskVerdict
     severity: str
     score: float
     confidence: float
@@ -145,24 +145,35 @@ class SessionRiskAnalyzer:
             event_count=len(normalized_events),
             factors=factors,
             reasons=reasons,
-            escalated=verdict in {"review", "block"},
+            escalated=verdict == "block",
             first_seen_at=normalized_events[0].timestamp,
             last_seen_at=normalized_events[-1].timestamp,
         )
 
     def _normalize_event(self, event: SessionEvent | dict[str, Any]) -> SessionEvent:
         if isinstance(event, SessionEvent):
-            return event
+            return SessionEvent(
+                source=event.source,
+                verdict=self._normalize_verdict(event.verdict),
+                severity=event.severity,
+                score=event.score,
+                timestamp=event.timestamp,
+                detail=event.detail,
+                metadata=dict(event.metadata),
+            )
 
         return SessionEvent(
             source=str(event.get("source", "unknown")),
-            verdict=str(event.get("verdict", "allow")),
+            verdict=self._normalize_verdict(event.get("verdict", "allow")),
             severity=str(event.get("severity", "low")),
             score=float(event.get("score", 0.0)),
             timestamp=self._normalize_timestamp(event.get("timestamp")),
             detail=event.get("detail"),
             metadata=dict(event.get("metadata", {}) or {}),
         )
+
+    def _normalize_verdict(self, value: Any) -> SessionRiskVerdict:
+        return "allow" if str(value).strip().lower() == "allow" else "block"
 
     def _normalize_timestamp(self, value: Any) -> str:
         if isinstance(value, datetime):
@@ -180,28 +191,7 @@ class SessionRiskAnalyzer:
 
     def _score_verdict_pressure(self, events: list[SessionEvent]) -> list[SessionRiskFactor]:
         factors: list[SessionRiskFactor] = []
-        review_count = sum(1 for event in events if event.verdict == "review")
         block_count = sum(1 for event in events if event.verdict == "block")
-        monitor_count = sum(1 for event in events if event.verdict == "monitor")
-
-        if monitor_count:
-            factors.append(
-                SessionRiskFactor(
-                    name="monitor_verdicts",
-                    weight=min(0.20, monitor_count * 0.05),
-                    evidence=f"Session accumulated {monitor_count} monitor verdict event(s).",
-                    category="verdict",
-                ),
-            )
-        if review_count:
-            factors.append(
-                SessionRiskFactor(
-                    name="review_verdicts",
-                    weight=min(0.36, review_count * 0.12),
-                    evidence=f"Session accumulated {review_count} review verdict event(s).",
-                    category="verdict",
-                ),
-            )
         if block_count:
             factors.append(
                 SessionRiskFactor(
@@ -333,10 +323,8 @@ class SessionRiskAnalyzer:
         for event in events:
             verdict_weight = {
                 "allow": 0.00,
-                "monitor": 0.05,
-                "review": 0.12,
                 "block": 0.24,
-            }.get(event.verdict, 0.0)
+            }.get(event.verdict, 0.24)
             severity_weight = {
                 "low": 0.00,
                 "medium": 0.04,
@@ -349,15 +337,15 @@ class SessionRiskAnalyzer:
         total = min(event_pressure + factor_pressure, 1.0)
         return round(total, 4)
 
-    def _resolve_verdict(self, events: list[SessionEvent], score: float, *, active_review: bool) -> str:
-        strongest_verdict = max((VERDICT_RANK.get(event.verdict, 1) for event in events), default=1)
-
-        if strongest_verdict >= VERDICT_RANK["block"] and score >= 0.68:
+    def _resolve_verdict(
+        self,
+        events: list[SessionEvent],
+        score: float,
+        *,
+        active_review: bool,
+    ) -> SessionRiskVerdict:
+        if active_review or score >= 0.18 or any(event.verdict != "allow" for event in events):
             return "block"
-        if active_review or score >= 0.46 or strongest_verdict >= VERDICT_RANK["review"]:
-            return "review"
-        if score >= 0.18 or strongest_verdict >= VERDICT_RANK["monitor"]:
-            return "monitor"
         return "allow"
 
     def _resolve_severity(self, events: list[SessionEvent], score: float) -> str:

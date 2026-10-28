@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from functools import lru_cache
+from typing import Any, Literal
+
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
+from app.runtime.networkguard import NetworkGuard, build_network_guard
+from app.services.action_guard import normalize_action_type
+
+PolicyVerdict = Literal["allow", "block"]
+
+
+def _is_valid_risk_score(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100
 
 
 @dataclass
@@ -20,7 +31,7 @@ class BoundaryRequest:
 @dataclass
 class BoundaryDecision:
     decision_id: str
-    verdict: str
+    verdict: PolicyVerdict
     reasons: list[str]
     review_item_id: str | None = None
 
@@ -41,7 +52,7 @@ class ExecutionReceipt:
     trace_id: str
     request_id: str
     decision_id: str
-    policy_verdict: str
+    policy_verdict: PolicyVerdict
     risk_score: int
     should_execute: bool
     halted_by_boundary: bool
@@ -52,14 +63,23 @@ class ExecutionReceipt:
     reasons: list[str]
 
 
-def _build_runtime_result(*, risk_score: int) -> BoundaryRuntimeResult:
-    if risk_score >= 90:
+@lru_cache(maxsize=1)
+def _get_network_guard() -> NetworkGuard:
+    return build_network_guard()
+
+
+def _build_runtime_result(
+    *,
+    risk_score: int,
+    network_policy_blocked: bool = False,
+) -> BoundaryRuntimeResult:
+    if network_policy_blocked:
         verdict = "block"
-        reasons = ["High-risk request blocked by executor boundary."]
-        review_item_id = None
-    elif risk_score >= 70:
-        verdict = "quarantine"
-        reasons = ["Request held for review by executor boundary."]
+        reasons = ["Request blocked by the configured network egress policy."]
+        review_item_id = "review-001"
+    elif risk_score > RISK_THRESHOLD_ALLOW_MAX:
+        verdict = "block"
+        reasons = ["Request blocked by the configured executor-boundary risk policy."]
         review_item_id = "review-001"
     else:
         verdict = "allow"
@@ -103,6 +123,14 @@ def execute_with_boundary(
     metadata: dict[str, Any] | None = None,
     executor: Callable[[BoundaryRequest], dict[str, Any]] | None = None,
 ) -> tuple[ExecutionReceipt, BoundaryRuntimeResult]:
+    risk_score_is_valid = _is_valid_risk_score(risk_score)
+    risk_score = max(0, min(100, risk_score)) if risk_score_is_valid else RISK_THRESHOLD_BLOCK_MIN
+    if risk_score > RISK_THRESHOLD_ALLOW_MAX:
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
+    network_policy_blocked = normalize_action_type(action_type) == "network_request" and not _get_network_guard().allow(url=target, metadata={"direction": "egress"})
+    if network_policy_blocked:
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
+
     request = BoundaryRequest(
         actor_id=actor_id,
         action_type=action_type,
@@ -114,10 +142,15 @@ def execute_with_boundary(
         metadata=metadata or {},
     )
 
-    runtime_result = _build_runtime_result(risk_score=risk_score)
+    runtime_result = _build_runtime_result(
+        risk_score=risk_score,
+        network_policy_blocked=network_policy_blocked,
+    )
     decision = runtime_result.decision
+    if not risk_score_is_valid:
+        decision.reasons.insert(0, "Invalid risk score; request blocked by executor boundary.")
 
-    if decision.verdict in {"block", "quarantine"}:
+    if decision.verdict == "block":
         receipt = ExecutionReceipt(
             execution_id="exec-001",
             state="denied",

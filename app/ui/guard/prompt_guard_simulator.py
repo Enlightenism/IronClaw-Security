@@ -7,6 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.services.guard_security_brain import GuardSecurityVerdict
 from app.ui.guard.prompt_guard_policy import (
     PromptGuardAction,
@@ -113,11 +114,9 @@ def _safe_excerpt(prompt: str, max_len: int = 160) -> str:
 
 
 def _risk_level_from_score(score: int) -> SimulatorRiskLevel:
-    if score >= 85:
-        return "critical"
-    if score >= 70:
+    if score >= RISK_THRESHOLD_BLOCK_MIN:
         return "high"
-    if score >= 35:
+    if score > RISK_THRESHOLD_ALLOW_MAX:
         return "medium"
     return "low"
 
@@ -125,17 +124,9 @@ def _risk_level_from_score(score: int) -> SimulatorRiskLevel:
 def _verdict_from_score(
     *,
     score: int,
-    quarantine_score: int,
-    block_score: int,
-    warn_score: int,
+    matched: bool,
 ) -> GuardSecurityVerdict:
-    if score >= quarantine_score:
-        return "quarantine"
-    if score >= block_score:
-        return "block"
-    if score >= warn_score:
-        return "warn"
-    return "allow"
+    return "block" if matched or score > RISK_THRESHOLD_ALLOW_MAX else "allow"
 
 
 def _simulate_prompt(prompt: str) -> PromptGuardSimulation:
@@ -159,7 +150,7 @@ def _simulate_prompt(prompt: str) -> PromptGuardSimulation:
                 rule_id=rule.id,
                 rule_name=rule.name,
                 category=rule.category,
-                action=rule.default_action,
+                action="block",
                 score=score,
                 matched_patterns=matched_patterns,
                 metadata={
@@ -169,13 +160,9 @@ def _simulate_prompt(prompt: str) -> PromptGuardSimulation:
         )
 
     risk_score = max((match.score for match in matches), default=0)
-
-    verdict = _verdict_from_score(
-        score=risk_score,
-        quarantine_score=policy.thresholds.quarantine_score,
-        block_score=policy.thresholds.block_score,
-        warn_score=policy.thresholds.warn_score,
-    )
+    verdict = _verdict_from_score(score=risk_score, matched=bool(matches))
+    if verdict == "block":
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
     risk_level = _risk_level_from_score(risk_score)
 
     return PromptGuardSimulation(

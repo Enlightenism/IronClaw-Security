@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from orchestrator.policyengine import (
     PolicyDecision,
     PolicyEngine,
@@ -13,6 +14,10 @@ from orchestrator.policyengine import (
     PolicyTarget,
     PolicyVerdict,
 )
+
+
+def _is_valid_risk_score(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100
 
 
 @dataclass(slots=True)
@@ -130,6 +135,7 @@ class PolicyEnforcer:
             normalized_request.organization_id = normalized_context.organization_id
 
         decision = self.policy_engine.evaluate(normalized_request)
+        self._normalize_decision(decision, normalized_request)
         result = self._build_result(decision=decision, request=normalized_request, context=normalized_context)
         self._dispatch(result)
         return result
@@ -174,6 +180,36 @@ class PolicyEnforcer:
             metadata=payload.get("metadata") or {},
         )
 
+    def _normalize_decision(
+        self,
+        decision: PolicyDecision,
+        request: PolicyRequest,
+    ) -> None:
+        decision_score_is_valid = _is_valid_risk_score(decision.risk_score)
+        decision_score = decision.risk_score if decision_score_is_valid else RISK_THRESHOLD_BLOCK_MIN
+        risk_score = max(decision_score, request.risk_score)
+        should_block = (
+            decision.verdict != PolicyVerdict.ALLOW
+            or decision.allowed is not True
+            or bool(decision.matched_rules)
+            or decision.requires_human_review
+            or request.requires_human_review
+            or not decision_score_is_valid
+            or risk_score > RISK_THRESHOLD_ALLOW_MAX
+            or request.target == PolicyTarget.UNKNOWN
+            or request.requires_secrets
+            and request.requires_network
+        )
+
+        decision.verdict = PolicyVerdict.BLOCK if should_block else PolicyVerdict.ALLOW
+        decision.allowed = not should_block
+        decision.requires_human_review = decision.requires_human_review or request.requires_human_review
+        decision.risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN) if should_block else risk_score
+        if should_block and not decision.reasons:
+            decision.reasons.append(
+                "Policy enforcer blocked a non-allow or invalid decision.",
+            )
+
     def _build_result(
         self,
         *,
@@ -183,7 +219,6 @@ class PolicyEnforcer:
     ) -> EnforcementResult:
         actions = self._actions_for_decision(decision, request)
         review_required = decision.requires_human_review or "enqueue_review" in actions
-        quarantine_required = decision.verdict == PolicyVerdict.QUARANTINE
         blocked = decision.verdict == PolicyVerdict.BLOCK
 
         status = self._status_for_verdict(decision.verdict, review_required=review_required)
@@ -210,7 +245,7 @@ class PolicyEnforcer:
             status=status,
             actions=actions,
             review_required=review_required,
-            quarantine_required=quarantine_required,
+            quarantine_required=False,
             blocked=blocked,
             audit_record=audit_record,
             metadata=metadata,
@@ -221,12 +256,6 @@ class PolicyEnforcer:
 
         if decision.verdict == PolicyVerdict.ALLOW:
             actions.append("allow_execution")
-
-        if decision.verdict == PolicyVerdict.WARN:
-            actions.extend(["allow_with_warning", "emit_security_warning"])
-
-        if decision.verdict == PolicyVerdict.QUARANTINE:
-            actions.extend(["quarantine_request", "halt_execution", "preserve_evidence"])
 
         if decision.verdict == PolicyVerdict.BLOCK:
             actions.extend(["block_request", "halt_execution", "preserve_evidence"])
@@ -246,17 +275,8 @@ class PolicyEnforcer:
         return _dedupe(actions)
 
     def _status_for_verdict(self, verdict: PolicyVerdict, *, review_required: bool) -> str:
-        if verdict == PolicyVerdict.ALLOW and not review_required:
-            return "allowed"
-        if verdict == PolicyVerdict.ALLOW and review_required:
-            return "allowed_pending_review"
-        if verdict == PolicyVerdict.WARN and review_required:
-            return "warn_pending_review"
-        if verdict == PolicyVerdict.WARN:
-            return "warned"
-        if verdict == PolicyVerdict.QUARANTINE:
-            return "quarantined"
-        return "blocked"
+        del review_required
+        return "allowed" if verdict == PolicyVerdict.ALLOW else "blocked"
 
     def _build_audit_record(
         self,
@@ -296,14 +316,8 @@ class PolicyEnforcer:
         if result.review_required and self.review_sink is not None:
             self.review_sink(payload)
 
-        if result.quarantine_required and self.quarantine_sink is not None:
-            self.quarantine_sink(payload)
-
         if result.blocked and self.block_sink is not None:
             self.block_sink(payload)
-
-        if result.decision.verdict == PolicyVerdict.WARN and self.warn_sink is not None:
-            self.warn_sink(payload)
 
         if result.decision.verdict == PolicyVerdict.ALLOW and self.allow_sink is not None:
             self.allow_sink(payload)
@@ -351,7 +365,7 @@ def build_policy_request(
     return PolicyRequest(
         target=target,
         action=action,
-        risk_score=int(risk_score),
+        risk_score=risk_score,
         attributes=dict(attributes or {}),
         source=source,
         actor_id=actor_id,

@@ -123,7 +123,7 @@ def test_secure_runtime_pipeline_allows_safe_request() -> None:
     assert len(file_return_guard.calls) == 1
 
 
-def test_secure_runtime_pipeline_reviews_when_any_stage_requires_review() -> None:
+def test_secure_runtime_pipeline_blocks_when_any_stage_requires_review() -> None:
     tool_call_guard = _StageStub(
         _make_result(
             verdict="review",
@@ -167,14 +167,14 @@ def test_secure_runtime_pipeline_reviews_when_any_stage_requires_review() -> Non
         environment_scope="sandbox",
     )
 
-    assert result.verdict == "review"
-    assert result.allowed is True
+    assert result.verdict == "block"
+    assert result.allowed is False
     assert result.should_review is True
-    assert result.should_block is False
+    assert result.should_block is True
     assert result.should_quarantine is False
 
 
-def test_secure_runtime_pipeline_blocks_when_network_stage_blocks() -> None:
+def test_secure_runtime_pipeline_blocks_when_file_return_stage_blocks() -> None:
     tool_call_guard = _StageStub(
         _make_result(
             verdict="allow",
@@ -270,10 +270,10 @@ def test_secure_runtime_pipeline_quarantines_when_file_stage_quarantines() -> No
         metadata={"contains_secrets": True},
     )
 
-    assert result.verdict == "quarantine"
+    assert result.verdict == "block"
     assert result.allowed is False
     assert result.should_block is True
-    assert result.should_quarantine is True
+    assert result.should_quarantine is False
 
 
 def test_secure_runtime_pipeline_aggregates_risk_delta_across_stages() -> None:
@@ -440,7 +440,7 @@ def test_secure_runtime_pipeline_passes_context_fields_to_all_stages() -> None:
         assert call["environment_scope"] == "sandbox"
 
 
-def test_secure_runtime_pipeline_short_circuits_after_quarantine() -> None:
+def test_secure_runtime_pipeline_short_circuits_after_legacy_quarantine_signal() -> None:
     tool_call_guard = _StageStub(
         _make_result(
             verdict="quarantine",
@@ -472,8 +472,10 @@ def test_secure_runtime_pipeline_short_circuits_after_quarantine() -> None:
         metadata={"contains_secrets": True},
     )
 
-    assert result.verdict == "quarantine"
-    assert result.should_quarantine is True
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
+    assert result.should_quarantine is False
     assert len(tool_call_guard.calls) == 1
     assert len(network_guard.calls) in {0, 1}
     assert len(file_return_guard.calls) in {0, 1}
@@ -551,4 +553,6 @@ def test_secure_runtime_pipeline_integration_high_risk_exfiltration_attempt() ->
     assert hasattr(result, "reasons")
     assert isinstance(result.reasons, list)
     assert result.reasons
-    assert result.verdict in {"review", "block", "quarantine"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True

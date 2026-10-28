@@ -3,13 +3,15 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 import uuid
 
 from app.detection.outputsanitizer import OutputSanitizationResult, build_output_sanitizer
 from app.detection.secretscanner import SecretScanResult, build_secret_scanner
 from app.runtime.networkguard import NetworkPolicy, build_network_guard
 from app.services.secretsredaction import SecretsRedactionResult, build_secrets_redaction_service
+
+SecretServiceVerdict = Literal["allow", "block"]
 
 # ---------------------------------------------------------------------------
 # SecretRecord — vault-record data model used by integrations secrets routes
@@ -147,7 +149,7 @@ def get_secret_service() -> _SecretVault:
 
 @dataclass(slots=True)
 class SecretServiceResult:
-    verdict: str
+    verdict: SecretServiceVerdict
     allowed: bool
     blocked: bool
     should_review: bool
@@ -156,8 +158,8 @@ class SecretServiceResult:
     risk_delta: int
     findings_detected: int
     secrets_redacted: int
-    network_verdict: str
-    output_verdict: str
+    network_verdict: SecretServiceVerdict
+    output_verdict: SecretServiceVerdict
     scan: dict[str, Any] = field(default_factory=dict)
     redaction: dict[str, Any] = field(default_factory=dict)
     output: dict[str, Any] = field(default_factory=dict)
@@ -366,6 +368,8 @@ class SecretService:
             network_result=network_result,
             secrets_redacted=secrets_redacted,
         )
+        network_verdict = self._normalize_network_verdict(network_result)
+        output_verdict = self._normalize_output_verdict(output_result)
         risk_delta = self._resolve_risk_delta(
             scan_result=scan_result,
             output_result=output_result,
@@ -374,14 +378,26 @@ class SecretService:
         )
         verdict = self._resolve_verdict(
             scan_result=scan_result,
+            redaction_result=redaction_result,
             output_result=output_result,
             network_result=network_result,
             score=score,
         )
         blocked = verdict == "block"
         allowed = not blocked
-        should_quarantine = verdict == "quarantine"
-        should_review = verdict == "review"
+        network_payload = network_result.as_dict()
+        network_payload.update(
+            {
+                "verdict": network_verdict,
+                "allowed": network_verdict == "allow",
+                "shouldreview": False,
+                "shouldblock": network_verdict == "block",
+                "shouldquarantine": False,
+            },
+        )
+        output_payload = output_result.as_dict()
+        output_payload["verdict"] = output_verdict
+        output_payload["blocked"] = output_verdict == "block"
         reasons = self._build_reasons(
             scan_result=scan_result,
             redaction_result=redaction_result,
@@ -394,20 +410,36 @@ class SecretService:
             verdict=verdict,
             allowed=allowed,
             blocked=blocked,
-            should_review=should_review,
-            should_quarantine=should_quarantine,
+            should_review=False,
+            should_quarantine=False,
             score=score,
             risk_delta=risk_delta,
             findings_detected=findings_detected,
             secrets_redacted=secrets_redacted,
-            network_verdict=network_result.verdict,
-            output_verdict=output_result.verdict,
+            network_verdict=network_verdict,
+            output_verdict=output_verdict,
             scan=scan_result.as_dict(),
             redaction=redaction_result.as_dict(),
-            output=output_result.as_dict(),
-            network=network_result.as_dict(),
+            output=output_payload,
+            network=network_payload,
             reasons=reasons,
         )
+
+    @staticmethod
+    def _normalize_network_verdict(
+        network_result: NetworkPolicy,
+    ) -> SecretServiceVerdict:
+        if network_result.verdict == "allow" and network_result.allowed and not network_result.should_review and not network_result.should_block and not network_result.should_quarantine and network_result.risk_delta <= 0:
+            return "allow"
+        return "block"
+
+    @staticmethod
+    def _normalize_output_verdict(
+        output_result: OutputSanitizationResult,
+    ) -> SecretServiceVerdict:
+        if output_result.verdict == "allow" and not output_result.blocked and not output_result.sanitized and not output_result.signals and output_result.score <= 0:
+            return "allow"
+        return "block"
 
     def _resolve_score(
         self,
@@ -417,7 +449,7 @@ class SecretService:
         network_result: NetworkPolicy,
         secrets_redacted: int,
     ) -> float:
-        scan_component = min(float(scan_result.score), 1.0)
+        scan_component = min(max(float(scan_result.risk_delta), 0.0) / 100.0, 1.0)
         output_component = min(float(output_result.score), 1.0)
         network_component = min(max(network_result.risk_delta, 0) / 100.0, 1.0)
         redaction_component = min(secrets_redacted * 0.08, 0.24)
@@ -452,20 +484,13 @@ class SecretService:
         self,
         *,
         scan_result: SecretScanResult,
+        redaction_result: SecretsRedactionResult,
         output_result: OutputSanitizationResult,
         network_result: NetworkPolicy,
         score: float,
-    ) -> str:
-        if network_result.should_quarantine:
-            return "quarantine"
-        if network_result.should_block or output_result.blocked:
+    ) -> SecretServiceVerdict:
+        if self._normalize_network_verdict(network_result) == "block" or self._normalize_output_verdict(output_result) == "block" or scan_result.found or bool(scan_result.findings) or redaction_result.changed or redaction_result.findings_redacted > 0 or score > 0:
             return "block"
-        if scan_result.found and score >= 0.80:
-            return "block"
-        if output_result.verdict == "sanitize":
-            return "sanitize"
-        if network_result.should_review or output_result.verdict == "review" or scan_result.found:
-            return "review"
         return "allow"
 
     def _build_reasons(
@@ -493,9 +518,10 @@ class SecretService:
             reasons.append("Output sanitizer transformed content before release.")
         if output_result.blocked:
             reasons.append("Output sanitizer blocked unsafe content.")
-        if network_result.verdict != "allow":
+        network_verdict = self._normalize_network_verdict(network_result)
+        if network_verdict != "allow":
             reasons.append(
-                f"Network guard returned verdict '{network_result.verdict}' for outbound context.",
+                f"Network guard returned verdict '{network_verdict}' for outbound context.",
             )
         reasons.extend(str(item) for item in output_result.reasons[:3])
         if not scan_result.found and not redaction_result.changed and network_result.verdict == "allow":

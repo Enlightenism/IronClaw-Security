@@ -44,7 +44,7 @@ def test_upload_allows_clean_text_file() -> None:
     assert result.output["blocked"] is False
 
 
-def test_upload_reviews_secret_text_and_redacts() -> None:
+def test_upload_blocks_secret_text_and_redacts() -> None:
     service = build_file_inspection_service()
 
     result = service.inspect_upload(
@@ -54,7 +54,11 @@ def test_upload_reviews_secret_text_and_redacts() -> None:
         metadata={"source": "api"},
     )
 
-    assert result.verdict in {"review", "sanitize", "block", "quarantine"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.blocked is True
+    assert result.should_review is False
+    assert result.should_quarantine is False
     assert result.findings_detected >= 1
     assert result.secrets_redacted >= 1
     assert result.redaction["changed"] is True
@@ -72,14 +76,14 @@ def test_upload_blocks_private_key_material() -> None:
         metadata={"source": "api"},
     )
 
-    assert result.verdict in {"block", "quarantine"}
+    assert result.verdict == "block"
     assert result.allowed is False
     assert result.blocked is True
-    assert result.should_quarantine is True
+    assert result.should_quarantine is False
     assert any(item["label"] == "private-key-material" for item in result.findings)
 
 
-def test_upload_reviews_script_extension() -> None:
+def test_upload_blocks_script_extension() -> None:
     service = build_file_inspection_service()
 
     result = service.inspect_upload(
@@ -89,8 +93,10 @@ def test_upload_reviews_script_extension() -> None:
         metadata={"source": "ui"},
     )
 
-    assert result.verdict in {"review", "block", "quarantine"}
-    assert result.should_review is True
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.blocked is True
+    assert result.should_review is False
     assert any(item["label"] == "executable-extension" for item in result.findings)
 
 
@@ -104,7 +110,7 @@ def test_upload_blocks_windows_executable_magic() -> None:
         metadata={"source": "ui"},
     )
 
-    assert result.verdict in {"block", "quarantine"}
+    assert result.verdict == "block"
     assert result.allowed is False
     assert result.blocked is True
     assert any(item["label"] == "dangerous-binary" for item in result.findings)
@@ -120,13 +126,13 @@ def test_upload_blocks_dangerous_mime_type() -> None:
         metadata={"source": "ui"},
     )
 
-    assert result.verdict in {"block", "quarantine"}
+    assert result.verdict == "block"
     assert result.allowed is False
     assert result.blocked is True
     assert any(item["label"] == "dangerous-mime-type" for item in result.findings)
 
 
-def test_upload_reviews_sensitive_filename() -> None:
+def test_upload_blocks_sensitive_filename() -> None:
     service = build_file_inspection_service()
 
     result = service.inspect_upload(
@@ -136,11 +142,14 @@ def test_upload_reviews_sensitive_filename() -> None:
         metadata={"source": "ui"},
     )
 
-    assert result.verdict in {"review", "block", "quarantine", "sanitize"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.blocked is True
+    assert result.should_review is False
     assert any(item["label"] == "sensitive-filename" for item in result.findings)
 
 
-def test_upload_reviews_sensitive_path_markers() -> None:
+def test_upload_blocks_sensitive_path_markers() -> None:
     service = build_file_inspection_service()
 
     result = service.inspect_upload(
@@ -150,8 +159,10 @@ def test_upload_reviews_sensitive_path_markers() -> None:
         metadata={"source": "ui"},
     )
 
-    assert result.verdict in {"review", "block", "quarantine", "sanitize"}
-    assert result.should_review is True
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.blocked is True
+    assert result.should_review is False
     assert any(item["label"] == "suspicious-path" for item in result.findings)
 
 
@@ -165,7 +176,7 @@ def test_upload_blocks_oversized_file() -> None:
         metadata={"source": "ui"},
     )
 
-    assert result.verdict in {"block", "quarantine"}
+    assert result.verdict == "block"
     assert result.allowed is False
     assert result.blocked is True
     assert any(item["label"] == "oversized-file" for item in result.findings)
@@ -185,10 +196,12 @@ def test_upload_detects_base64_encoded_text_payload() -> None:
 
     assert result.content["decodedfrombinary"] is True
     assert result.output["decodedfrombinary"] is True
+    assert result.verdict == "block"
+    assert result.blocked is True
     assert result.findings_detected >= 1
 
 
-def test_upload_reviews_unsafe_command_content() -> None:
+def test_upload_blocks_unsafe_command_content() -> None:
     service = build_file_inspection_service()
 
     result = service.inspect_upload(
@@ -198,7 +211,9 @@ def test_upload_reviews_unsafe_command_content() -> None:
         metadata={"source": "ui"},
     )
 
-    assert result.verdict in {"review", "block", "sanitize", "quarantine"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.blocked is True
     assert any(item["label"] == "unsafe-command-content" for item in result.findings)
 
 
@@ -222,7 +237,12 @@ def test_upload_inspects_archive_and_flags_suspicious_entries() -> None:
     assert result.archive["is_archive"] is True
     assert result.archive["entry_count"] == 3
     assert result.archive["suspicious_entries"] >= 1
-    assert result.verdict in {"review", "block", "quarantine", "sanitize"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.blocked is True
+    assert result.should_review is False
+    assert result.should_quarantine is False
+    assert result.archive["blocked"] is True
     assert any(item["label"] == "suspicious-archive-entry" for item in result.findings)
 
 
@@ -318,9 +338,11 @@ def test_batch_returns_aggregate_decision() -> None:
         direction="ingress",
     )
 
-    assert result["verdict"] in {"review", "block", "quarantine", "sanitize"}
+    assert result["verdict"] == "block"
     assert result["blocked"] is True
     assert result["allowed"] is False
+    assert result["shouldreview"] is False
+    assert result["shouldquarantine"] is False
     assert len(result["results"]) == 2
 
 

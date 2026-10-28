@@ -55,9 +55,9 @@ def _seed_audit_events() -> None:
         actor_id="audit-actor-002",
         action_type="tool_call",
         target="shell",
-        verdict="quarantine",
+        verdict="block",
         risk_score=85,
-        reason="Seeded quarantine event.",
+        reason="Seeded blocked event.",
         session_id="audit-session-002",
         file_path="app/orchestrator/secure_runtime_pipeline.py",
         metadata={
@@ -133,7 +133,7 @@ def test_list_audit_events_for_actor() -> None:
     events = list_audit_events_for_actor("audit-actor-002")
     assert len(events) == 1
     assert events[0]["actor_id"] == "audit-actor-002"
-    assert events[0]["verdict"] == "quarantine"
+    assert events[0]["verdict"] == "block"
 
 
 def test_list_audit_events_for_request() -> None:
@@ -179,15 +179,15 @@ def test_list_audit_events_as_schema_honors_limit() -> None:
     assert results[0].actor == "audit-actor-002"
 
 
-def test_list_audit_events_as_schema_quarantine_maps_correctly() -> None:
+def test_list_audit_events_as_schema_block_maps_correctly() -> None:
     _seed_audit_events()
     results = list_audit_events_as_schema()
-    quarantine_event = results[0]
-    assert quarantine_event.outcome == AuditOutcome.QUARANTINED
-    assert quarantine_event.event_type == AuditEventType.ACTION_QUARANTINED
-    assert quarantine_event.severity == AuditSeverity.CRITICAL
-    assert quarantine_event.risk_score == 85
-    assert quarantine_event.target_type == AuditTargetType.TOOL_CALL
+    blocked_event = results[0]
+    assert blocked_event.outcome == AuditOutcome.BLOCKED
+    assert blocked_event.event_type == AuditEventType.ACTION_BLOCKED
+    assert blocked_event.severity == AuditSeverity.CRITICAL
+    assert blocked_event.risk_score == 85
+    assert blocked_event.target_type == AuditTargetType.TOOL_CALL
 
 
 def test_list_audit_events_as_schema_allow_maps_correctly() -> None:
@@ -206,7 +206,7 @@ def test_list_audit_events_for_session_as_schema() -> None:
     assert len(results) == 1
     assert isinstance(results[0], AuditEventCreate)
     assert results[0].session_id == "audit-session-002"
-    assert results[0].outcome == AuditOutcome.QUARANTINED
+    assert results[0].outcome == AuditOutcome.BLOCKED
 
 
 def test_list_audit_events_for_session_as_schema_no_match_returns_empty() -> None:

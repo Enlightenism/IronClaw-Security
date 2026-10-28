@@ -58,10 +58,10 @@ def _build_scenarios() -> list[TestConsoleScenarioView]:
         TestConsoleScenarioView(
             scenario_id="prompt-injection-web-fetch",
             title="Prompt injection web fetch",
-            description="Suspicious fetched content that should be quarantined for review.",
+            description="Suspicious fetched content that should be blocked and queued for review.",
             action_type="web_fetch",
             target="https://example.test/injection",
-            expected_policy_verdict="quarantine",
+            expected_policy_verdict="block",
             expected_execution_state="review_required",
             sample_payload={
                 "url": "https://example.test/injection",
@@ -96,16 +96,16 @@ def _build_scenarios() -> list[TestConsoleScenarioView]:
         ),
         TestConsoleScenarioView(
             scenario_id="guard-quarantine-smoke",
-            title="Guard Quarantine Smoke",
-            description="Guard evaluation with suspicious payload that should be quarantined.",
+            title="Guard Block Smoke",
+            description="Guard evaluation with suspicious payload that should be blocked.",
             action_type="guard_eval",
             target="/guard",
-            expected_policy_verdict="quarantine",
+            expected_policy_verdict="block",
             expected_execution_state="review_required",
             sample_payload={
                 "method": "POST",
                 "path": "/guard",
-                "expected_outcome": "quarantine",
+                "expected_outcome": "block",
             },
         ),
         TestConsoleScenarioView(

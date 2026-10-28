@@ -86,8 +86,8 @@ _SAMPLE_AUDIT_EVENTS: list[AuditEventView] = [
         review_id="review_002",
         execution_id="exec_003",
         details={
-            "policy_verdict": "review",
-            "reason": "Untrusted external content escalated for review.",
+            "policy_verdict": "block",
+            "reason": "Untrusted external content was blocked and queued for review.",
         },
     ),
 ]

@@ -415,7 +415,7 @@ if __name__ == "__main__":
             file_path="prompts/inbound.txt",
             level="high",
             reason="Escalated heuristic prompt-injection risk requires review.",
-            verdict="quarantine",
+            verdict="block",
             risk_score=85,
         ),
     )

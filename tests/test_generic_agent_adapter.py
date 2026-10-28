@@ -9,6 +9,7 @@ from app.adapters.generic_agent_adapter import (
     build_generic_agent_adapter,
     build_generic_agent_adapter_request,
 )
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.policy_enforcer import PolicyDecision
 from app.services.integration_registry import initialize_integration_registry
 
@@ -56,6 +57,29 @@ def test_generic_agent_adapter_preserves_hermes_runtime_identity():
 
     assert response.platform == "hermes"
     assert response.metadata["runtime"] == "hermes"
+
+
+def test_legacy_warning_decision_is_normalized_to_block():
+    response = adapt_policy_decision_to_generic_agent(
+        PolicyDecision(
+            decision_id="legacy-warning",
+            verdict="warn",
+            risk_score=45,
+            risk_level="medium",
+            mode="monitor",
+            allow_execution=True,
+            requires_review=True,
+        ),
+        mode="monitor",
+    )
+
+    assert response.verdict == "block"
+    assert response.should_allow is False
+    assert response.should_warn is False
+    assert response.should_quarantine is False
+    assert response.should_block is True
+    assert response.should_review is True
+    assert response.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
 
 def test_build_generic_agent_adapter_returns_expected_adapter():

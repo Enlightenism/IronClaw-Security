@@ -2,13 +2,23 @@ from __future__ import annotations
 
 from collections.abc import Callable, MutableMapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.runtime.commandsupervisor import CommandPolicy, build_command_supervisor
 from app.runtime.filereturnguard import FileReturnPolicy, build_file_return_guard
 from app.runtime.networkguard import NetworkPolicy, build_network_guard
 
 ExecutorCallable = Callable[..., Any]
+
+
+def _has_suspicious_matches(policy: Any) -> bool:
+    matched_rules = getattr(policy, "matched_rules", None)
+    if matched_rules is None and hasattr(policy, "as_dict"):
+        matched_rules = policy.as_dict().get("matchedrules", [])
+    if isinstance(matched_rules, str):
+        matched_rules = [matched_rules]
+    return any(str(rule).strip().lower() != "execution_boundary" and not str(rule).strip().lower().startswith("allowed_host:") for rule in matched_rules or [])
 
 
 @dataclass(slots=True)
@@ -43,7 +53,7 @@ class SandboxExecutionRequest:
 @dataclass(slots=True)
 class SandboxExecutionDecision:
     executionstate: str
-    verdict: str
+    verdict: Literal["allow", "block"]
     allowed: bool
     shouldreview: bool
     shouldblock: bool
@@ -73,7 +83,7 @@ class SandboxExecutionDecision:
 @dataclass(slots=True)
 class SandboxExecutionResult:
     executionstate: str
-    verdict: str
+    verdict: Literal["allow", "block"]
     executed: bool
     result: Any = None
     decision: dict[str, Any] = field(default_factory=dict)
@@ -176,51 +186,42 @@ class SandboxRouter:
             )
             riskdelta += 45
 
-        verdict = "allow"
-        executionstate = "approved"
-        allowed = True
-        shouldreview = False
-        shouldblock = False
-        shouldquarantine = False
-
         policies = [policy for policy in (command_policy, network_policy, *artifact_policies) if policy is not None]
 
-        if any(getattr(policy, "should_quarantine", False) for policy in policies):
-            verdict = "quarantine"
-            executionstate = "denied"
-            allowed = False
-            shouldblock = True
-            shouldquarantine = True
-        elif any(getattr(policy, "should_block", False) for policy in policies):
-            verdict = "block"
-            executionstate = "denied"
-            allowed = False
-            shouldblock = True
-        elif any(getattr(policy, "should_review", False) for policy in policies):
-            verdict = "review"
-            executionstate = "queuedforreview"
-            shouldreview = True
-
         normalized_risk = max(0, min(100, int(riskdelta)))
+        shouldreview = any(bool(getattr(policy, "should_review", False)) or bool(getattr(policy, "should_warn", False)) or str(getattr(policy, "verdict", "allow")).strip().lower() in {"warn", "review"} for policy in policies)
+        shouldblock = normalized_risk > RISK_THRESHOLD_ALLOW_MAX or any(
+            getattr(policy, "allowed", False) is not True
+            or str(getattr(policy, "verdict", "allow")).strip().lower() != "allow"
+            or bool(getattr(policy, "should_block", False))
+            or bool(getattr(policy, "should_quarantine", False))
+            or bool(getattr(policy, "should_review", False))
+            or bool(getattr(policy, "should_warn", False))
+            or _has_suspicious_matches(policy)
+            for policy in policies
+        )
+        final_risk = max(normalized_risk, RISK_THRESHOLD_BLOCK_MIN) if shouldblock else normalized_risk
+        verdict = "block" if shouldblock else "allow"
+        executionstate = "queuedforreview" if shouldblock and shouldreview else "denied" if shouldblock else "approved"
 
         reasons.insert(
             0,
             {
                 "source": "sandboxrouter",
                 "label": "Sandbox routing",
-                "details": (f"Sandbox router evaluated action '{normalized_request.actiontype}' for target '{normalized_request.target}' with cumulative risk {normalized_risk}."),
-                "score": normalized_risk,
+                "details": (f"Sandbox router evaluated action '{normalized_request.actiontype}' for target '{normalized_request.target}' with cumulative risk {final_risk}."),
+                "score": final_risk,
             },
         )
 
         return SandboxExecutionDecision(
             executionstate=executionstate,
             verdict=verdict,
-            allowed=allowed,
+            allowed=not shouldblock,
             shouldreview=shouldreview,
             shouldblock=shouldblock,
-            shouldquarantine=shouldquarantine,
-            riskdelta=normalized_risk,
+            shouldquarantine=False,
+            riskdelta=final_risk,
             reasons=reasons,
             commandsupervision=command_policy.as_dict() if command_policy is not None else {},
             networkpolicy=network_policy.as_dict() if network_policy is not None else {},

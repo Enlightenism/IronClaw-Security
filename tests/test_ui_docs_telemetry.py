@@ -84,7 +84,7 @@ _KNOWN_EVENT_TYPES = {
     "telemetry_flush",
 }
 
-_KNOWN_VERDICTS = {"allow", "warn", "quarantine", "block"}
+_KNOWN_VERDICTS = {"allow", "block"}
 
 _KNOWN_EMISSION_MODES = {"automatic", "on-demand"}
 
@@ -533,6 +533,17 @@ def test_get_docs_telemetry_allow_example_snapshot_verdict(
     )
     assert example is not None
     assert example["eventsnapshot"].get("verdict") == "allow"
+
+
+def test_get_docs_telemetry_examples_use_only_allow_and_block_verdicts(
+    test_client: TestClient,
+) -> None:
+    response = test_client.get(URL)
+    assert response.status_code == 200
+    for example in response.json()["eventexamples"]:
+        verdict = example["eventsnapshot"].get("verdict")
+        if verdict is not None:
+            assert verdict in _KNOWN_VERDICTS
 
 
 def test_get_docs_telemetry_notes_are_non_empty_strings(test_client: TestClient) -> None:

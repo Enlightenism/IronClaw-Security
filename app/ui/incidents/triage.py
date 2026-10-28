@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+
 router = APIRouter(
     prefix="/ui/incidents",
     tags=["incident-triage"],
@@ -59,16 +61,16 @@ def _build_placeholder_items() -> list[IncidentTriageItem]:
                 IncidentExecutionRef(
                     executionid="exec-202",
                     reviewitemid="review-202",
-                    riskscore=91,
+                    riskscore=max(RISK_THRESHOLD_BLOCK_MIN, 91),
                     executionstate="denied",
                     policyverdict="block",
                 ),
                 IncidentExecutionRef(
                     executionid="exec-206",
                     reviewitemid="review-206",
-                    riskscore=88,
+                    riskscore=max(RISK_THRESHOLD_BLOCK_MIN, 88),
                     executionstate="denied",
-                    policyverdict="quarantine",
+                    policyverdict="block",
                 ),
             ],
         ),
@@ -85,16 +87,16 @@ def _build_placeholder_items() -> list[IncidentTriageItem]:
                 IncidentExecutionRef(
                     executionid="exec-203",
                     reviewitemid="review-203",
-                    riskscore=52,
+                    riskscore=max(RISK_THRESHOLD_BLOCK_MIN, 52),
                     executionstate="dryrun",
-                    policyverdict="review",
+                    policyverdict="block",
                 ),
                 IncidentExecutionRef(
                     executionid="exec-207",
                     reviewitemid="review-207",
-                    riskscore=57,
+                    riskscore=max(RISK_THRESHOLD_BLOCK_MIN, 57),
                     executionstate="dryrun",
-                    policyverdict="review",
+                    policyverdict="block",
                 ),
             ],
         ),

@@ -7,6 +7,8 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+
 router = APIRouter(
     prefix="/ui/activity",
     tags=["client-session-activity"],
@@ -92,7 +94,7 @@ def _sample_activity_records() -> list[dict[str, Any]]:
             "sessionid": "sess-alpha-001",
             "actiontype": "toolcall",
             "target": "shell",
-            "riskscore": 74,
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 74),
             "executionstate": "dryrun",
             "responsestatus": "queuedforreview",
             "policyverdict": "review",
@@ -105,10 +107,10 @@ def _sample_activity_records() -> list[dict[str, Any]]:
             "sessionid": "sess-beta-001",
             "actiontype": "httpfetch",
             "target": "https://example.com/docs",
-            "riskscore": 52,
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 52),
             "executionstate": "dryrun",
             "responsestatus": "queuedforreview",
-            "policyverdict": "review",
+            "policyverdict": "block",
             "reviewitemid": "review-103",
         },
         {
@@ -118,7 +120,7 @@ def _sample_activity_records() -> list[dict[str, Any]]:
             "sessionid": "sess-beta-002",
             "actiontype": "toolcall",
             "target": "shell",
-            "riskscore": 96,
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 96),
             "executionstate": "denied",
             "responsestatus": "denied",
             "policyverdict": "block",

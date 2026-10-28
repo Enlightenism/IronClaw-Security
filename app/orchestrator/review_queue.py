@@ -211,7 +211,7 @@ if __name__ == "__main__":
         actor_id="agent-security-01",
         action_type="tool_call",
         target="shell",
-        verdict="quarantine",
+        verdict="block",
         risk_score=88,
         reason="Risky shell operation requires human review.",
         file_path="app/orchestrator/policy_enforcer.py",

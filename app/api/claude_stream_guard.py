@@ -104,23 +104,17 @@ async def _proxy_stream_with_guard(
                             context=context,
                         )
 
-                        bundle_verdict = str(
-                            verdict.get("bundle_verdict", "allow"),
-                        ).lower()
+                        bundle_verdict = "allow" if str(verdict.get("bundle_verdict", "")).strip().lower() == "allow" else "block"
                         reason = str(verdict.get("reason", ""))
 
-                        if guard_mode == "enforce" and bundle_verdict in {
-                            "block",
-                            "quarantine",
-                        }:
+                        if bundle_verdict == "block":
                             blocked = True
                             yield _build_block_warning(reason, bundle_verdict)
                             break
 
+                        safe_text = buffer[scanned_upto:]
                         scanned_upto = len(buffer)
-
-                    if not blocked:
-                        yield chunk.encode("utf-8")
+                        yield safe_text.encode("utf-8")
 
                 if not blocked and len(buffer) > scanned_upto:
                     verdict = await _scan_chunk_with_policy_guard(
@@ -131,16 +125,13 @@ async def _proxy_stream_with_guard(
                         context=context,
                     )
 
-                    bundle_verdict = str(
-                        verdict.get("bundle_verdict", "allow"),
-                    ).lower()
+                    bundle_verdict = "allow" if str(verdict.get("bundle_verdict", "")).strip().lower() == "allow" else "block"
                     reason = str(verdict.get("reason", ""))
 
-                    if guard_mode == "enforce" and bundle_verdict in {
-                        "block",
-                        "quarantine",
-                    }:
+                    if bundle_verdict == "block":
                         yield _build_block_warning(reason, bundle_verdict)
+                    else:
+                        yield buffer[scanned_upto:].encode("utf-8")
 
         except httpx.HTTPError as exc:
             error_msg = f"[IRONCLAW-GUARD] Upstream streaming error: {exc!r}"

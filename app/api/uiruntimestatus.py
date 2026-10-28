@@ -35,7 +35,7 @@ class RuntimePolicyStatus(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     policymode: Literal["dryrun", "enforce", "lockdown"] = Field(default="dryrun")
-    defaultaction: Literal["allow", "review", "block"] = Field(default="review")
+    defaultaction: Literal["allow", "block"] = Field(default="block")
 
 
 class RuntimeStatusPageResponse(BaseModel):
@@ -78,7 +78,7 @@ def runtime_status_page() -> RuntimeStatusPageResponse:
     if "policy" not in payload or not isinstance(payload["policy"], dict):
         payload["policy"] = {
             "policymode": "dryrun",
-            "defaultaction": "review",
+            "defaultaction": "block",
         }
 
     return RuntimeStatusPageResponse.model_validate(payload)

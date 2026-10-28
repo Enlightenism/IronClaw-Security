@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -16,17 +18,17 @@ class ActionGuardRequest(BaseModel):
 class ActionGuardResponse(BaseModel):
     action_type: str
     target: str
-    policy_verdict: str
+    policy_verdict: Literal["allow", "block"]
     risk_score: int
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     reason: str | None = None
 
 
 class ActionPolicyResponse(BaseModel):
     action_type: str
     target: str
-    policy_verdict: str
+    policy_verdict: Literal["allow", "block"]
     risk_score: int
     should_execute: bool
     halted_by_boundary: bool
@@ -36,9 +38,9 @@ class ActionPolicyResponse(BaseModel):
 class ActionDecisionResponse(BaseModel):
     action_type: str
     target: str
-    verdict: str
+    verdict: Literal["allow", "block"]
     risk_score: int
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     decision_source: str | None = None
     reason: str | None = None

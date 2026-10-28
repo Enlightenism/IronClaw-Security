@@ -211,7 +211,7 @@ def build_claude_error_response(
 def build_claude_success_response(
     *,
     operation: Literal["scan", "action_policy", "action_decision", "execute"],
-    verdict: Literal["allow", "review", "block"],
+    verdict: Literal["allow", "block"],
     summary: str,
     should_halt: bool = False,
     should_warn: bool = False,

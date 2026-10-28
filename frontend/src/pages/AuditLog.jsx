@@ -23,9 +23,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const VERDICTS = ["allow", "warn", "quarantine", "block"];
+const VERDICTS = ["allow", "block"];
 const PAGE_SIZE = 20;
 
+// Legacy values remain styled for historical audit rows, not new filters.
 const verdictVariant = (verdict) => {
   switch (verdict) {
     case "allow":

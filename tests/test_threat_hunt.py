@@ -8,7 +8,7 @@ from pydantic import ValidationError
 import pytest
 
 from app.schemas.threat_detection import (
-    DetectionVerdict,
+    HistoricalDetectionVerdict,
     HuntMatch,
     HuntQuery,
     HuntResult,
@@ -552,7 +552,7 @@ class TestHuntMatchFieldIntegrity:
         match = service._row_to_hunt_match(row, query)
 
         assert match is not None
-        assert match.verdict == DetectionVerdict.BLOCK
+        assert match.verdict == HistoricalDetectionVerdict.BLOCK
 
     def test_match_severity_is_deserialized_correctly(self, service: ThreatHuntService) -> None:
         row = _make_row(severity="critical", extracted_indicators=["192.0.2.1"])
@@ -608,13 +608,13 @@ class TestHuntMatchFieldIntegrity:
         assert "lateral_movement" in match.risk_families
         assert "exfiltration" in match.risk_families
 
-    def test_invalid_verdict_falls_back_to_monitor(self, service: ThreatHuntService) -> None:
+    def test_invalid_verdict_falls_back_to_block(self, service: ThreatHuntService) -> None:
         row = _make_row(verdict="totally_invalid", extracted_indicators=["192.0.2.1"])
         query = _make_query()
         match = service._row_to_hunt_match(row, query)
 
         assert match is not None
-        assert match.verdict == DetectionVerdict.MONITOR
+        assert match.verdict == HistoricalDetectionVerdict.BLOCK
 
     def test_invalid_severity_falls_back_to_low(self, service: ThreatHuntService) -> None:
         row = _make_row(severity="not_a_level", extracted_indicators=["192.0.2.1"])

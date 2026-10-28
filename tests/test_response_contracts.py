@@ -270,9 +270,9 @@ def test_guard_bundle_contract(client: TestClient) -> None:
     body = response.json()
     assert isinstance(body, dict)
     _assert_has_keys(body, {"highest_verdict", "should_halt", "should_warn"})
-    assert isinstance(body["should_halt"], bool)
-    assert isinstance(body["should_warn"], bool)
-    assert isinstance(body["highest_verdict"], str)
+    assert body["highest_verdict"] in {"allow", "block"}
+    assert body["should_halt"] is (body["highest_verdict"] == "block")
+    assert body["should_warn"] is False
 
 
 # ===========================================================================

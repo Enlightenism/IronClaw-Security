@@ -56,7 +56,7 @@ curl -X POST "$IRONCLAW_BASE_URL/claude/bootstrap" \
     "Configure Claude Code's proxy to send all external tool calls through /guard/execute.",
     "Send combined prompt/context/model output bundles to /policy/guard-bundle before showing them to the user.",
     "Always include X-API-Key using the value from IRONCLAW_GUARD_API_KEY.",
-    "Use IRONCLAW_GUARD_MODE to decide whether to enforce blocks or only warn in the UI."
+    "Use IRONCLAW_GUARD_MODE for logging and presentation only; every mode must honor block verdicts."
   ]
 }
 ```
@@ -128,7 +128,7 @@ def execute_tool_with_guard(tool_name: str, args: Dict[str, Any]) -> Any:
 
     # Expected high-level shape:
     # {
-    #   "policy_verdict": "allow" | "review" | "block",
+    #   "policy_verdict": "allow" | "block",
     #   "should_execute": true/false,
     #   "halted_by_boundary": true/false,
     #   "reason": "..."
@@ -178,42 +178,35 @@ def guard_and_render_response(
 
     # Expected high-level shape:
     # {
-    #   "bundle_verdict": "allow" | "warn" | "quarantine" | "block",
+    #   "bundle_verdict": "allow" | "block",
     #   "reason": "..."
     # }
 
-    bundle_verdict = verdict.get("bundle_verdict", "allow")
+    bundle_verdict = verdict.get("bundle_verdict", "block")
     reason = verdict.get("reason", "")
 
-    if bundle_verdict in {"block", "quarantine"}:
+    if bundle_verdict != "allow":
         # Replace unsafe content with a safe explanation.
         return f"⚠️ Response blocked by IronClaw security guard.\n\nReason: {reason or 'high-risk content detected.'}"
 
-    if bundle_verdict == "warn":
-        # Optionally annotate the response with a warning banner.
-        return "⚠️ IronClaw detected potentially risky content. Review carefully.\n\n" + model_output
-
-    # bundle_verdict == "allow"
     return model_output
 ```
 
-Claude Code never sees the raw model output until IronClaw approves or
-annotates it, which helps block prompt injections and unsafe content
-before it reaches the user.
+Claude Code never sees the raw model output unless IronClaw returns `allow`;
+blocked or unrecognized results are withheld before they reach the user.
 
 ## 6. Mapping guard modes in Claude Code
 
 Respect `IRONCLAW_GUARD_MODE` in your proxy logic:
 
 - `enforce`:
-  - Block / quarantine results as shown above.
-  - Throw errors or surface warnings in the editor when an action is blocked.
+  - Withhold every result that is not `allow`.
+  - Throw an error or surface the block reason in the editor.
 - `assist`:
-  - Always return content but annotate warnings instead of hard blocking.
-  - Useful during rollout or for less trusted projects.
+  - May add logging or operator guidance, but must still withhold blocked content.
 - `dryrun`:
-  - Call the guard endpoints and log results.
-  - Never block; use this mode for evaluation in non‑prod environments.
+  - Log guard results for evaluation.
+  - A `block` result still prevents content or actions from proceeding.
 
 ### Example mode-sensitive handling
 
@@ -228,28 +221,15 @@ GUARD_MODE = os.environ.get("IRONCLAW_GUARD_MODE", "enforce").lower()
 def guard_and_maybe_block(model_output: str, bundle: dict) -> str:
     guard = get_guard_client()
     verdict = guard.guard_bundle(bundle)
-    bundle_verdict = verdict.get("bundle_verdict", "allow")
+    bundle_verdict = verdict.get("bundle_verdict", "block")
     reason = verdict.get("reason", "")
 
-    if GUARD_MODE == "dryrun":
-        # Log only; never block.
-        log_guard_verdict(bundle_verdict, reason)
-        return model_output
-
-    if GUARD_MODE == "assist":
-        if bundle_verdict in {"block", "quarantine", "warn"}:
-            log_guard_verdict(bundle_verdict, reason)
-            return f"⚠️ IronClaw flagged this response as potentially unsafe.\n\nReason: {reason or 'review recommended.'}\n\n" + model_output
-        return model_output
-
-    # GUARD_MODE == "enforce"
-    if bundle_verdict in {"block", "quarantine"}:
+    if bundle_verdict != "allow":
         log_guard_verdict(bundle_verdict, reason)
         return f"⚠️ Response blocked by IronClaw security guard.\n\nReason: {reason or 'high-risk content detected.'}"
 
-    if bundle_verdict == "warn":
+    if GUARD_MODE in {"assist", "dryrun"}:
         log_guard_verdict(bundle_verdict, reason)
-        return "⚠️ IronClaw warns this response may be unsafe.\n\n" + model_output
 
     return model_output
 ```
@@ -276,7 +256,8 @@ def on_shutdown() -> None:
 - Guard external actions via `guard_execute`.
 - Guard combined prompt/output bundles via `guard_bundle` before displaying
   anything to the user.
-- Respect `IRONCLAW_GUARD_MODE` to control enforce/assist/dryrun behavior.
+- Respect `IRONCLAW_GUARD_MODE` for logging and presentation; no mode may bypass
+  a block verdict.
 
 This keeps Claude Code flexible while ensuring IronClaw remains the
 front‑line security boundary for all agent actions and outputs.

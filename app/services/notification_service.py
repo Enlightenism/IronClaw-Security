@@ -25,6 +25,7 @@ class NotificationEvent(StrEnum):
     INCIDENT_OPENED = "incident_opened"
     INCIDENT_ESCALATED = "incident_escalated"
     INCIDENT_RESOLVED = "incident_resolved"
+    POLICY_ALLOW = "policy_allow"
     POLICY_BLOCK = "policy_block"
     POLICY_QUARANTINE = "policy_quarantine"
     REVIEW_ITEM_SUBMITTED = "review_item_submitted"
@@ -670,6 +671,7 @@ _EVENT_SEVERITY_MAP: dict[str, NotificationSeverity] = {
     NotificationEvent.INCIDENT_OPENED.value: "warning",
     NotificationEvent.INCIDENT_ESCALATED.value: "critical",
     NotificationEvent.INCIDENT_RESOLVED.value: "info",
+    NotificationEvent.POLICY_ALLOW.value: "info",
     NotificationEvent.POLICY_BLOCK.value: "critical",
     NotificationEvent.POLICY_QUARANTINE.value: "warning",
     NotificationEvent.REVIEW_ITEM_SUBMITTED.value: "info",
@@ -767,10 +769,11 @@ def dispatch_policy_block(
     org_id: str | None = None,
     channels: list[NotificationChannel] | None = None,
 ) -> DispatchResult:
-    event = NotificationEvent.POLICY_BLOCK if verdict == "block" else NotificationEvent.POLICY_QUARANTINE
+    normalized_verdict = "allow" if verdict.strip().lower() == "allow" else "block"
+    event = NotificationEvent.POLICY_ALLOW if normalized_verdict == "allow" else NotificationEvent.POLICY_BLOCK
     payload = build_notification_payload(
         event=event,
-        title=f"IronClaw Policy {verdict.upper()}: {decision_id}",
+        title=f"IronClaw Policy {normalized_verdict.upper()}: {decision_id}",
         body=summary,
         source_id=decision_id,
         source_type="policy_decision",
@@ -778,7 +781,7 @@ def dispatch_policy_block(
         session_id=session_id,
         trace_id=trace_id,
         org_id=org_id,
-        metadata={"verdict": verdict},
+        metadata={"verdict": normalized_verdict},
     )
     return dispatch_notification(engine, payload, channels=channels)
 

@@ -14,7 +14,7 @@ router = APIRouter()
 
 class GuardedTextResponse(BaseModel):
     context_type: ContextType
-    verdict: Literal["allow", "warn", "quarantine", "block"]
+    verdict: Literal["allow", "block"]
     scan_id: str | None
     summary: str
     risk_score: int
@@ -22,7 +22,7 @@ class GuardedTextResponse(BaseModel):
     original_text: str
     effective_text: str
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     client_id: str | None = None
     session_id: str | None = None
 
@@ -41,9 +41,9 @@ class PromptGuardResponse(BaseModel):
     retrieved_doc: GuardedTextResponse | None
     tool_output: GuardedTextResponse | None
     model_output: GuardedTextResponse | None
-    highest_verdict: Literal["allow", "warn", "quarantine", "block"]
+    highest_verdict: Literal["allow", "block"]
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     client_id: str | None = None
     session_id: str | None = None
 

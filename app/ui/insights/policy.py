@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+
 router = APIRouter(
     prefix="/ui/insights",
     tags=["policy-insights"],
@@ -62,16 +64,16 @@ def _sample_execution_records() -> list[dict]:
         {
             "executionid": "exec-002",
             "timestamp": _utc_iso(2026, 4, 18, 9),
-            "riskscore": 55,
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 55),
             "executionstate": "dryrun",
-            "policyverdict": "review",
+            "policyverdict": "block",
             "reviewitemid": "review-002",
             "reasons": [{"source": "policy", "label": "mid-risk-fetch"}],
         },
         {
             "executionid": "exec-003",
             "timestamp": _utc_iso(2026, 4, 18, 10),
-            "riskscore": 95,
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 95),
             "executionstate": "denied",
             "policyverdict": "block",
             "reviewitemid": "review-003",
@@ -92,18 +94,18 @@ def _sample_execution_records() -> list[dict]:
         {
             "executionid": "exec-005",
             "timestamp": _utc_iso(2026, 4, 18, 12),
-            "riskscore": 74,
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 74),
             "executionstate": "dryrun",
-            "policyverdict": "review",
+            "policyverdict": "block",
             "reviewitemid": "review-005",
             "reasons": [{"source": "policy", "label": "sensitive-tooling"}],
         },
         {
             "executionid": "exec-006",
             "timestamp": _utc_iso(2026, 4, 18, 13),
-            "riskscore": 88,
+            "riskscore": max(RISK_THRESHOLD_BLOCK_MIN, 88),
             "executionstate": "denied",
-            "policyverdict": "quarantine",
+            "policyverdict": "block",
             "reviewitemid": "review-006",
             "reasons": [{"source": "policy", "label": "exfiltration-pattern"}],
         },

@@ -10,6 +10,7 @@ from app.adapters.malwi_adapter import (
     evaluate_malwi_request,
     summarize_malwi_adapter_response,
 )
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.policy_enforcer import initialize_policy_engine
 from app.services.integration_registry import IntegrationRecord
 
@@ -128,7 +129,7 @@ def test_malwi_request_to_dict_roundtrip() -> None:
 def test_adapt_policy_decision_allow() -> None:
     req = build_malwi_adapter_request(action_type="lookup_hash", target="abc123")
     decision = evaluate_malwi_request(_ENGINE, req)
-    assert decision.verdict in {"allow", "warn", "quarantine", "block"}
+    assert decision.verdict in {"allow", "block"}
     assert isinstance(decision.risk_score, int)
     assert decision.adapter_name == "ironclaw-malwi"
     assert decision.platform == "malwi"
@@ -137,11 +138,14 @@ def test_adapt_policy_decision_allow() -> None:
 def test_adapt_policy_decision_verdicts_are_consistent_malwi() -> None:
     req = build_malwi_adapter_request(action_type="lookup_ip", target="10.0.0.1")
     resp = evaluate_malwi_request(_ENGINE, req, mode="monitor")
+    assert resp.verdict in {"allow", "block"}
     assert resp.should_allow == (resp.verdict == "allow")
-    assert resp.should_warn == (resp.verdict == "warn")
-    assert resp.should_quarantine == (resp.verdict == "quarantine")
+    assert resp.should_warn is False
+    assert resp.should_quarantine is False
     assert resp.should_block == (resp.verdict == "block")
-    assert resp.should_hold == (resp.verdict in {"warn", "quarantine", "block"})
+    assert resp.should_hold == (resp.verdict == "block")
+    if resp.verdict == "block":
+        assert resp.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
 
 def test_adapt_policy_decision_trace_id_propagated_malwi() -> None:

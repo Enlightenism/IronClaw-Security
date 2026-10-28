@@ -67,7 +67,7 @@ def _result_payload(**overrides: Any) -> dict[str, Any]:
         "org_id": "org-1",
         "agent_id": "agent-1",
         "session_id": "session-1",
-        "verdict": canonical.DetectionVerdict.REVIEW,
+        "verdict": canonical.DetectionVerdict.BLOCK,
         "score": 0.7,
         "severity": canonical.ThreatSeverityLevel.HIGH,
         "scanned_text": "connect to 1.2.3.4 via https://evil.example.com",
@@ -137,7 +137,7 @@ def _hunt_match_payload(**overrides: Any) -> dict[str, Any]:
         "org_id": "org-1",
         "agent_id": "agent-1",
         "session_id": "session-1",
-        "verdict": canonical.DetectionVerdict.REVIEW,
+        "verdict": canonical.HistoricalDetectionVerdict.REVIEW,
         "score": 0.7,
         "severity": canonical.ThreatSeverityLevel.HIGH,
         "matched_ioc_value": "1.2.3.4",
@@ -309,7 +309,7 @@ def _detection_summary_payload(**overrides: Any) -> dict[str, Any]:
         "org_id": "org-1",
         "agent_id": "agent-1",
         "session_id": "session-1",
-        "verdict": canonical.DetectionVerdict.REVIEW,
+        "verdict": canonical.HistoricalDetectionVerdict.REVIEW,
         "score": 0.6,
         "severity": canonical.ThreatSeverityLevel.HIGH,
         "ioc_match_count": 2,
@@ -355,10 +355,15 @@ class TestThreatDetectionShimIdentity:
 
 class TestCanonicalEnums:
     def test_detection_verdict_values(self) -> None:
-        assert canonical.DetectionVerdict.ALLOW.value == "allow"
-        assert canonical.DetectionVerdict.MONITOR.value == "monitor"
-        assert canonical.DetectionVerdict.REVIEW.value == "review"
-        assert canonical.DetectionVerdict.BLOCK.value == "block"
+        assert {verdict.value for verdict in canonical.DetectionVerdict} == {"allow", "block"}
+
+    def test_historical_verdict_values(self) -> None:
+        assert {verdict.value for verdict in canonical.HistoricalDetectionVerdict} == {
+            "allow",
+            "monitor",
+            "review",
+            "block",
+        }
 
     def test_threat_severity_values(self) -> None:
         assert canonical.ThreatSeverityLevel.INFO.value == "info"
@@ -519,7 +524,7 @@ class TestDetectionResult:
         assert model.org_id == "org-1"
         assert model.agent_id == "agent-1"
         assert model.session_id == "session-1"
-        assert model.verdict == canonical.DetectionVerdict.REVIEW
+        assert model.verdict == canonical.DetectionVerdict.BLOCK
         assert model.score == 0.7
         assert model.severity == canonical.ThreatSeverityLevel.HIGH
         assert model.scanned_text == "connect to 1.2.3.4 via https://evil.example.com"
@@ -538,23 +543,42 @@ class TestDetectionResult:
         assert model.correlation_signals[0].mitre_technique_ids == ["T1059", "T1204"]
         assert model.mitre_techniques == ["T1059", "T1204"]
 
-    def test_is_threat_for_review_and_block(self) -> None:
-        review = canonical.DetectionResult(**_result_payload(verdict=canonical.DetectionVerdict.REVIEW))
+    def test_is_threat_for_block(self) -> None:
         block = canonical.DetectionResult(**_result_payload(verdict=canonical.DetectionVerdict.BLOCK))
-        assert review.is_threat is True
         assert block.is_threat is True
 
-    def test_is_threat_false_for_allow_and_monitor(self) -> None:
-        allow = canonical.DetectionResult(**_result_payload(verdict=canonical.DetectionVerdict.ALLOW))
-        monitor = canonical.DetectionResult(**_result_payload(verdict=canonical.DetectionVerdict.MONITOR))
+    def test_clean_allow_is_not_a_threat(self) -> None:
+        allow = canonical.DetectionResult(
+            **_result_payload(
+                verdict=canonical.DetectionVerdict.ALLOW,
+                score=0.0,
+                ioc_matches=[],
+                correlation_signals=[],
+            )
+        )
         assert allow.is_threat is False
-        assert monitor.is_threat is False
+
+    def test_allow_with_suspicious_signals_is_normalized_to_block(self) -> None:
+        model = canonical.DetectionResult(**_result_payload(verdict=canonical.DetectionVerdict.ALLOW))
+        assert model.verdict == canonical.DetectionVerdict.BLOCK
+
+    def test_rejects_legacy_verdict_values(self) -> None:
+        for verdict in ("warn", "quarantine", "monitor", "review"):
+            with pytest.raises(ValidationError):
+                canonical.DetectionResult(**_result_payload(verdict=verdict))
 
     def test_requires_block_only_for_block(self) -> None:
-        review = canonical.DetectionResult(**_result_payload(verdict=canonical.DetectionVerdict.REVIEW))
         block = canonical.DetectionResult(**_result_payload(verdict=canonical.DetectionVerdict.BLOCK))
-        assert review.requires_block is False
         assert block.requires_block is True
+        allow = canonical.DetectionResult(
+            **_result_payload(
+                verdict=canonical.DetectionVerdict.ALLOW,
+                score=0.0,
+                ioc_matches=[],
+                correlation_signals=[],
+            )
+        )
+        assert allow.requires_block is False
 
     def test_top_ioc_returns_highest_confidence(self) -> None:
         model = canonical.DetectionResult(
@@ -899,7 +923,7 @@ class TestDetectionSummary:
         assert model.org_id == "org-1"
         assert model.agent_id == "agent-1"
         assert model.session_id == "session-1"
-        assert model.verdict == canonical.DetectionVerdict.REVIEW
+        assert model.verdict == canonical.HistoricalDetectionVerdict.REVIEW
         assert model.score == 0.6
         assert model.severity == canonical.ThreatSeverityLevel.HIGH
         assert model.ioc_match_count == 2

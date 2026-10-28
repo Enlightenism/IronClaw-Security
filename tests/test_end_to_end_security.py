@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.core.auth import API_KEY_HEADER_NAME
 from app.main import create_app
 
@@ -16,7 +17,7 @@ def _auth_headers() -> dict[str, str]:
     return {API_KEY_HEADER_NAME: "test-api-key"}
 
 
-def test_end_to_end_safe_http_fetch_flow_allows_execution() -> None:
+def test_end_to_end_http_fetch_is_blocked_without_allowlist() -> None:
     app = _make_app()
     client = TestClient(app)
 
@@ -37,8 +38,8 @@ def test_end_to_end_safe_http_fetch_flow_allows_execution() -> None:
         return
 
     guard_body = guard_response.json()
-    assert guard_body["verdict"] in {"allow", "warn"}
-    assert guard_body["should_halt"] is False
+    assert guard_body["verdict"] == "block"
+    assert guard_body["should_halt"] is True
 
     exec_response = client.post(
         "/guard/execute",
@@ -59,13 +60,13 @@ def test_end_to_end_safe_http_fetch_flow_allows_execution() -> None:
         return
 
     exec_body = exec_response.json()
-    assert exec_body["response_status"] in {"completed", "queued_for_review", "denied"}
+    assert exec_body["response_status"] in {"queued_for_review", "denied"}
     assert exec_body["execution_id"]
     assert exec_body["trace_id"]
     assert isinstance(exec_body.get("risk_score"), int)
 
 
-def test_end_to_end_high_risk_tool_call_is_quarantined_or_denied() -> None:
+def test_end_to_end_high_risk_tool_call_is_blocked() -> None:
     app = _make_app()
     client = TestClient(app)
 
@@ -86,9 +87,9 @@ def test_end_to_end_high_risk_tool_call_is_quarantined_or_denied() -> None:
         return
 
     guard_body = guard_response.json()
-    assert guard_body["verdict"] in {"quarantine", "block"}
+    assert guard_body["verdict"] == "block"
     assert guard_body["should_halt"] is True
-    assert guard_body["risk_score"] >= 20
+    assert guard_body["risk_score"] >= RISK_THRESHOLD_BLOCK_MIN
 
     exec_response = client.post(
         "/guard/execute",
@@ -111,8 +112,8 @@ def test_end_to_end_high_risk_tool_call_is_quarantined_or_denied() -> None:
     exec_body = exec_response.json()
     assert exec_body["response_status"] in {"completed", "queued_for_review", "denied"}
     assert exec_body["execution_state"] in {"executed", "denied", "held", "failed"}
-    assert exec_body["risk_score"] >= 50
-    assert exec_body["policy_verdict"] in {"quarantine", "block", "warn", "allow"}
+    assert exec_body["risk_score"] >= RISK_THRESHOLD_BLOCK_MIN
+    assert exec_body["policy_verdict"] == "block"
 
 
 def test_end_to_end_history_and_audit_are_accessible() -> None:

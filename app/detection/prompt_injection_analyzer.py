@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 HIGH_CONFIDENCE_PATTERNS = {
     "ignore previous instructions": 45,
@@ -51,7 +51,7 @@ SOCIAL_ENGINEERING_PATTERNS = {
 class PromptInjectionAnalysis:
     detected: bool
     risk_score: int
-    verdict: str
+    verdict: Literal["allow", "block"]
     confidence: str
     reason: str
     matched_patterns: list[str] = field(default_factory=list)
@@ -122,11 +122,11 @@ def _score_patterns(text: str) -> tuple[int, list[str]]:
     return min(100, score), matched
 
 
-def _derive_verdict(score: int) -> tuple[str, str]:
+def _derive_verdict(score: int) -> tuple[Literal["allow", "block"], str]:
     if score >= 70:
-        return "quarantine", "high"
+        return "block", "high"
     if score >= 35:
-        return "warn", "medium"
+        return "block", "medium"
     return "allow", "low"
 
 
@@ -134,8 +134,10 @@ def analyze_prompt_injection(payload: Any) -> PromptInjectionAnalysis:
     text = _get_text(payload)
     score, matched_patterns = _score_patterns(text)
     verdict, confidence = _derive_verdict(score)
+    if matched_patterns:
+        verdict = "block"
 
-    detected = score >= 35
+    detected = verdict == "block"
     failed_checks = []
 
     if matched_patterns:

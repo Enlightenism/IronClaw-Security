@@ -7,11 +7,11 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
+
 
 class PolicyVerdict(StrEnum):
     ALLOW = "allow"
-    WARN = "warn"
-    QUARANTINE = "quarantine"
     BLOCK = "block"
 
 
@@ -30,6 +30,16 @@ class RiskLevel(StrEnum):
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
+
+
+def _normalize_verdict(value: Any) -> PolicyVerdict:
+    if isinstance(value, PolicyVerdict):
+        return value
+    return PolicyVerdict.ALLOW if str(value).strip().lower() == PolicyVerdict.ALLOW.value else PolicyVerdict.BLOCK
+
+
+def _is_valid_risk_score(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100
 
 
 @dataclass(slots=True)
@@ -54,7 +64,7 @@ class PolicyRule:
     name: str
     description: str
     target: PolicyTarget = PolicyTarget.UNKNOWN
-    verdict: PolicyVerdict = PolicyVerdict.WARN
+    verdict: PolicyVerdict = PolicyVerdict.BLOCK
     enabled: bool = True
     priority: int = 100
     tags: tuple[str, ...] = ()
@@ -66,15 +76,19 @@ class PolicyRule:
     require_human_review: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        self.verdict = _normalize_verdict(self.verdict)
+        if not isinstance(self.target, PolicyTarget):
+            target_value = str(self.target).strip().lower()
+            self.target = PolicyTarget(target_value) if target_value in {item.value for item in PolicyTarget} else PolicyTarget.UNKNOWN
+
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> PolicyRule:
         target = data.get("target", PolicyTarget.UNKNOWN)
-        verdict = data.get("verdict", PolicyVerdict.WARN)
+        verdict = _normalize_verdict(data.get("verdict", PolicyVerdict.BLOCK))
 
         if not isinstance(target, PolicyTarget):
             target = PolicyTarget(str(target).lower()) if str(target).lower() in {t.value for t in PolicyTarget} else PolicyTarget.UNKNOWN
-        if not isinstance(verdict, PolicyVerdict):
-            verdict = PolicyVerdict(str(verdict).lower()) if str(verdict).lower() in {v.value for v in PolicyVerdict} else PolicyVerdict.WARN
 
         contains_raw = data.get("contains", {}) or {}
         normalized_contains: dict[str, tuple[str, ...]] = {}
@@ -126,7 +140,8 @@ class PolicyRule:
             if not all(needle in haystack for needle in needles):
                 return False
 
-        if self.min_risk_score is not None and request.risk_score < self.min_risk_score:
+        has_match_predicates = bool(self.match_any_keys or self.match_all_keys or self.equals or self.contains)
+        if self.min_risk_score is not None and request.risk_score < self.min_risk_score and not has_match_predicates:
             return False
 
         return True
@@ -163,6 +178,13 @@ class PolicyRequest:
     requires_human_review: bool = False
     fail_closed: bool = True
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.target, PolicyTarget):
+            target_str = str(self.target).lower()
+            self.target = PolicyTarget(target_str) if target_str in {item.value for item in PolicyTarget} else PolicyTarget.UNKNOWN
+        if not _is_valid_risk_score(self.risk_score):
+            self.risk_score = RISK_THRESHOLD_BLOCK_MIN
+
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any] | None) -> PolicyRequest:
         data = data or {}
@@ -195,7 +217,10 @@ class PolicyRequest:
         return cls(
             target=target,
             action=str(data.get("action") or "unknown"),
-            risk_score=_safe_int(data.get("risk_score"), default=0),
+            risk_score=_safe_int(
+                data.get("risk_score"),
+                default=RISK_THRESHOLD_BLOCK_MIN,
+            ),
             attributes=attributes,
             source=_none_if_blank(data.get("source")),
             actor_id=_none_if_blank(data.get("actor_id")),
@@ -272,9 +297,9 @@ DEFAULT_POLICY_RULES: tuple[PolicyRule, ...] = (
     PolicyRule(
         rule_id="quarantine-high-risk-runtime",
         name="quarantine_high_risk_runtime",
-        description="High-risk runtime requests are quarantined for containment.",
+        description="High-risk runtime requests are blocked for containment.",
         target=PolicyTarget.RUNTIME,
-        verdict=PolicyVerdict.QUARANTINE,
+        verdict=PolicyVerdict.BLOCK,
         min_risk_score=75,
         priority=900,
         require_human_review=True,
@@ -290,9 +315,9 @@ DEFAULT_POLICY_RULES: tuple[PolicyRule, ...] = (
     PolicyRule(
         rule_id="warn-networked-tool-use",
         name="warn_networked_tool_use",
-        description="Network-enabled tool use requires elevated scrutiny.",
+        description="Network-enabled tool use is blocked for security review.",
         target=PolicyTarget.TOOL,
-        verdict=PolicyVerdict.WARN,
+        verdict=PolicyVerdict.BLOCK,
         priority=300,
         match_any_keys=("tool_name",),
     ),
@@ -301,7 +326,7 @@ DEFAULT_POLICY_RULES: tuple[PolicyRule, ...] = (
         name="review_sensitive_filesystem_access",
         description="Sensitive filesystem access must be reviewed before execution.",
         target=PolicyTarget.ACTION,
-        verdict=PolicyVerdict.WARN,
+        verdict=PolicyVerdict.BLOCK,
         priority=400,
         contains={"path": ("users", "appdata")},
         require_human_review=True,
@@ -326,8 +351,10 @@ class PolicyEngine:
                 materialized_rules.append(rule if isinstance(rule, PolicyRule) else PolicyRule.from_mapping(rule))
 
         self._rules: list[PolicyRule] = sorted(materialized_rules, key=lambda item: item.priority, reverse=True)
-        self.default_verdict = default_verdict
-        self.fail_closed_verdict = fail_closed_verdict
+        self.default_verdict = _normalize_verdict(default_verdict)
+        self.fail_closed_verdict = _normalize_verdict(fail_closed_verdict)
+        if self.fail_closed_verdict == PolicyVerdict.ALLOW:
+            self.fail_closed_verdict = PolicyVerdict.BLOCK
 
     @property
     def rules(self) -> tuple[PolicyRule, ...]:
@@ -361,10 +388,10 @@ class PolicyEngine:
         decision = PolicyDecision(
             decision_id=f"pol-{uuid4().hex}",
             verdict=verdict,
-            allowed=verdict in {PolicyVerdict.ALLOW, PolicyVerdict.WARN},
+            allowed=verdict == PolicyVerdict.ALLOW,
             action=normalized.action,
             target=normalized.target,
-            risk_score=normalized.risk_score,
+            risk_score=(normalized.risk_score if verdict == PolicyVerdict.ALLOW else max(normalized.risk_score, RISK_THRESHOLD_BLOCK_MIN)),
             reasons=reasons,
             evidence=evidence,
             matched_rules=[rule.rule_id for rule in matched_rules],
@@ -373,12 +400,13 @@ class PolicyEngine:
             metadata=metadata,
         )
 
-        if verdict in {PolicyVerdict.BLOCK, PolicyVerdict.QUARANTINE}:
-            decision.allowed = False
-
         if requires_human_review and verdict == PolicyVerdict.ALLOW:
-            decision.verdict = PolicyVerdict.WARN
-            decision.allowed = True
+            decision.verdict = PolicyVerdict.BLOCK
+            decision.allowed = False
+            decision.risk_score = max(
+                decision.risk_score,
+                RISK_THRESHOLD_BLOCK_MIN,
+            )
             if "Human review required before unrestricted execution." not in decision.reasons:
                 decision.reasons.append("Human review required before unrestricted execution.")
 
@@ -406,9 +434,9 @@ class PolicyEngine:
 
     def _resolve_verdict(self, request: PolicyRequest, matched_rules: Sequence[PolicyRule]) -> PolicyVerdict:
         if matched_rules:
-            return max((rule.verdict for rule in matched_rules), key=_verdict_rank)
+            return PolicyVerdict.BLOCK
 
-        if request.fail_closed and self._request_is_unsafe_or_unknown(request):
+        if self._request_is_unsafe_or_unknown(request):
             return self.fail_closed_verdict
 
         return self.default_verdict
@@ -416,19 +444,17 @@ class PolicyEngine:
     def _request_is_unsafe_or_unknown(self, request: PolicyRequest) -> bool:
         if request.target == PolicyTarget.UNKNOWN:
             return True
-        if request.risk_score >= 70:
+        if request.risk_score > RISK_THRESHOLD_ALLOW_MAX:
             return True
         if request.requires_secrets and request.requires_network:
+            return True
+        if request.requires_human_review:
             return True
         return False
 
     def _default_reason_for_verdict(self, verdict: PolicyVerdict, request: PolicyRequest) -> str:
         if verdict == PolicyVerdict.ALLOW:
             return "No blocking policy conditions were matched."
-        if verdict == PolicyVerdict.WARN:
-            return "Request is allowed with elevated caution."
-        if verdict == PolicyVerdict.QUARANTINE:
-            return "Request is quarantined pending containment or review."
         return f"Request was blocked by {request.target.value} policy safeguards."
 
     def _calculate_confidence(
@@ -441,7 +467,7 @@ class PolicyEngine:
         if matched_rules:
             base += min(len(matched_rules) * 0.1, 0.3)
         base += min(max(request.risk_score, 0), 100) / 1000.0
-        if verdict in {PolicyVerdict.BLOCK, PolicyVerdict.QUARANTINE}:
+        if verdict == PolicyVerdict.BLOCK:
             base += 0.1
         return round(min(base, 0.99), 3)
 
@@ -483,9 +509,7 @@ def decide_policy(
 def _verdict_rank(verdict: PolicyVerdict) -> int:
     order = {
         PolicyVerdict.ALLOW: 0,
-        PolicyVerdict.WARN: 1,
-        PolicyVerdict.QUARANTINE: 2,
-        PolicyVerdict.BLOCK: 3,
+        PolicyVerdict.BLOCK: 1,
     }
     return order[verdict]
 
@@ -493,8 +517,6 @@ def _verdict_rank(verdict: PolicyVerdict) -> int:
 def _severity_for_verdict(verdict: PolicyVerdict) -> RiskLevel:
     mapping = {
         PolicyVerdict.ALLOW: RiskLevel.LOW,
-        PolicyVerdict.WARN: RiskLevel.MEDIUM,
-        PolicyVerdict.QUARANTINE: RiskLevel.HIGH,
         PolicyVerdict.BLOCK: RiskLevel.CRITICAL,
     }
     return mapping[verdict]

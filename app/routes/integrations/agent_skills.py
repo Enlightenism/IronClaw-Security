@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
@@ -88,7 +88,7 @@ def _build_audit_trail(
     risk_score_input: int,
     risk_score_final: int,
     risk_level: str,
-    verdict: str,
+    verdict: Literal["allow", "block"],
     matched_rule_count: int,
     evaluated_at: str,
     metadata: dict[str, Any],
@@ -155,7 +155,7 @@ def _build_capabilities(*, include_runtime_details: bool = True) -> list[dict[st
         },
         {
             "name": "policy-enforcement",
-            "description": "Apply IronClaw policy decisions with allow, warn, quarantine, and block verdicts to skill actions.",
+            "description": "Apply IronClaw policy decisions with allow and block verdicts to skill actions.",
             "required": True,
         },
     ]
@@ -271,7 +271,7 @@ class AgentSkillsEvaluateResponse(BaseModel):
     adapter_name: str
     platform: str
     mode: str
-    verdict: str
+    verdict: Literal["allow", "block"]
     should_allow: bool
     should_warn: bool
     should_quarantine: bool
@@ -359,7 +359,7 @@ async def evaluate_agent_skills(body: AgentSkillsEvaluateRequest) -> AgentSkills
             verdict="block",
             should_allow=False,
             should_warn=False,
-            should_quarantine=True,
+            should_quarantine=False,
             should_block=True,
             risk_score=100,
             risk_level="critical",
@@ -459,10 +459,10 @@ async def evaluate_agent_skills(body: AgentSkillsEvaluateRequest) -> AgentSkills
         platform=response.platform,
         mode=response.mode,
         verdict=response.verdict,
-        should_allow=response.should_allow,
-        should_warn=response.should_warn,
-        should_quarantine=response.should_quarantine,
-        should_block=response.should_block,
+        should_allow=response.verdict == "allow",
+        should_warn=False,
+        should_quarantine=False,
+        should_block=response.verdict == "block",
         risk_score=response.risk_score,
         risk_level=response.risk_level,
         summary=response.summary,
@@ -560,8 +560,8 @@ async def agent_skills_manifest() -> AgentSkillsManifestResponse:
         "total_rules": len(engine.rules),
         "verdicts": {
             "block": [r.rule_id for r in engine.rules if r.verdict == "block"],
-            "quarantine": [r.rule_id for r in engine.rules if r.verdict == "quarantine"],
-            "warn": [r.rule_id for r in engine.rules if r.verdict == "warn"],
+            "quarantine": [],
+            "warn": [],
             "allow": [r.rule_id for r in engine.rules if r.verdict == "allow"],
         },
         "tags": sorted({tag for rule in engine.rules for tag in rule.tags}),

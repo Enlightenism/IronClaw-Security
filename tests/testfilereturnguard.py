@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.runtime.filereturnguard import build_file_return_guard
 
 
@@ -29,44 +30,48 @@ def test_allow_safe_text_artifact_from_approved_root(guard):
     assert policy.should_quarantine is False
 
 
-def test_block_missing_path(guard):
+def test_missing_path_blocks(guard):
     policy = guard.evaluate(path="", content="anything")
 
     assert policy.allowed is False
-    assert policy.verdict == "quarantine"
-    assert policy.should_quarantine is True
+    assert policy.verdict == "block"
+    assert policy.should_block is True
+    assert policy.should_quarantine is False
     assert "missing_path" in policy.matched_rules
 
 
-def test_quarantine_parent_escape_path(guard):
+def test_parent_escape_path_blocks(guard):
     policy = guard.evaluate(path="../secrets.txt", content="secret")
 
     assert policy.allowed is False
-    assert policy.verdict == "quarantine"
-    assert policy.should_quarantine is True
+    assert policy.verdict == "block"
+    assert policy.should_block is True
+    assert policy.should_quarantine is False
     assert "path_escape" in policy.matched_rules
 
 
-def test_quarantine_absolute_unix_path(guard):
+def test_absolute_unix_path_blocks(guard):
     policy = guard.evaluate(path="/etc/passwd", content="root:x:0:0")
 
     assert policy.allowed is False
-    assert policy.verdict == "quarantine"
+    assert policy.verdict == "block"
     assert "absolute_path" in policy.matched_rules
 
 
-def test_quarantine_absolute_windows_path(guard):
+def test_absolute_windows_path_blocks(guard):
     policy = guard.evaluate(path="C:/windows/system32/cmd.exe", content=b"MZpayload")
 
     assert policy.allowed is False
-    assert policy.verdict in {"block", "quarantine"}
+    assert policy.verdict == "block"
     assert "absolute_path" in policy.matched_rules
 
 
-def test_review_unapproved_root(guard):
+def test_unapproved_root_blocks(guard):
     policy = guard.evaluate(path="tmp/report.txt", content="safe content")
 
-    assert policy.verdict in {"review", "block", "quarantine"}
+    assert policy.verdict == "block"
+    assert policy.allowed is False
+    assert policy.risk_delta >= RISK_THRESHOLD_BLOCK_MIN
     assert any(rule.startswith("unapproved_root:tmp") for rule in policy.matched_rules)
 
 
@@ -74,31 +79,34 @@ def test_block_blocked_extension(guard):
     policy = guard.evaluate(path="artifacts/payload.exe", content=b"MZbinary")
 
     assert policy.allowed is False
-    assert policy.verdict in {"block", "quarantine"}
+    assert policy.verdict == "block"
     assert "blocked_extension:.exe" in policy.matched_rules
 
 
-def test_review_unapproved_extension(guard):
+def test_unapproved_extension_blocks(guard):
     policy = guard.evaluate(path="artifacts/blob.bin", content=b"plain-bytes")
 
-    assert policy.allowed is True
-    assert policy.verdict == "review"
+    assert policy.allowed is False
+    assert policy.verdict == "block"
+    assert policy.risk_delta >= RISK_THRESHOLD_BLOCK_MIN
     assert "unapproved_extension:.bin" in policy.matched_rules
 
 
-def test_review_missing_extension(guard):
+def test_missing_extension_blocks(guard):
     policy = guard.evaluate(path="artifacts/README", content="hello")
 
-    assert policy.allowed is True
-    assert policy.verdict == "review"
+    assert policy.allowed is False
+    assert policy.verdict == "block"
+    assert policy.risk_delta >= RISK_THRESHOLD_BLOCK_MIN
     assert "missing_extension" in policy.matched_rules
 
 
-def test_review_empty_artifact(guard):
+def test_empty_artifact_blocks(guard):
     policy = guard.evaluate(path="artifacts/empty.txt", content="")
 
-    assert policy.allowed is True
-    assert policy.verdict == "review"
+    assert policy.allowed is False
+    assert policy.verdict == "block"
+    assert policy.risk_delta >= RISK_THRESHOLD_BLOCK_MIN
     assert "empty_artifact" in policy.matched_rules
 
 
@@ -107,7 +115,7 @@ def test_block_oversized_artifact(guard):
     policy = guard.evaluate(path="artifacts/large.txt", content=content)
 
     assert policy.allowed is False
-    assert policy.verdict in {"block", "quarantine"}
+    assert policy.verdict == "block"
     assert "oversized_artifact" in policy.matched_rules
 
 
@@ -124,26 +132,26 @@ def test_sensitive_name_rules_raise_risk(guard, path, expected_rule):
     policy = guard.evaluate(path=path, content="safe text")
 
     assert expected_rule in policy.matched_rules
-    assert policy.verdict in {"review", "block", "quarantine"}
+    assert policy.verdict == "block"
 
 
-def test_quarantine_binary_magic_mz_under_safe_extension(guard):
+def test_binary_magic_mz_under_safe_extension_blocks(guard):
     policy = guard.evaluate(path="artifacts/report.txt", content=b"MZfake-executable")
 
     assert policy.allowed is False
-    assert policy.verdict == "quarantine"
+    assert policy.verdict == "block"
     assert "binary_signature:windows-executable" in policy.matched_rules
 
 
-def test_quarantine_binary_magic_elf_under_safe_extension(guard):
+def test_binary_magic_elf_under_safe_extension_blocks(guard):
     policy = guard.evaluate(path="artifacts/report.txt", content=b"\x7fELFpayload")
 
     assert policy.allowed is False
-    assert policy.verdict == "quarantine"
+    assert policy.verdict == "block"
     assert "binary_signature:elf-binary" in policy.matched_rules
 
 
-def test_zip_with_parent_traversal_entry_is_quarantined(guard):
+def test_zip_with_parent_traversal_entry_blocks(guard):
     import io
     import zipfile
 
@@ -155,11 +163,11 @@ def test_zip_with_parent_traversal_entry_is_quarantined(guard):
     policy = guard.evaluate(path="artifacts/archive.zip", content=payload.getvalue())
 
     assert policy.allowed is False
-    assert policy.verdict == "quarantine"
+    assert policy.verdict == "block"
     assert "archive_path_traversal" in policy.matched_rules
 
 
-def test_zip_with_blocked_entry_is_quarantined(guard):
+def test_zip_with_blocked_entry_blocks(guard):
     import io
     import zipfile
 
@@ -171,7 +179,7 @@ def test_zip_with_blocked_entry_is_quarantined(guard):
     policy = guard.evaluate(path="artifacts/bundle.zip", content=payload.getvalue())
 
     assert policy.allowed is False
-    assert policy.verdict == "quarantine"
+    assert policy.verdict == "block"
     assert "archive_blocked_extension:.exe" in policy.matched_rules
 
 
@@ -179,7 +187,7 @@ def test_invalid_zip_content_with_zip_extension_is_blocked(guard):
     policy = guard.evaluate(path="artifacts/fake.zip", content=b"not-a-real-zip")
 
     assert policy.allowed is False
-    assert policy.verdict in {"block", "quarantine"}
+    assert policy.verdict == "block"
     assert "invalid_archive" in policy.matched_rules
 
 
@@ -215,7 +223,7 @@ def test_reads_existing_file_when_content_not_provided(tmp_path: Path, guard):
 
     assert policy.filename == "report.txt"
     assert policy.size_bytes == len(b"from-disk")
-    assert policy.verdict in {"review", "block", "quarantine"}
+    assert policy.verdict == "block"
 
 
 def test_policy_dict_contains_expected_shapes(guard):
@@ -235,7 +243,7 @@ def test_policy_dict_contains_expected_shapes(guard):
 def test_reasons_and_rules_are_deduplicated_when_analyzers_repeat_signals(monkeypatch, guard):
     repeated_analysis = {
         "riskdelta": 25,
-        "shouldreview": True,
+        "shouldblock": True,
         "reasons": [
             {
                 "source": "artifactanalyzer",
@@ -291,4 +299,5 @@ def test_reasons_and_rules_are_deduplicated_when_analyzers_repeat_signals(monkey
 
     repeated = [item for item in policy.reasons if item["label"] == "Repeated" and item["details"] == "Same reason"]
     assert len(repeated) == 1
-    assert policy.matched_rules.count("artifactanalyzer:review") == 1
+    assert policy.verdict == "block"
+    assert policy.matched_rules.count("artifactanalyzer:block") == 1

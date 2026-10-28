@@ -10,6 +10,7 @@ from app.adapters.base import (
     AdapterExecutionResult,
     BaseIntegrationAdapter,
 )
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.policy_enforcer import (
     PolicyDecision,
     PolicyEngine,
@@ -21,9 +22,9 @@ from app.services.integration_registry import (
     get_integration,
 )
 
-AdapterVerdict = Literal["allow", "warn", "quarantine", "block"]
+AdapterVerdict = Literal["allow", "block"]
 AdapterExecutionMode = Literal["monitor", "enforce"]
-SecretScanStatus = Literal["clean", "warned", "blocked"]
+SecretScanStatus = Literal["clean", "blocked"]
 
 _REDACT_KEEP_PREFIX = 6
 _REDACT_KEEP_SUFFIX = 4
@@ -82,50 +83,6 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     # JWT
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\b")),
 ]
-
-# ---------------------------------------------------------------------------
-# Severity classification per pattern type
-# ---------------------------------------------------------------------------
-
-_BLOCK_PATTERNS: frozenset[str] = frozenset(
-    {
-        "aws_access_key_id",
-        "aws_secret_access_key",
-        "github_pat_classic",
-        "github_pat_fine_grained",
-        "github_oauth",
-        "github_app_token",
-        "github_refresh_token",
-        "openai_api_key",
-        "openai_api_key_project",
-        "anthropic_api_key",
-        "google_api_key",
-        "stripe_live_secret",
-        "stripe_restricted_key",
-        "slack_bot_token",
-        "slack_user_token",
-        "huggingface_token",
-        "groq_api_key",
-        "private_key_block",
-    }
-)
-
-_WARN_PATTERNS: frozenset[str] = frozenset(
-    {
-        "google_oauth_client_secret",
-        "stripe_test_secret",
-        "slack_workspace_token",
-        "slack_webhook_url",
-        "twilio_account_sid",
-        "twilio_auth_token",
-        "sendgrid_api_key",
-        "bearer_token",
-        "generic_password",
-        "hex_secret_64",
-        "jwt",
-    }
-)
-
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -223,7 +180,6 @@ def _scan_text(text: str, location: str) -> list[SecretMatch]:
     for pattern_type, pattern in _SECRET_PATTERNS:
         for match in pattern.finditer(text):
             raw_value = _extract_match_value(match)
-            verdict: AdapterVerdict = "block" if pattern_type in _BLOCK_PATTERNS else "warn"
             span_start, span_end = match.span(0)
             snippet_start = max(0, span_start - 20)
             snippet_end = min(len(text), span_end + 20)
@@ -232,7 +188,7 @@ def _scan_text(text: str, location: str) -> list[SecretMatch]:
             results.append(
                 SecretMatch(
                     pattern_type=pattern_type,
-                    verdict=verdict,
+                    verdict="block",
                     location=location,
                     matched_value_redacted=_redact(raw_value),
                     span_start=span_start,
@@ -287,15 +243,12 @@ def scan_for_secrets(
         scanned.append("extra_fields")
         all_matches.extend(_scan_dict_values(extra_fields, "extra_fields"))
 
-    block_count = sum(1 for m in all_matches if m.verdict == "block")
-    warn_count = sum(1 for m in all_matches if m.verdict == "warn")
+    block_count = len(all_matches)
+    warn_count = 0
 
-    if block_count > 0:
+    if all_matches:
         verdict: AdapterVerdict = "block"
         status: SecretScanStatus = "blocked"
-    elif warn_count > 0:
-        verdict = "warn"
-        status = "warned"
     else:
         verdict = "allow"
         status = "clean"
@@ -474,32 +427,26 @@ def adapt_policy_decision_to_secret_scanner(
     request: SecretScannerAdapterRequest | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> SecretScannerAdapterResponse:
-    policy_verdict: AdapterVerdict = decision.verdict  # type: ignore[assignment]
-    scan_verdict = scan_result.verdict
-
-    _severity: dict[str, int] = {"allow": 0, "warn": 1, "quarantine": 2, "block": 3}
-    final_verdict: AdapterVerdict = scan_verdict if _severity.get(scan_verdict, 0) >= _severity.get(policy_verdict, 0) else policy_verdict
-
-    if final_verdict == "block":
-        risk_score = max(decision.risk_score, 90)
-        risk_level = "critical"
-    elif final_verdict == "quarantine":
-        risk_score = max(decision.risk_score, 70)
-        risk_level = "high"
-    elif final_verdict == "warn":
-        risk_score = max(decision.risk_score, 50)
-        risk_level = "high" if risk_score >= 70 else "medium"
-    else:
-        risk_score = decision.risk_score
-        risk_level = decision.risk_level
+    scan_has_signal = scan_result.verdict != "allow" or scan_result.scan_status != "clean" or scan_result.total_matches > 0 or scan_result.block_matches > 0 or scan_result.warn_matches > 0 or bool(scan_result.matches)
+    policy_is_allow = decision.verdict == "allow" and decision.allow_execution is True and not decision.requires_review and not decision.matched_rules and 0 <= decision.risk_score <= RISK_THRESHOLD_ALLOW_MAX
+    final_verdict: AdapterVerdict = "allow" if policy_is_allow and not scan_has_signal else "block"
+    risk_score = max(decision.risk_score, RISK_THRESHOLD_BLOCK_MIN, 90) if final_verdict == "block" else decision.risk_score
+    risk_level = "critical" if final_verdict == "block" else decision.risk_level
+    scan_status: SecretScanStatus = "blocked" if scan_has_signal else "clean"
+    total_matches = max(
+        scan_result.total_matches,
+        len(scan_result.matches),
+        scan_result.block_matches + scan_result.warn_matches,
+    )
+    block_matches = total_matches if scan_has_signal else 0
 
     matched_pattern_types = list({m.pattern_type for m in scan_result.matches})
     matched_rules = [match.rule_id for match in decision.matched_rules] + [f"secret_pattern:{pt}" for pt in matched_pattern_types]
 
-    if scan_result.block_matches > 0:
-        summary = f"Secret scanner blocked payload: {scan_result.block_matches} high-severity secret(s) detected across {len(scan_result.scanned_locations)} location(s). Pattern types: {', '.join(matched_pattern_types[:5])}."
-    elif scan_result.warn_matches > 0:
-        summary = f"Secret scanner warned: {scan_result.warn_matches} potential secret(s) detected. Pattern types: {', '.join(matched_pattern_types[:5])}."
+    if scan_has_signal:
+        summary = f"Secret scanner blocked payload: {total_matches} secret(s) detected across {len(scan_result.scanned_locations)} location(s). Pattern types: {', '.join(matched_pattern_types[:5])}." if total_matches else "Secret scanner returned a non-clear result; action blocked."
+    elif final_verdict == "block":
+        summary = decision.summary or "Secret scanner blocked the action by policy."
     else:
         summary = decision.summary or "Secret scanner: no secrets detected."
 
@@ -509,16 +456,16 @@ def adapt_policy_decision_to_secret_scanner(
         mode=mode,
         verdict=final_verdict,
         should_allow=final_verdict == "allow",
-        should_warn=final_verdict == "warn",
-        should_quarantine=final_verdict == "quarantine",
+        should_warn=False,
+        should_quarantine=False,
         should_block=final_verdict == "block",
-        scan_status=scan_result.scan_status,
+        scan_status=scan_status,
         risk_score=risk_score,
         risk_level=risk_level,
         summary=summary,
-        total_matches=scan_result.total_matches,
-        block_matches=scan_result.block_matches,
-        warn_matches=scan_result.warn_matches,
+        total_matches=total_matches,
+        block_matches=block_matches,
+        warn_matches=0,
         scanned_locations=scan_result.scanned_locations,
         matches=[m.to_dict() for m in scan_result.matches],
         matched_rules=matched_rules,
@@ -559,7 +506,7 @@ def evaluate_secret_scanner_request(
 
     adjusted_risk = max(
         risk_score,
-        90 if scan_result.block_matches > 0 else (50 if scan_result.warn_matches > 0 else 0),
+        90 if scan_result.verdict == "block" else 0,
     )
 
     decision = evaluate_policy(
@@ -650,23 +597,7 @@ class SecretScannerAdapter(BaseIntegrationAdapter):
                 request=request,
                 success=False,
                 status="blocked",
-                summary=(f"{self.record.name} blocked action '{request.action_type}': {scan_result.block_matches} high-severity secret(s) detected."),
-                output={
-                    "guard_applied": True,
-                    "scan_result": scan_result.to_dict(),
-                },
-                metadata={
-                    "runtime": self.runtime,
-                    "scan_mode": self.scan_mode,
-                },
-            )
-
-        if scan_result.verdict == "warn":
-            return self.build_result(
-                request=request,
-                success=True,
-                status="accepted_with_warnings",
-                summary=(f"{self.record.name} warned on action '{request.action_type}': {scan_result.warn_matches} potential secret(s) detected."),
+                summary=(f"{self.record.name} blocked action '{request.action_type}': {scan_result.total_matches} secret(s) detected."),
                 output={
                     "guard_applied": True,
                     "scan_result": scan_result.to_dict(),

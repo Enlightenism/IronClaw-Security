@@ -40,12 +40,12 @@ from the project root. `GUARD_THRESHOLD` defaults to `0.5` and must be between
 
 ## What happens during a scan
 
-When enabled, the local classifier can add a malicious-content signal to the
-existing rule-based risk assessment. A `MALICIOUS` classification raises the
-risk score to at least IronClaw's block threshold; the normal policy and verdict
-pipeline then returns the scan result. Content that already meets the
-hard-block threshold through existing rules does not need another model
-classification.
+When enabled, the local classifier runs for every scan. A `MALICIOUS`
+classification at or above `GUARD_THRESHOLD` blocks the scan, as does any
+matched pattern or suspicious signal. If the classifier cannot load or run,
+IronClaw fails closed and returns `block` with a reason such as
+`prompt_guard_unavailable`. An `allow` requires no matched patterns or errors
+and a successful `BENIGN` classification when the classifier is enabled.
 
 For example, scan content through the existing IronClaw SDK:
 
@@ -67,6 +67,6 @@ print(result.verdict)
 print(result.reason)
 ```
 
-The SDK returns IronClaw's usual verdict (`allow`, `warn`, `quarantine`, or
-`block`), not a generated response from Prompt Guard. Your application should
-continue to call its own generative model separately when it needs a response.
+The SDK returns IronClaw's final verdict (`allow` or `block`), not a generated
+response from Prompt Guard. Your application should continue to call its own
+generative model separately when it needs a response.

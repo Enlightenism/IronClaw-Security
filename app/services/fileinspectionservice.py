@@ -7,10 +7,12 @@ from dataclasses import dataclass, field
 import hashlib
 import io
 import re
-from typing import Any
+from typing import Any, Literal
 import zipfile
 
 from app.services.secretservice import build_secret_service
+
+FileInspectionVerdict = Literal["allow", "block"]
 
 _TEXT_EXTENSIONS = {
     ".env",
@@ -155,7 +157,7 @@ def _truncate_text(text: str, limit: int) -> str:
 
 @dataclass(slots=True)
 class FileInspectionDecision:
-    verdict: str = "allow"
+    verdict: FileInspectionVerdict = "allow"
     allowed: bool = True
     blocked: bool = False
     should_review: bool = False
@@ -276,10 +278,8 @@ class FileInspectionService:
         direction: str = "ingress",
     ) -> dict[str, Any]:
         decisions: list[dict[str, Any]] = []
-        highest_verdict = "allow"
+        highest_verdict: FileInspectionVerdict = "allow"
         blocked = False
-        should_review = False
-        should_quarantine = False
         findings_detected = 0
         secrets_redacted = 0
         risk_delta = 0
@@ -300,9 +300,7 @@ class FileInspectionService:
             )
             decisions.append(decision.as_dict())
             highest_verdict = self._merge_verdict(highest_verdict, decision.verdict)
-            blocked = blocked or decision.blocked
-            should_review = should_review or decision.should_review
-            should_quarantine = should_quarantine or decision.should_quarantine
+            blocked = blocked or decision.blocked or decision.verdict == "block"
             findings_detected += decision.findings_detected
             secrets_redacted += decision.secrets_redacted
             risk_delta += decision.risk_delta
@@ -311,8 +309,8 @@ class FileInspectionService:
             "verdict": highest_verdict,
             "allowed": not blocked,
             "blocked": blocked,
-            "shouldreview": should_review,
-            "shouldquarantine": should_quarantine,
+            "shouldreview": False,
+            "shouldquarantine": False,
             "findingsdetected": findings_detected,
             "secretsredacted": secrets_redacted,
             "riskdelta": risk_delta,
@@ -339,7 +337,7 @@ class FileInspectionService:
         findings: list[dict[str, Any]] = []
         reasons: list[str] = []
         risk_delta = 0
-        verdict = "allow"
+        verdict: FileInspectionVerdict = "allow"
         allowed = True
         blocked = False
         should_review = False
@@ -372,7 +370,7 @@ class FileInspectionService:
             )
             reasons.append("File path contains restricted or sensitive directory markers.")
             risk_delta += 18
-            verdict = self._merge_verdict(verdict, "review")
+            verdict = self._merge_verdict(verdict, "block")
             should_review = True
 
         basename = normalized_name.rsplit("/", 1)[-1].lower()
@@ -386,7 +384,7 @@ class FileInspectionService:
             )
             reasons.append("File name matches a known sensitive credential or system artifact.")
             risk_delta += 30
-            verdict = self._merge_verdict(verdict, "review")
+            verdict = self._merge_verdict(verdict, "block")
             should_review = True
 
         if extension in _EXECUTABLE_EXTENSIONS:
@@ -399,7 +397,7 @@ class FileInspectionService:
             )
             reasons.append("Executable or script file detected.")
             risk_delta += 28
-            verdict = self._merge_verdict(verdict, "review")
+            verdict = self._merge_verdict(verdict, "block")
             should_review = True
 
         for magic, label in _BINARY_MAGIC_LABELS:
@@ -514,7 +512,7 @@ class FileInspectionService:
                 )
                 reasons.append("Private key material detected in file content.")
                 risk_delta += 50
-                verdict = self._merge_verdict(verdict, "quarantine")
+                verdict = self._merge_verdict(verdict, "block")
                 blocked = True
                 allowed = False
                 should_quarantine = True
@@ -528,7 +526,7 @@ class FileInspectionService:
                 )
                 reasons.append("Large encoded payload detected.")
                 risk_delta += 12
-                verdict = self._merge_verdict(verdict, "review")
+                verdict = self._merge_verdict(verdict, "block")
                 should_review = True
 
             if "nc " in extracted_text or "curl " in extracted_text or "wget " in extracted_text:
@@ -540,7 +538,7 @@ class FileInspectionService:
                 )
                 reasons.append("Command content may support outbound exfiltration or remote code execution.")
                 risk_delta += 18
-                verdict = self._merge_verdict(verdict, "review")
+                verdict = self._merge_verdict(verdict, "block")
                 should_review = True
 
             redaction = dict(getattr(secret_result, "redaction", {}))
@@ -577,20 +575,24 @@ class FileInspectionService:
                 "highentropytokens": 0,
             }
 
-        if not reasons:
+        blocked = blocked or should_review or should_quarantine or verdict != "allow"
+        verdict = "block" if blocked else "allow"
+        allowed = not blocked
+        if blocked:
+            output["blocked"] = True
+            if archive_report["is_archive"]:
+                archive_report["blocked"] = True
+            if not reasons:
+                reasons.append("File inspection detected a suspicious or blocked signal.")
+        elif not reasons:
             reasons.append("File cleared inspection checks.")
-
-        if blocked and verdict == "allow":
-            verdict = "block"
-        if should_quarantine and verdict not in {"quarantine"}:
-            verdict = self._merge_verdict(verdict, "quarantine")
 
         return FileInspectionDecision(
             verdict=verdict,
             allowed=allowed and not blocked,
             blocked=blocked,
-            should_review=should_review,
-            should_quarantine=should_quarantine,
+            should_review=False,
+            should_quarantine=False,
             findings_detected=findings_detected,
             secrets_redacted=secrets_redacted,
             risk_delta=risk_delta,
@@ -611,11 +613,21 @@ class FileInspectionService:
         *,
         normalized_name: str,
         content: bytes,
-    ) -> tuple[list[dict[str, Any]], list[str], int, str, bool, bool, bool, bool, dict[str, Any]]:
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[str],
+        int,
+        FileInspectionVerdict,
+        bool,
+        bool,
+        bool,
+        bool,
+        dict[str, Any],
+    ]:
         findings: list[dict[str, Any]] = []
         reasons: list[str] = []
         risk_delta = 0
-        verdict = "allow"
+        verdict: FileInspectionVerdict = "allow"
         allowed = True
         blocked = False
         should_review = False
@@ -679,7 +691,7 @@ class FileInspectionService:
                         )
                         reasons.append(f"Archive entry flagged: {entry_name}.")
                         risk_delta += 14
-                        verdict = self._merge_verdict(verdict, "review")
+                        verdict = self._merge_verdict(verdict, "block")
                         should_review = True
 
                     payload["entries"].append(
@@ -709,7 +721,7 @@ class FileInspectionService:
                     blocked = True
 
                 if suspicious_entries > 0 and not blocked:
-                    verdict = self._merge_verdict(verdict, "review")
+                    verdict = self._merge_verdict(verdict, "block")
 
                 payload["blocked"] = blocked
 
@@ -757,15 +769,8 @@ class FileInspectionService:
             return ""
         return decoded.decode("utf-8", errors="replace")
 
-    def _merge_verdict(self, left: str, right: str) -> str:
-        rank = {
-            "allow": 0,
-            "sanitize": 1,
-            "review": 2,
-            "block": 3,
-            "quarantine": 4,
-        }
-        return right if rank.get(right, 0) > rank.get(left, 0) else left
+    def _merge_verdict(self, left: str, right: str) -> FileInspectionVerdict:
+        return "allow" if left == "allow" and right == "allow" else "block"
 
     def _dedupe_reasons(self, reasons: Sequence[str]) -> list[str]:
         seen: set[str] = set()

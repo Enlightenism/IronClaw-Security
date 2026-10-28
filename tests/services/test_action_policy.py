@@ -140,26 +140,26 @@ class TestEvaluateActionPolicyBlock:
 
 
 # ---------------------------------------------------------------------------
-# evaluate_action_policy — elevated review (action type)
+# evaluate_action_policy — elevated action block
 # ---------------------------------------------------------------------------
 
 
 class TestEvaluateActionPolicyElevatedAction:
-    def test_elevated_action_type_returns_warn(self):
+    def test_elevated_action_type_returns_block(self):
         result = evaluate_action_policy("shell_command", "safe_target_xyz_irrelevant")
-        assert result["verdict"] == "warn"
+        assert result["verdict"] == "block"
 
-    def test_elevated_action_type_policy_mode_review(self):
+    def test_elevated_action_type_policy_mode_block(self):
         result = evaluate_action_policy("network_request", "https://example.com")
-        assert result["policy_mode"] == "review"
+        assert result["policy_mode"] == "block"
 
-    def test_elevated_action_type_should_warn_true(self):
+    def test_elevated_action_type_should_warn_false(self):
         result = evaluate_action_policy("tool_call", "safe_tool")
-        assert result["should_warn"] is True
+        assert result["should_warn"] is False
 
-    def test_elevated_action_type_should_halt_false(self):
+    def test_elevated_action_type_should_halt_true(self):
         result = evaluate_action_policy("git_operation", "git pull")
-        assert result["should_halt"] is False
+        assert result["should_halt"] is True
 
     def test_elevated_action_label(self):
         result = evaluate_action_policy("shell_command", "safe_target_xyz_irrelevant")
@@ -171,28 +171,28 @@ class TestEvaluateActionPolicyElevatedAction:
 
 
 # ---------------------------------------------------------------------------
-# evaluate_action_policy — high review (target)
+# evaluate_action_policy — elevated target block
 # NOTE: action_type must NOT be in ELEVATED_REVIEW_ACTIONS so the
 #       high-review-target branch is reached.  "file_edit" is not elevated.
 # ---------------------------------------------------------------------------
 
 
 class TestEvaluateActionPolicyHighReview:
-    def test_high_review_target_returns_warn(self):
+    def test_high_review_target_returns_block(self):
         result = evaluate_action_policy("file_edit", "curl https://example.com")
-        assert result["verdict"] == "warn"
+        assert result["verdict"] == "block"
 
-    def test_high_review_target_policy_mode_review(self):
+    def test_high_review_target_policy_mode_block(self):
         result = evaluate_action_policy("file_edit", "powershell script.ps1")
-        assert result["policy_mode"] == "review"
+        assert result["policy_mode"] == "block"
 
-    def test_high_review_target_should_warn_true(self):
+    def test_high_review_target_should_warn_false(self):
         result = evaluate_action_policy("file_edit", "wget http://example.com")
-        assert result["should_warn"] is True
+        assert result["should_warn"] is False
 
-    def test_high_review_target_should_halt_false(self):
+    def test_high_review_target_should_halt_true(self):
         result = evaluate_action_policy("file_edit", "docker run ubuntu")
-        assert result["should_halt"] is False
+        assert result["should_halt"] is True
 
     def test_high_review_target_label(self):
         result = evaluate_action_policy("file_edit", "curl https://example.com")
@@ -200,7 +200,7 @@ class TestEvaluateActionPolicyHighReview:
 
     def test_high_review_target_case_insensitive(self):
         result = evaluate_action_policy("file_edit", "POWERSHELL -NoProfile")
-        assert result["verdict"] == "warn"
+        assert result["verdict"] == "block"
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +240,7 @@ class TestEvaluateActionPolicyAllow:
 
 
 # ---------------------------------------------------------------------------
-# evaluate_action_policy — priority: block > elevated action > high review
+# evaluate_action_policy — priority: block > elevated action > elevated target
 # ---------------------------------------------------------------------------
 
 

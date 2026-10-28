@@ -329,11 +329,15 @@ class TestThreatScoringEngine:
         result = self.engine.compute([m], [sig])
         assert result.verdict == DetectionVerdict.BLOCK
 
-    def test_verdict_thresholds_cover_allow_monitor_review_block(self) -> None:
+    def test_any_positive_score_blocks(self) -> None:
         assert self.engine._verdict_from_score(0.00) == DetectionVerdict.ALLOW
-        assert self.engine._verdict_from_score(0.20) == DetectionVerdict.MONITOR
-        assert self.engine._verdict_from_score(0.50) == DetectionVerdict.REVIEW
+        assert self.engine._verdict_from_score(0.0001) == DetectionVerdict.BLOCK
+        assert self.engine._verdict_from_score(0.20) == DetectionVerdict.BLOCK
+        assert self.engine._verdict_from_score(0.50) == DetectionVerdict.BLOCK
         assert self.engine._verdict_from_score(0.75) == DetectionVerdict.BLOCK
+        assert self.engine._verdict_from_score(float("nan")) == DetectionVerdict.BLOCK
+        assert self.engine._verdict_from_score(float("inf")) == DetectionVerdict.BLOCK
+        assert self.engine._verdict_from_score(float("-inf")) == DetectionVerdict.BLOCK
 
     def test_severity_thresholds_cover_info_low_medium_high_critical(self) -> None:
         assert self.engine._severity_from_score(0.00, []) == ThreatSeverityLevel.INFO
@@ -1171,11 +1175,11 @@ class TestDetectionRequestValidation:
 
 
 class TestDetectionResultProperties:
-    def _make_result(self, verdict: DetectionVerdict, score: float = 0.5) -> DetectionResult:
+    def _make_result(self, verdict: DetectionVerdict, score: float | None = None) -> DetectionResult:
         return DetectionResult(
             event_id=str(uuid.uuid4()),
             verdict=verdict,
-            score=score,
+            score=score if score is not None else (0.0 if verdict == DetectionVerdict.ALLOW else 0.5),
             severity=ThreatSeverityLevel.MEDIUM,
             assessed_at="2026-01-01T00:00:00+00:00",
         )
@@ -1184,24 +1188,26 @@ class TestDetectionResultProperties:
         r = self._make_result(DetectionVerdict.BLOCK)
         assert r.is_threat is True
 
-    def test_is_threat_review(self) -> None:
-        r = self._make_result(DetectionVerdict.REVIEW)
-        assert r.is_threat is True
-
     def test_is_threat_allow(self) -> None:
         r = self._make_result(DetectionVerdict.ALLOW)
         assert r.is_threat is False
 
-    def test_is_threat_monitor(self) -> None:
-        r = self._make_result(DetectionVerdict.MONITOR)
-        assert r.is_threat is False
+    def test_legacy_verdict_is_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            DetectionResult(
+                event_id=str(uuid.uuid4()),
+                verdict="review",
+                score=0.0,
+                severity=ThreatSeverityLevel.MEDIUM,
+                assessed_at="2026-01-01T00:00:00+00:00",
+            )
 
     def test_requires_block_true(self) -> None:
         r = self._make_result(DetectionVerdict.BLOCK)
         assert r.requires_block is True
 
-    def test_requires_block_false(self) -> None:
-        r = self._make_result(DetectionVerdict.REVIEW)
+    def test_requires_block_false_for_allow(self) -> None:
+        r = self._make_result(DetectionVerdict.ALLOW)
         assert r.requires_block is False
 
     def test_top_ioc_none_on_empty(self) -> None:
@@ -1221,7 +1227,7 @@ class TestDetectionResultProperties:
         assert r.ioc_match_count == 2
 
     def test_correlation_signal_count(self) -> None:
-        r = self._make_result(DetectionVerdict.REVIEW)
+        r = self._make_result(DetectionVerdict.BLOCK)
         r.correlation_signals = [_make_correlation_signal(), _make_correlation_signal()]
         assert r.correlation_signal_count == 2
 

@@ -18,7 +18,7 @@ def test_evaluate_action_policy_allows_safe_local_target() -> None:
     assert result["reasons"][0]["source"] == "policy"
 
 
-def test_evaluate_action_policy_reviews_elevated_action_type() -> None:
+def test_evaluate_action_policy_blocks_elevated_action_type() -> None:
     result = evaluate_action_policy(
         action_type="tool_call",
         target="safe-tool",
@@ -26,10 +26,10 @@ def test_evaluate_action_policy_reviews_elevated_action_type() -> None:
         session_id="policy-session-002",
     )
 
-    assert result["policy_mode"] == "review"
-    assert result["verdict"] == "warn"
-    assert result["should_halt"] is False
-    assert result["should_warn"] is True
+    assert result["policy_mode"] == "block"
+    assert result["verdict"] == "block"
+    assert result["should_halt"] is True
+    assert result["should_warn"] is False
     assert result["reasons"][0]["label"] == "Elevated action type"
 
 
@@ -48,7 +48,7 @@ def test_evaluate_action_policy_blocks_sensitive_target() -> None:
     assert result["reasons"][0]["label"] == "Blocked target"
 
 
-def test_evaluate_action_policy_reviews_elevated_target_when_action_is_safe() -> None:
+def test_evaluate_action_policy_blocks_elevated_target_when_action_is_safe() -> None:
     result = evaluate_action_policy(
         action_type="file_edit",
         target="powershell.exe",
@@ -56,8 +56,8 @@ def test_evaluate_action_policy_reviews_elevated_target_when_action_is_safe() ->
         session_id="policy-session-004",
     )
 
-    assert result["policy_mode"] == "review"
-    assert result["verdict"] == "warn"
-    assert result["should_halt"] is False
-    assert result["should_warn"] is True
+    assert result["policy_mode"] == "block"
+    assert result["verdict"] == "block"
+    assert result["should_halt"] is True
+    assert result["should_warn"] is False
     assert result["reasons"][0]["label"] == "Elevated target"

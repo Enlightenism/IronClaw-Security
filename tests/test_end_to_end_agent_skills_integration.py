@@ -80,6 +80,8 @@ def test_agent_skills_route_contract_handshake_manifest_and_secret_scan_gate():
     assert manifest_payload["adapter_name"] == "ironclaw-agent-skills"
     assert manifest_payload["policy_bindings"]["package_model"] == "shared-cross-runtime-skill-bundle"
     assert manifest_payload["policy_bindings"]["runtime_scope"] == "cross-runtime"
+    assert manifest_payload["policy_bindings"]["verdicts"]["warn"] == []
+    assert manifest_payload["policy_bindings"]["verdicts"]["quarantine"] == []
     assert "skill_install" in manifest_payload["supported_action_types"]
     assert any(cap["name"] == "audit-trail" for cap in manifest_payload["capabilities"])
 
@@ -100,7 +102,8 @@ def test_agent_skills_route_contract_handshake_manifest_and_secret_scan_gate():
     evaluate_payload = evaluate.json()
     assert evaluate_payload["verdict"] == "block"
     assert evaluate_payload["should_block"] is True
-    assert evaluate_payload["should_quarantine"] is True
+    assert evaluate_payload["should_warn"] is False
+    assert evaluate_payload["should_quarantine"] is False
     assert evaluate_payload["secret_scan"]["scanned"] is True
     assert evaluate_payload["secret_scan"]["findings"]
     assert evaluate_payload["audit_trail"]["secret_scan_triggered"] is True

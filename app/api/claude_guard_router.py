@@ -86,18 +86,17 @@ async def _guarded_upstream_stream(
                 partial_text=buffer,
                 context=context,
             )
-            verdict = str(verdict_data.get("bundle_verdict", "allow")).lower()
+            verdict = "allow" if str(verdict_data.get("bundle_verdict", "")).strip().lower() == "allow" else "block"
             reason = str(verdict_data.get("reason", ""))
 
-            if guard_mode == "enforce" and verdict in {"block", "quarantine"}:
+            if verdict == "block":
                 blocked = True
                 yield _build_guard_warning(reason, verdict)
                 break
 
+            safe_text = buffer[scanned_upto:]
             scanned_upto = len(buffer)
-
-        if not blocked:
-            yield chunk.encode("utf-8")
+            yield safe_text.encode("utf-8")
 
     if not blocked and len(buffer) > scanned_upto:
         verdict_data = await _scan_with_policy_guard(
@@ -107,11 +106,13 @@ async def _guarded_upstream_stream(
             partial_text=buffer,
             context=context,
         )
-        verdict = str(verdict_data.get("bundle_verdict", "allow")).lower()
+        verdict = "allow" if str(verdict_data.get("bundle_verdict", "")).strip().lower() == "allow" else "block"
         reason = str(verdict_data.get("reason", ""))
 
-        if guard_mode == "enforce" and verdict in {"block", "quarantine"}:
+        if verdict == "block":
             yield _build_guard_warning(reason, verdict)
+        else:
+            yield buffer[scanned_upto:].encode("utf-8")
 
 
 @router.post(

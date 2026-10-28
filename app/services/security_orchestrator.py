@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.models.guard_facade import GuardActionResponse
 from app.services.guard_facade import execute_guard_action
 from app.services.scan_to_guard_adapter import build_guard_request_from_scan
@@ -21,6 +22,13 @@ def orchestrate_security_action(
     agent_id: str | None = None,
 ) -> dict[str, Any]:
     scan_result = perform_scan(target_type=target_type, target_value=target_value)
+    if scan_result.get("verdict") != "allow" or scan_result.get("matched_patterns") or scan_result.get("failed_checks") or scan_result.get("errors") or scan_result.get("error"):
+        scan_result["verdict"] = "block"
+        scan_result["risk_score"] = max(
+            int(scan_result.get("risk_score") or 0),
+            RISK_THRESHOLD_BLOCK_MIN,
+        )
+        scan_result["untrusted"] = True
 
     if scan_result["verdict"] == "block":
         # Record observation before returning so the baseline captures blocked actions
@@ -60,9 +68,7 @@ def orchestrate_security_action(
 
     guard_response: GuardActionResponse = execute_guard_action(guard_request)
 
-    final_verdict = guard_response.verdict
-    if scan_result["verdict"] == "quarantine" and guard_response.verdict == "allow":
-        final_verdict = "quarantine"
+    final_verdict = "allow" if guard_response.verdict == "allow" else "block"
 
     # Record behavioral observation for baseline learning
     risk_score = int(scan_result.get("risk_score", 0))
@@ -106,7 +112,7 @@ def orchestrate_security_action(
         "sandbox_lane": scan_result.get("sandbox_lane", "none"),
         "review_status": scan_result.get("review_status", "none"),
         "quarantine_reason": scan_result.get("quarantine_reason"),
-        "untrusted": scan_result.get("untrusted", False),
+        "untrusted": bool(scan_result.get("untrusted", False)) or final_verdict == "block",
         "drift_report": drift_report,
     }
 

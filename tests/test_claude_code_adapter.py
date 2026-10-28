@@ -5,9 +5,12 @@ from app.adapters.claude_code_adapter import (
     ClaudeCodeAdapter,
     ClaudeCodeAdapterRequest,
     ClaudeCodeAdapterResponse,
+    adapt_policy_decision_to_claude_code,
     build_claude_code_adapter_request,
     summarize_claude_code_adapter_response,
 )
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+from app.orchestrator.policy_enforcer import PolicyDecision
 from app.services.integration_registry import (
     get_integration,
     initialize_integration_registry,
@@ -213,22 +216,44 @@ def test_summarize_claude_code_adapter_response_shape():
         adapter_name="ironclaw-claude-code",
         platform="claude-code",
         mode="enforce",
-        verdict="warn",
+        verdict="block",
         should_allow=False,
-        should_warn=True,
+        should_warn=False,
         should_quarantine=False,
-        should_block=False,
-        risk_score=45,
-        risk_level="medium",
+        should_block=True,
+        risk_score=RISK_THRESHOLD_BLOCK_MIN,
+        risk_level="high",
         summary="Suspicious pattern detected.",
         secret_scan={},
     )
 
     summary = summarize_claude_code_adapter_response(response)
 
-    assert summary["verdict"] == "warn"
-    assert summary["risk_score"] == 45
-    assert summary["risk_level"] == "medium"
+    assert summary["verdict"] == "block"
+    assert summary["risk_score"] == response.risk_score
+    assert summary["risk_level"] == response.risk_level
     assert "decision_id" in summary
     assert "trace_id" in summary
     assert "reviewed_at" in summary
+
+
+def test_legacy_warning_decision_is_normalized_to_block():
+    decision = PolicyDecision(
+        decision_id="legacy-warning",
+        verdict="warn",
+        risk_score=45,
+        risk_level="medium",
+        mode="monitor",
+        allow_execution=True,
+        requires_review=True,
+        matched_rules=[],
+    )
+
+    response = adapt_policy_decision_to_claude_code(decision)
+
+    assert response.verdict == "block"
+    assert response.should_allow is False
+    assert response.should_warn is False
+    assert response.should_quarantine is False
+    assert response.should_block is True
+    assert response.risk_score >= RISK_THRESHOLD_BLOCK_MIN

@@ -8,11 +8,12 @@ from pydantic import BaseModel, Field
 
 from app.core.auth import require_api_key
 from app.services.policy_store import (
-    PolicySettingsRecord as StoredPolicySettingsRecord,
-)
-from app.services.policy_store import (
+    PolicyDecision,
     PolicyThresholdRecord,
     get_policy_store,
+)
+from app.services.policy_store import (
+    PolicySettingsRecord as StoredPolicySettingsRecord,
 )
 
 router = APIRouter(
@@ -23,7 +24,6 @@ router = APIRouter(
 
 
 PolicyMode = Literal["monitor", "enforce", "lockdown"]
-PolicyDecision = Literal["allow", "warn", "quarantine", "block"]
 
 
 class PolicyThresholdsView(BaseModel):

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import logging
 from pathlib import Path
 from typing import Any, Literal
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.agent_registry import (
     AgentDescriptor,
     AgentRegistry,
@@ -15,6 +17,7 @@ from app.orchestrator.agent_registry import (
 from client import IronClawClient
 
 OrchestratorDecisionSource = Literal["registry_only", "guard_api", "guard_api_fallback"]
+logger = logging.getLogger(__name__)
 
 
 def _text(value: Any, default: str = "") -> str:
@@ -38,6 +41,10 @@ def _clamp_risk(value: Any, default: int = 0) -> int:
     except (TypeError, ValueError):
         parsed = default
     return max(0, min(100, parsed))
+
+
+def _is_valid_risk_score(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100
 
 
 def _normalized_tags(agent: AgentDescriptor) -> list[str]:
@@ -107,17 +114,11 @@ def _fallback_decision_from_registry(
     fail_secure: bool = True,
 ) -> OrchestrationDecision:
     registry_risk = _registry_risk_score(agent, action_type)
-    should_warn = agent.threat_profile in {"sensitive", "execution_capable", "security_critical"} or action_type in {"shell_command", "network_request", "git_operation", "tool_call"} or action_type not in agent.protected_actions
-
     summary = _default_summary_for_registry_only(agent, action_type)
-    if should_warn:
-        summary = f"{summary} Registry fallback requires elevated review."
-
-    verdict = "warn" if should_warn else "allow"
-    should_halt = bool(fail_secure and registry_risk >= 70)
-    if should_halt:
-        verdict = "block"
-        summary = f"{summary} Guard API was unavailable and fail-secure fallback blocked this action based on registry threat profile."
+    if fail_secure:
+        summary = f"{summary} Guard API was unavailable; fail-closed fallback blocked this action."
+    else:
+        summary = f"{summary} Guard API was unavailable; block-only policy prevented a fail-open fallback."
 
     return OrchestrationDecision(
         agent_id=agent.agent_id,
@@ -125,12 +126,12 @@ def _fallback_decision_from_registry(
         action_type=action_type,
         target=target,
         content=content,
-        allowed=not should_halt and verdict == "allow",
-        verdict=verdict,
-        should_halt=should_halt,
-        should_warn=should_warn or should_halt,
+        allowed=False,
+        verdict="block",
+        should_halt=True,
+        should_warn=False,
         summary=summary,
-        risk_score=registry_risk,
+        risk_score=max(registry_risk, RISK_THRESHOLD_BLOCK_MIN),
         matched_patterns=[],
         decision_source="guard_api_fallback",
         registry_tags=_normalized_tags(agent),
@@ -149,7 +150,7 @@ class OrchestrationDecision:
     target: str
     content: str
     allowed: bool
-    verdict: str
+    verdict: Literal["allow", "block"]
     should_halt: bool
     should_warn: bool
     summary: str
@@ -209,20 +210,22 @@ class IronClawOrchestrator:
         if not use_guard_api:
             summary = _default_summary_for_registry_only(agent, action_type)
             registry_risk = _registry_risk_score(agent, action_type)
-            verdict = "warn" if action_type not in agent.protected_actions else "allow"
-            should_warn = verdict == "warn" or registry_risk >= 40
+            should_block = action_type not in agent.protected_actions or agent.threat_profile in {"sensitive", "execution_capable", "security_critical"} or registry_risk > RISK_THRESHOLD_ALLOW_MAX
+            verdict: Literal["allow", "block"] = "block" if should_block else "allow"
+            if should_block:
+                summary = f"{summary} Registry-only policy blocked this action."
             return OrchestrationDecision(
                 agent_id=agent.agent_id,
                 file_path=agent.relative_path,
                 action_type=action_type,
                 target=normalized_target,
                 content=normalized_content,
-                allowed=verdict == "allow",
+                allowed=not should_block,
                 verdict=verdict,
-                should_halt=False,
-                should_warn=should_warn,
+                should_halt=should_block,
+                should_warn=False,
                 summary=summary,
-                risk_score=registry_risk,
+                risk_score=(max(registry_risk, RISK_THRESHOLD_BLOCK_MIN) if should_block else registry_risk),
                 matched_patterns=[],
                 decision_source="registry_only",
                 registry_tags=_normalized_tags(agent),
@@ -240,19 +243,36 @@ class IronClawOrchestrator:
                 client_id=resolved_client_id,
                 session_id=_text(session_id) or None,
             )
+            raw_verdict = _text(getattr(decision, "verdict", "")).lower()
+            raw_should_halt = getattr(decision, "should_halt", None)
+            raw_should_warn = getattr(decision, "should_warn", None)
+            raw_risk_score = getattr(decision, "risk_score", None)
+            raw_matched_patterns = getattr(decision, "matched_patterns", None)
+            risk_score = _clamp_risk(
+                raw_risk_score,
+                default=RISK_THRESHOLD_BLOCK_MIN,
+            )
+            matched_patterns = [_text(item) for item in raw_matched_patterns or [] if _text(item)]
+            allowed = raw_verdict == "allow" and raw_should_halt is False and raw_should_warn is False and _is_valid_risk_score(raw_risk_score) and risk_score <= RISK_THRESHOLD_ALLOW_MAX and isinstance(raw_matched_patterns, list) and not matched_patterns
+            summary = _text(
+                getattr(decision, "summary", ""),
+                "Guard API decision completed.",
+            )
+            if not allowed and (raw_verdict != "block" or raw_should_halt is not True):
+                summary = f"{summary} Block-only policy blocked the action because the guard result was incomplete or not a clean allow."
             return OrchestrationDecision(
                 agent_id=agent.agent_id,
                 file_path=agent.relative_path,
                 action_type=action_type,
                 target=normalized_target,
                 content=normalized_content,
-                allowed=not bool(getattr(decision, "should_halt", False)),
-                verdict=_text(getattr(decision, "verdict", "allow"), "allow"),
-                should_halt=bool(getattr(decision, "should_halt", False)),
-                should_warn=bool(getattr(decision, "should_warn", False)),
-                summary=_text(getattr(decision, "summary", ""), "Guard API decision completed."),
-                risk_score=_clamp_risk(getattr(decision, "risk_score", 0)),
-                matched_patterns=[_text(item) for item in getattr(decision, "matched_patterns", []) or [] if _text(item)],
+                allowed=allowed,
+                verdict="allow" if allowed else "block",
+                should_halt=not allowed,
+                should_warn=False,
+                summary=summary,
+                risk_score=(risk_score if allowed else max(risk_score, RISK_THRESHOLD_BLOCK_MIN)),
+                matched_patterns=matched_patterns,
                 decision_source="guard_api",
                 registry_tags=_normalized_tags(agent),
                 registry_threat_profile=agent.threat_profile,
@@ -261,6 +281,7 @@ class IronClawOrchestrator:
                 session_id=_text(session_id) or None,
             )
         except Exception:
+            logger.exception("Guard API orchestration failed; blocking the action.")
             return _fallback_decision_from_registry(
                 agent=agent,
                 action_type=action_type,

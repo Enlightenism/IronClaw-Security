@@ -79,7 +79,7 @@ def _build_placeholder_items() -> list[AuditLogItem]:
             reviewitemid="review-203",
             actiontype="httpfetch",
             target="https://example.com/docs",
-            policyverdict="review",
+            policyverdict="block",
             executionstate="dryrun",
             responsestatus="queuedforreview",
             message="Mid-risk execution was queued for manual review.",

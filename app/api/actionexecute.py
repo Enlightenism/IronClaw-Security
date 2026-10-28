@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.audit import createauditevent
-from app.services.action_guard import ActionGuardDecision, analyze_action
+from app.config import (
+    RISK_THRESHOLD_ALLOW_MAX,
+    RISK_THRESHOLD_BLOCK_MIN,
+    RISK_THRESHOLD_QUARANTINE_MIN,
+)
+from app.services.action_guard import ActionGuardDecision, analyze_action, normalize_action_type
 from app.services.actionexecuteservice import (
     ActionExecutionRequest,
     get_action_execute_service,
 )
 
 router = APIRouter(prefix="/action", tags=["action-execution"])
+logger = logging.getLogger(__name__)
 
 AllowedActionType = Literal[
     "httpfetch",
@@ -24,8 +31,6 @@ AllowedActionType = Literal[
 ]
 
 _ACTION_TYPE_MAP: dict[str, str] = {
-    "httpfetch": "network_request",
-    "browseropen": "network_request",
     "toolcall": "tool_call",
     "filewrite": "file_write",
     "fileread": "file_read",
@@ -123,7 +128,7 @@ def _usage_to_dict(receipt: Any) -> dict[str, Any]:
 
 
 def _run_detection(request: ActionExecuteRequestModel) -> ActionGuardDecision | None:
-    guard_action_type = _ACTION_TYPE_MAP.get(request.actiontype, "tool_call")
+    guard_action_type = normalize_action_type(_ACTION_TYPE_MAP.get(request.actiontype, request.actiontype))
     try:
         result: ActionGuardDecision = analyze_action(
             action_type=guard_action_type,  # type: ignore[arg-type]
@@ -135,53 +140,119 @@ def _run_detection(request: ActionExecuteRequestModel) -> ActionGuardDecision | 
         )
         return result
     except Exception:  # noqa: BLE001
+        logger.exception("actionexecute: detection failed; blocking action")
         return None
+
+
+def _severity_for_risk_score(risk_score: int) -> str:
+    if risk_score >= RISK_THRESHOLD_BLOCK_MIN:
+        return "critical"
+    if risk_score >= (RISK_THRESHOLD_QUARANTINE_MIN + RISK_THRESHOLD_BLOCK_MIN) // 2:
+        return "high"
+    if risk_score >= (RISK_THRESHOLD_ALLOW_MAX + RISK_THRESHOLD_QUARANTINE_MIN) // 2:
+        return "medium"
+    return "low" if risk_score > 0 else "none"
 
 
 def _detection_to_promptinjection(detection: ActionGuardDecision | None) -> dict[str, Any]:
     if detection is None:
+        risk_score = RISK_THRESHOLD_BLOCK_MIN
+        logger.error("actionexecute: detection result missing; blocking action")
         return {
-            "flagged": False,
-            "riskdelta": 0,
+            "flagged": True,
+            "riskdelta": risk_score,
             "shouldquarantine": False,
             "shouldreview": False,
-            "matchedpatterns": [],
-            "reasons": [],
+            "matchedpatterns": ["detection_unavailable"],
+            "reasons": [
+                {
+                    "source": "scan",
+                    "label": "Detection unavailable",
+                    "details": "Action detection failed; action blocked.",
+                    "score": risk_score,
+                },
+            ],
+            "verdict": "block",
+            "severity": _severity_for_risk_score(risk_score),
+            "categories": ["detection_error"],
+            "scan_id": None,
+            "summary": "Action detection unavailable; action blocked.",
+            "drift_report": None,
         }
 
-    verdict = detection.get("verdict", "allow")
-    risk_score = int(detection.get("risk_score", 0) or 0)
-    matched_patterns = list(detection.get("matched_patterns", []))
-    reasons = list(detection.get("reasons", []))
+    invalid_result = False
+    raw_verdict = detection.get("verdict")
+    if raw_verdict not in ("allow", "block"):
+        logger.error("actionexecute: invalid detection verdict; blocking action")
+        invalid_result = True
 
-    flagged = verdict != "allow"
-    shouldquarantine = verdict in ("quarantine", "block")
-    shouldreview = verdict == "warn"
+    raw_risk_score = detection.get("risk_score")
+    if isinstance(raw_risk_score, int) and not isinstance(raw_risk_score, bool) and 0 <= raw_risk_score <= 100:
+        risk_score = raw_risk_score
+    else:
+        logger.error("actionexecute: invalid detection risk score; blocking action")
+        risk_score = RISK_THRESHOLD_BLOCK_MIN
+        invalid_result = True
 
-    severity = "none"
-    if risk_score >= 70:
-        severity = "critical"
-    elif risk_score >= 40:
-        severity = "high"
-    elif risk_score >= 20:
-        severity = "medium"
-    elif risk_score > 0:
-        severity = "low"
+    raw_matched_patterns = detection.get("matched_patterns")
+    if isinstance(raw_matched_patterns, list) and all(isinstance(pattern, str) for pattern in raw_matched_patterns):
+        matched_patterns = list(raw_matched_patterns)
+    else:
+        logger.error("actionexecute: invalid matched-pattern result; blocking action")
+        matched_patterns = ["invalid_detection_patterns"]
+        invalid_result = True
 
-    categories: list[str] = list(detection.get("categories", []))
+    raw_reasons = detection.get("reasons")
+    if isinstance(raw_reasons, list) and all(isinstance(reason, dict) for reason in raw_reasons):
+        reasons = list(raw_reasons)
+    else:
+        logger.error("actionexecute: invalid detection reasons; blocking action")
+        reasons = []
+        invalid_result = True
+
+    raw_categories = detection.get("categories")
+    if isinstance(raw_categories, list) and all(isinstance(category, str) for category in raw_categories):
+        categories = list(raw_categories)
+    else:
+        logger.error("actionexecute: invalid detection categories; blocking action")
+        categories = ["detection_error"]
+        invalid_result = True
+
+    if invalid_result:
+        reasons.append(
+            {
+                "source": "scan",
+                "label": "Invalid detection result",
+                "details": "Action detection returned invalid data; action blocked.",
+                "score": risk_score,
+            },
+        )
+
+    verdict = "block" if (invalid_result or raw_verdict != "allow" or risk_score > RISK_THRESHOLD_ALLOW_MAX or bool(matched_patterns) or bool(categories)) else "allow"
+    if verdict == "block":
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
+
+    summary = detection.get("summary")
+    if invalid_result:
+        summary = "Invalid action detection result; action blocked."
+    elif not isinstance(summary, str) or not summary:
+        summary = "Suspicious activity detected; action blocked." if verdict == "block" else "No suspicious activity detected."
+    scan_id = detection.get("scan_id")
+    if not isinstance(scan_id, str):
+        scan_id = None
 
     return {
-        "flagged": flagged,
+        "flagged": verdict == "block",
         "riskdelta": risk_score,
-        "shouldquarantine": shouldquarantine,
-        "shouldreview": shouldreview,
+        "shouldquarantine": False,
+        "shouldreview": raw_verdict == "warn",
         "matchedpatterns": matched_patterns,
         "reasons": reasons,
         "verdict": verdict,
-        "severity": severity,
+        "severity": _severity_for_risk_score(risk_score),
         "categories": categories,
-        "scan_id": detection.get("scan_id"),
-        "summary": detection.get("summary", ""),
+        "scan_id": scan_id,
+        "summary": summary,
         "drift_report": detection.get("drift_report"),
     }
 

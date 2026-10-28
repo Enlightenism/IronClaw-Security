@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.execute import router
 from app.orchestrator.secureruntimepipeline import (
     SecureRuntimePipeline,
@@ -54,7 +55,9 @@ def test_guard_execute_denies_high_risk_shell_request() -> None:
     assert body["shouldexecute"] is False
     assert body["haltedbyboundary"] is True
     assert body["executorresult"] is None
-    assert body["policyverdict"] in {"block", "quarantine"}
+    assert body["policyverdict"] == "block"
+    assert body["responseaction"] == "block"
+    assert body["riskscore"] >= RISK_THRESHOLD_BLOCK_MIN
 
 
 def test_guard_execute_exposes_core_boundary_summary_fields() -> None:

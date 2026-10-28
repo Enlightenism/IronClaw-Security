@@ -56,8 +56,8 @@ def _make_decision(
     risk_score: int = 0,
     mode: str = "enforce",
 ) -> PolicyDecision:
-    allow_execution = verdict in {"allow", "warn"} if mode == "enforce" else True
-    requires_review = verdict in {"warn", "quarantine"}
+    allow_execution = verdict == "allow"
+    requires_review = verdict != "allow"
     return PolicyDecision(
         decision_id="dec-001",
         verdict=verdict,
@@ -210,15 +210,22 @@ class TestAdaptPolicyDecisionToCape:
         assert resp.should_block is False
         assert resp.should_hold is False
 
-    def test_warn_verdict_flags(self):
+    def test_legacy_warn_verdict_is_blocked(self):
         resp = adapt_policy_decision_to_cape(_make_decision("warn"))
+        assert resp.verdict == "block"
         assert resp.should_allow is False
-        assert resp.should_warn is True
+        assert resp.should_warn is False
+        assert resp.should_quarantine is False
+        assert resp.should_block is True
         assert resp.should_hold is True
 
-    def test_quarantine_verdict_flags(self):
+    def test_legacy_quarantine_verdict_is_blocked(self):
         resp = adapt_policy_decision_to_cape(_make_decision("quarantine"))
-        assert resp.should_quarantine is True
+        assert resp.verdict == "block"
+        assert resp.should_allow is False
+        assert resp.should_warn is False
+        assert resp.should_quarantine is False
+        assert resp.should_block is True
         assert resp.should_hold is True
 
     def test_block_verdict_flags(self):
@@ -505,7 +512,7 @@ class TestEvaluateCapeRequest:
     def test_verdict_is_valid(self):
         req = build_cape_adapter_request(action_type="submit_url", target="http://bad.com")
         resp = evaluate_cape_request(self._engine(), req)
-        assert resp.verdict in ("allow", "warn", "quarantine", "block")
+        assert resp.verdict in ("allow", "block")
 
     def test_mode_default_enforce(self):
         req = build_cape_adapter_request(action_type="submit_sample", target="evil.exe")

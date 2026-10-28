@@ -180,14 +180,7 @@ def _build_detection_result(
     top_severity_str = max(all_severities, key=lambda s: severity_rank.get(s, 0)) if all_severities else result.highest_severity
     severity = _severity_to_enum(top_severity_str)
 
-    if not ioc_matches:
-        verdict = DetectionVerdict.ALLOW
-    elif severity in (ThreatSeverityLevel.CRITICAL, ThreatSeverityLevel.HIGH):
-        verdict = DetectionVerdict.BLOCK
-    elif severity == ThreatSeverityLevel.MEDIUM:
-        verdict = DetectionVerdict.REVIEW
-    else:
-        verdict = DetectionVerdict.MONITOR
+    verdict = DetectionVerdict.BLOCK if ioc_matches else DetectionVerdict.ALLOW
 
     score_map = {
         ThreatSeverityLevel.CRITICAL: 1.0,

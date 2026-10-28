@@ -218,6 +218,11 @@ def test_review_queue_item_full_construction():
     assert "rule-001" in item.matched_rules
 
 
+def test_review_queue_item_preserves_legacy_verdict():
+    item = ReviewQueueItem(item_id="item-legacy", verdict="quarantine")
+    assert item.verdict == "quarantine"
+
+
 def test_review_queue_item_orm_compat():
     assert ReviewQueueItem.model_config.get("from_attributes") is True
 
@@ -339,6 +344,16 @@ def test_review_decision_create_full_construction():
     assert d.metadata["source"] == "manual"
 
 
+@pytest.mark.parametrize("verdict", ["warn", "quarantine", "review", "error"])
+def test_review_decision_create_rejects_nonbinary_override(verdict):
+    with pytest.raises(ValidationError):
+        ReviewDecisionCreate(
+            item_id="item-x",
+            decision=ReviewStatus.approved,
+            override_verdict=verdict,
+        )
+
+
 def test_review_decision_create_orm_compat():
     assert ReviewDecisionCreate.model_config.get("from_attributes") is True
 
@@ -383,6 +398,16 @@ def test_review_decision_explicit_decided_at_preserved():
     assert d.decided_at == ts
 
 
+@pytest.mark.parametrize("verdict", ["warn", "quarantine", "review", "error"])
+def test_review_decision_rejects_nonbinary_override(verdict):
+    with pytest.raises(ValidationError):
+        ReviewDecision(
+            item_id="item-x",
+            decision=ReviewStatus.approved,
+            override_verdict=verdict,
+        )
+
+
 def test_review_decision_full_construction():
     from datetime import datetime
 
@@ -393,13 +418,13 @@ def test_review_decision_full_construction():
         decision=ReviewStatus.escalated,
         reviewer_id="lead",
         reasoning="Requires security team escalation",
-        override_verdict="quarantine",
+        override_verdict="block",
         metadata={"ticket": "SEC-42"},
         decided_at=now,
     )
     assert d.decision_id == "dec-001"
     assert d.decision == ReviewStatus.escalated
-    assert d.override_verdict == "quarantine"
+    assert d.override_verdict == "block"
     assert d.metadata["ticket"] == "SEC-42"
 
 

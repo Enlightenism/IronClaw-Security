@@ -81,7 +81,7 @@ def get_docs_quickstart() -> QuickstartPageResponse:
         QuickstartStepView(
             stepid="wire-policy",
             title="Tune your policy defaults",
-            description="Inspect current policy status and align thresholds for review, quarantine, and hard block decisions.",
+            description=("Inspect current policy status and tune thresholds for allow or block decisions."),
             codeblock=("GET /policy/status\nGET /ui/policy/settings"),
         ),
     ]

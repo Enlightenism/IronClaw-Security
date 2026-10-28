@@ -9,6 +9,7 @@ from app.adapters.llamafirewall_adapter import (
     evaluate_llamafirewall_request,
     summarize_llamafirewall_adapter_response,
 )
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.policy_enforcer import (
     PolicyEngine,
     initialize_policy_engine,
@@ -389,7 +390,7 @@ def test_adapt_allow_decision(engine: PolicyEngine) -> None:
     assert resp.adapter_name == "ironclaw-llamafirewall"
 
 
-def test_adapt_warn_verdict_sets_should_hold(engine: PolicyEngine) -> None:
+def test_adapt_legacy_warn_verdict_fails_closed(engine: PolicyEngine) -> None:
     from app.orchestrator.policy_enforcer import PolicyDecision, PolicyMatch
 
     fake_match = PolicyMatch(
@@ -413,12 +414,15 @@ def test_adapt_warn_verdict_sets_should_hold(engine: PolicyEngine) -> None:
         reasons=["Test warn reason"],
     )
     resp = adapt_policy_decision_to_llamafirewall(fake_decision)
-    assert resp.verdict == "warn"
-    assert resp.should_warn is True
+    assert resp.verdict == "block"
+    assert resp.should_warn is False
+    assert resp.should_quarantine is False
+    assert resp.should_block is True
     assert resp.should_hold is True
+    assert resp.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
 
-def test_adapt_quarantine_verdict(engine: PolicyEngine) -> None:
+def test_adapt_legacy_quarantine_verdict_fails_closed(engine: PolicyEngine) -> None:
     from app.orchestrator.policy_enforcer import PolicyDecision, PolicyMatch
 
     fake_match = PolicyMatch(
@@ -442,9 +446,12 @@ def test_adapt_quarantine_verdict(engine: PolicyEngine) -> None:
         reasons=["Test quarantine reason"],
     )
     resp = adapt_policy_decision_to_llamafirewall(fake_decision)
-    assert resp.verdict == "quarantine"
-    assert resp.should_quarantine is True
+    assert resp.verdict == "block"
+    assert resp.should_warn is False
+    assert resp.should_quarantine is False
+    assert resp.should_block is True
     assert resp.should_hold is True
+    assert resp.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
 
 # ---------- LlamaFirewall scan result enrichment ----------

@@ -27,7 +27,7 @@ def test_guard_action_allows_safe_request() -> None:
     assert result["quarantined"] is False
 
 
-def test_guard_action_routes_indirect_injection_to_review() -> None:
+def test_guard_action_blocks_indirect_injection_and_requires_review() -> None:
     result = guardaction(
         actiontype="httpfetch",
         target="https://example.com/untrusted",
@@ -42,14 +42,14 @@ def test_guard_action_routes_indirect_injection_to_review() -> None:
         },
     )
 
-    assert result["verdict"] == "review"
-    assert result["allowed"] is True
-    assert result["haltedbyboundary"] is False
+    assert result["verdict"] == "block"
+    assert result["allowed"] is False
+    assert result["haltedbyboundary"] is True
     assert result["requiresreview"] is True
     assert result["promptinjection"]["flagged"] is True
 
 
-def test_guard_action_quarantines_exfiltration_path() -> None:
+def test_guard_action_blocks_exfiltration_path() -> None:
     result = guardaction(
         actiontype="toolcall",
         target="shell",
@@ -60,10 +60,10 @@ def test_guard_action_quarantines_exfiltration_path() -> None:
         filepath="app/api/actionexecute.py",
     )
 
-    assert result["verdict"] == "quarantine"
+    assert result["verdict"] == "block"
     assert result["allowed"] is False
     assert result["haltedbyboundary"] is True
-    assert result["quarantined"] is True
+    assert result["quarantined"] is False
 
 
 def test_action_guard_route_returns_typed_response() -> None:
@@ -81,5 +81,5 @@ def test_action_guard_route_returns_typed_response() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["verdict"] in {"allow", "review", "quarantine", "deny"}
+    assert body["verdict"] in {"allow", "block"}
     assert isinstance(body["reasons"], list)

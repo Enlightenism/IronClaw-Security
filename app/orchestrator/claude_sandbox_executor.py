@@ -123,16 +123,17 @@ class ClaudeSandboxExecutor:
         guarded_request: GuardedActionRequest,
     ) -> GuardedActionResult:
         """Execute a guarded action, respecting the guard verdict and executor mode."""
-        verdict = guarded_request.policy_verdict.lower()
-        should_execute = guarded_request.should_execute
-        halted_by_boundary = guarded_request.halted_by_boundary
+        raw_verdict = getattr(guarded_request, "policy_verdict", None)
+        verdict = raw_verdict.strip().lower() if isinstance(raw_verdict, str) else "block"
+        should_execute = getattr(guarded_request, "should_execute", None) is True
+        halted_by_boundary = getattr(guarded_request, "halted_by_boundary", None)
 
-        if not should_execute or halted_by_boundary or verdict in {"block", "quarantine"}:
+        if verdict != "allow" or not should_execute or halted_by_boundary is not False:
             return GuardedActionResult(
                 execution_state="denied",
                 response_action="block",
                 response_status="denied",
-                policy_verdict=verdict or "block",
+                policy_verdict="block",
                 should_execute=False,
                 halted_by_boundary=True,
                 executor_name=self.name,
@@ -195,7 +196,7 @@ class ClaudeSandboxExecutor:
             execution_state=execution_state,
             response_action="allow",
             response_status=response_status,
-            policy_verdict=verdict or "allow",
+            policy_verdict="allow",
             should_execute=True,
             halted_by_boundary=False,
             executor_name=self.name,

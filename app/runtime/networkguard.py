@@ -7,6 +7,7 @@ import re
 from typing import Any
 from urllib.parse import parse_qsl, urlparse
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.detection.secretscanner import build_secret_scanner
 
 DEFAULT_ALLOWED_SCHEMES = {"http", "https"}
@@ -115,6 +116,7 @@ class NetworkPolicy:
     reasons: list[dict[str, Any]] = field(default_factory=list)
     matched_rules: list[str] = field(default_factory=list)
     direction: str = "egress"
+    method: str = "GET"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -132,14 +134,15 @@ class NetworkPolicy:
             "reasons": list(self.reasons),
             "matchedrules": list(self.matched_rules),
             "direction": self.direction,
+            "method": self.method,
         }
 
 
 @dataclass(slots=True)
 class NetworkGuard:
-    review_threshold: int = 20
-    block_threshold: int = 50
-    quarantine_threshold: int = 80
+    review_threshold: int = RISK_THRESHOLD_ALLOW_MAX + 1
+    block_threshold: int = RISK_THRESHOLD_BLOCK_MIN
+    quarantine_threshold: int = RISK_THRESHOLD_BLOCK_MIN
     allowed_schemes: set[str] = field(default_factory=lambda: set(DEFAULT_ALLOWED_SCHEMES))
     blocked_schemes: set[str] = field(default_factory=lambda: set(DEFAULT_BLOCKED_SCHEMES))
     allowed_hosts: set[str] = field(default_factory=lambda: set(DEFAULT_ALLOWED_HOSTS))
@@ -172,6 +175,7 @@ class NetworkGuard:
         risk_delta = 0
         metadata_map = dict(metadata or {})
         direction = str(metadata_map.get("direction") or "egress").strip().lower() or "egress"
+        normalized_method = str(method or "GET").upper()
 
         if not normalized_url:
             reasons.append(
@@ -192,14 +196,29 @@ class NetworkGuard:
                 path="",
                 normalized_url=normalized_url,
                 direction=direction,
+                method=normalized_method,
             )
 
         parsed = urlparse(normalized_url)
         scheme = (parsed.scheme or "").strip().lower()
         host = (parsed.hostname or "").strip().lower()
-        port = parsed.port
+        try:
+            port = parsed.port
+        except ValueError:
+            port = None
+            reasons.append(
+                NetworkReason(
+                    source="networkguard",
+                    label="Invalid port",
+                    details="Network request URL contains an invalid port value.",
+                    score=100,
+                ),
+            )
+            matched_rules.append("invalid_port")
+            risk_delta += 100
+        if port is None and scheme in {"http", "https"}:
+            port = 80 if scheme == "http" else 443
         path = parsed.path or "/"
-        normalized_method = str(method or "GET").upper()
 
         if not scheme:
             reasons.append(
@@ -211,6 +230,7 @@ class NetworkGuard:
                 ),
             )
             matched_rules.append("missing_scheme")
+            matched_rules.append("invalid_url")
             risk_delta += 60
 
         if scheme in self.blocked_schemes:
@@ -235,6 +255,18 @@ class NetworkGuard:
             )
             matched_rules.append(f"unapproved_scheme:{scheme}")
             risk_delta += 35
+
+        if scheme == "http":
+            reasons.append(
+                NetworkReason(
+                    source="networkguard",
+                    label="Insecure scheme",
+                    details="Unencrypted HTTP is not permitted for runtime egress.",
+                    score=15,
+                ),
+            )
+            matched_rules.append("insecure_scheme:http")
+            risk_delta += 15
 
         if not host:
             reasons.append(
@@ -311,6 +343,7 @@ class NetworkGuard:
             path=path,
             normalized_url=normalized_url,
             direction=direction,
+            method=normalized_method,
         )
 
     def allow(
@@ -722,37 +755,24 @@ class NetworkGuard:
         path: str,
         normalized_url: str,
         direction: str,
+        method: str = "GET",
     ) -> NetworkPolicy:
         deduped_reasons = self._dedupe_reasons(reasons)
         deduped_rules = self._dedupe_rules(matched_rules)
         normalized_risk = max(0, min(100, int(risk_delta)))
 
-        verdict = "allow"
-        allowed = True
-        should_review = False
-        should_block = False
-        should_quarantine = False
-
-        if normalized_risk >= self.quarantine_threshold:
-            verdict = "quarantine"
-            allowed = False
-            should_block = True
-            should_quarantine = True
-        elif normalized_risk >= self.block_threshold:
-            verdict = "block"
-            allowed = False
-            should_block = True
-        elif normalized_risk >= self.review_threshold:
-            verdict = "review"
-            should_review = True
+        suspicious_rules = [rule for rule in deduped_rules if not rule.startswith("allowed_host:")]
+        should_review = normalized_risk >= self.review_threshold
+        should_block = bool(suspicious_rules) or normalized_risk > RISK_THRESHOLD_ALLOW_MAX or should_review
+        final_risk = max(normalized_risk, RISK_THRESHOLD_BLOCK_MIN) if should_block else normalized_risk
 
         return NetworkPolicy(
-            verdict=verdict,
-            allowed=allowed,
+            verdict="block" if should_block else "allow",
+            allowed=not should_block,
             should_review=should_review,
             should_block=should_block,
-            should_quarantine=should_quarantine,
-            risk_delta=normalized_risk,
+            should_quarantine=False,
+            risk_delta=final_risk,
             scheme=scheme,
             host=host,
             port=port,
@@ -761,14 +781,15 @@ class NetworkGuard:
             reasons=[reason.as_dict() for reason in deduped_reasons],
             matched_rules=deduped_rules,
             direction=direction,
+            method=method,
         )
 
 
 def initialize_networkguard(
     *,
-    review_threshold: int = 20,
-    block_threshold: int = 50,
-    quarantine_threshold: int = 80,
+    review_threshold: int = RISK_THRESHOLD_ALLOW_MAX + 1,
+    block_threshold: int = RISK_THRESHOLD_BLOCK_MIN,
+    quarantine_threshold: int = RISK_THRESHOLD_BLOCK_MIN,
     allowed_schemes: Iterable[str] | None = None,
     blocked_schemes: Iterable[str] | None = None,
     allowed_hosts: Iterable[str] | None = None,

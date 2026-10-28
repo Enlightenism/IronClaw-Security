@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.services.guard_security_brain import GuardMode
 from app.ui.guard.brain_status import build_guard_brain_status_view
 from app.ui.guard.control_panel import CONTROL_FLAGS
@@ -93,16 +94,14 @@ def _score_runtime_actions(mode: GuardMode) -> DomainPostureScore:
 
     total = max(status.total_evaluations, 1)
     blocked = status.blocked_count
-    quarantined = status.quarantined_count
-    warned = status.warned_count
+    quarantined = 0
+    warned = 0
     allowed = status.allowed_count
 
-    high_risk_ratio = (blocked + quarantined) / total
-    warn_ratio = warned / total
+    high_risk_ratio = blocked / total
 
     base = 100.0
     base -= high_risk_ratio * 60.0
-    base -= warn_ratio * 25.0
 
     if mode in ("assist", "enforce"):
         base += 5.0
@@ -111,7 +110,7 @@ def _score_runtime_actions(mode: GuardMode) -> DomainPostureScore:
 
     score = _clamp_score(base)
 
-    rationale = f"Based on {total} recent decisions: {blocked} blocked, {quarantined} quarantined, {warned} warned, {allowed} allowed."
+    rationale = f"Based on {total} recent decisions: {blocked} blocked, {allowed} allowed."
 
     return DomainPostureScore(
         name="runtime_actions",
@@ -125,7 +124,7 @@ def _score_runtime_actions(mode: GuardMode) -> DomainPostureScore:
             "warned": warned,
             "allowed": allowed,
             "high_risk_ratio": round(high_risk_ratio, 3),
-            "warn_ratio": round(warn_ratio, 3),
+            "warn_ratio": 0.0,
             "health": status.health,
             "last_verdict": status.last_verdict,
             "last_risk_score": status.last_risk_score,
@@ -236,8 +235,9 @@ def _score_request_stream_exposure(mode: GuardMode) -> DomainPostureScore:
     recent_events = list(_REQUEST_EVENTS[-100:])
     total = len(recent_events)
 
-    high_risk = sum(1 for event in recent_events if event.risk_score >= 70)
-    blocked_or_quarantined = sum(1 for event in recent_events if event.verdict in ("block", "quarantine"))
+    high_risk = sum(1 for event in recent_events if event.risk_score >= RISK_THRESHOLD_BLOCK_MIN or event.verdict == "block")
+    # Keep the legacy indicator name; current decisions counted here are block-only.
+    blocked_or_quarantined = sum(1 for event in recent_events if event.verdict == "block")
     prompt_injection_signals = sum(1 for event in recent_events if any(signal == "prompt_injection" for signal in event.signals))
     credential_leak_signals = sum(1 for event in recent_events if any(signal == "credential_leak" for signal in event.signals))
     data_exfiltration_signals = sum(1 for event in recent_events if any(signal == "data_exfiltration" for signal in event.signals))
@@ -259,7 +259,7 @@ def _score_request_stream_exposure(mode: GuardMode) -> DomainPostureScore:
     score = _clamp_score(base)
     last_event_at = recent_events[-1].occurred_at if recent_events else None
 
-    rationale = f"Recent stream has {total} requests, {high_risk} high-risk evaluations, and {blocked_or_quarantined} blocked or quarantined outcomes."
+    rationale = f"Recent stream has {total} requests, {high_risk} high-risk evaluations, and {blocked_or_quarantined} blocked outcomes."
 
     return DomainPostureScore(
         name="request_stream_exposure",

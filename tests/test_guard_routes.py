@@ -22,6 +22,7 @@ os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
 import app.api.routes.guard as _guard_module
 from app.api.routes.guard import router as guard_router
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.core.auth import require_api_key
 from app.core.errors import AppError
 
@@ -346,8 +347,10 @@ class TestGuardExecuteShape:
         data = resp.json()
         assert data["response_status"] == "queued_for_review"
         assert data["execution_state"] == "held"
+        assert data["policy_verdict"] == "block"
+        assert data["risk_score"] >= RISK_THRESHOLD_BLOCK_MIN
 
-    def test_deny_without_block_sets_failed_state(self, client: TestClient) -> None:
+    def test_legacy_nonbinary_verdict_without_review_fails_closed(self, client: TestClient) -> None:
         decision = _make_policy_decision(
             verdict="warn",
             allow_execution=False,
@@ -358,6 +361,8 @@ class TestGuardExecuteShape:
         data = resp.json()
         assert data["response_status"] == "denied"
         assert data["execution_state"] == "failed"
+        assert data["policy_verdict"] == "block"
+        assert data["risk_score"] >= RISK_THRESHOLD_BLOCK_MIN
 
     def test_risk_score_clamped_to_100_max_in_payload(self, client: TestClient) -> None:
         payload = {**_EXECUTE_PAYLOAD, "risk_score": 101}

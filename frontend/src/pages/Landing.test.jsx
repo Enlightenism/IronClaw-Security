@@ -574,4 +574,17 @@ describe("Landing", () => {
       expect(screen.getByTestId("powered-by")).toBeInTheDocument();
     });
   });
+
+  it("describes binary verdicts and quarantine as operational isolation", async () => {
+    await renderLanding();
+
+    expect(
+      screen.getByText(/returning only allow or block verdicts/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /operational isolation and review workflow, not a final verdict/,
+      ),
+    ).toBeInTheDocument();
+  });
 });

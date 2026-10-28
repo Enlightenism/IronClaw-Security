@@ -5,7 +5,8 @@ from typing import Any
 
 import pytest
 
-from app.runtime.commandsupervisor import build_command_supervisor
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+from app.runtime.commandsupervisor import CommandSupervisor, build_command_supervisor
 
 
 def _decision_attr(decision: Any, name: str, default: Any = None) -> Any:
@@ -33,14 +34,28 @@ def test_allow_safe_echo_command():
 
     assert _decision_attr(decision, "allowed") is True
     assert _decision_attr(decision, "verdict") == "allow"
-    assert _decision_attr(decision, "command") == "echo hello"
+    assert _decision_attr(decision, "normalized_command") == "echo hello"
     assert _decision_attr(decision, "cwd") == "/workspace"
     assert _decision_attr(decision, "should_review") is False
     assert _decision_attr(decision, "should_block") is False
     assert _decision_attr(decision, "should_quarantine") is False
 
 
-def test_missing_command_quarantines():
+def test_low_severity_pattern_blocks_with_configured_minimum_risk():
+    supervisor = CommandSupervisor(
+        blocked_patterns=(("low_severity", r"(?i)\blowrisk\b", 1),),
+    )
+
+    decision = supervisor.evaluate(command="echo lowrisk")
+
+    assert decision.verdict == "block"
+    assert decision.allowed is False
+    assert decision.should_block is True
+    assert decision.should_quarantine is False
+    assert decision.risk_delta >= RISK_THRESHOLD_BLOCK_MIN
+
+
+def test_missing_command_blocks():
     supervisor = build_command_supervisor()
 
     decision = supervisor.evaluate(command="")
@@ -48,12 +63,13 @@ def test_missing_command_quarantines():
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
     assert _decision_attr(decision, "allowed") is False
-    assert _decision_attr(decision, "verdict") == "quarantine"
-    assert _decision_attr(decision, "should_quarantine") is True
-    assert "missing_command" in matched_rules
+    assert _decision_attr(decision, "verdict") == "block"
+    assert _decision_attr(decision, "should_block") is True
+    assert _decision_attr(decision, "should_quarantine") is False
+    assert "empty_command" in matched_rules
 
 
-def test_whitespace_command_quarantines():
+def test_whitespace_command_blocks():
     supervisor = build_command_supervisor()
 
     decision = supervisor.evaluate(command="   ")
@@ -61,8 +77,8 @@ def test_whitespace_command_quarantines():
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
     assert _decision_attr(decision, "allowed") is False
-    assert _decision_attr(decision, "verdict") == "quarantine"
-    assert "missing_command" in matched_rules
+    assert _decision_attr(decision, "verdict") == "block"
+    assert "empty_command" in matched_rules
 
 
 @pytest.mark.parametrize(
@@ -83,7 +99,7 @@ def test_dangerous_tokens_trigger_high_verdict(command: str, expected_rule: str)
     decision = supervisor.evaluate(command=command)
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
-    assert _decision_attr(decision, "verdict") in {"review", "block", "quarantine"}
+    assert _decision_attr(decision, "verdict") == "block"
     assert expected_rule in matched_rules
 
 
@@ -93,7 +109,7 @@ def test_shell_metacharacters_raise_risk():
     decision = supervisor.evaluate(command="echo hi && uname -a")
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
-    assert _decision_attr(decision, "verdict") in {"review", "block", "quarantine"}
+    assert _decision_attr(decision, "verdict") == "block"
     assert any(rule.startswith("shell_metacharacter") for rule in matched_rules)
 
 
@@ -104,7 +120,7 @@ def test_long_command_raises_risk():
     decision = supervisor.evaluate(command=command)
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
-    assert _decision_attr(decision, "verdict") in {"review", "block", "quarantine"}
+    assert _decision_attr(decision, "verdict") == "block"
     assert "command_length_exceeded" in matched_rules
 
 
@@ -117,11 +133,11 @@ def test_unapproved_cwd_raises_risk():
     )
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
-    assert _decision_attr(decision, "verdict") in {"review", "block", "quarantine"}
+    assert _decision_attr(decision, "verdict") == "block"
     assert any(rule.startswith("unapproved_cwd") for rule in matched_rules)
 
 
-def test_parent_escape_cwd_quarantines():
+def test_parent_escape_cwd_blocks():
     supervisor = build_command_supervisor()
 
     decision = supervisor.evaluate(
@@ -131,8 +147,8 @@ def test_parent_escape_cwd_quarantines():
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
     assert _decision_attr(decision, "allowed") is False
-    assert _decision_attr(decision, "verdict") == "quarantine"
-    assert "cwd_escape" in matched_rules
+    assert _decision_attr(decision, "verdict") == "block"
+    assert "path_escape" in matched_rules
 
 
 def test_absolute_windows_cwd_raises_risk():
@@ -144,7 +160,7 @@ def test_absolute_windows_cwd_raises_risk():
     )
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
-    assert _decision_attr(decision, "verdict") in {"review", "block", "quarantine"}
+    assert _decision_attr(decision, "verdict") == "block"
     assert any(rule in matched_rules for rule in ("absolute_cwd", "unapproved_cwd:C:/Windows/System32"))
 
 
@@ -160,7 +176,7 @@ def test_environment_override_of_sensitive_keys_raises_risk():
     )
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
-    assert _decision_attr(decision, "verdict") in {"review", "block", "quarantine"}
+    assert _decision_attr(decision, "verdict") == "block"
     assert any(rule.startswith("sensitive_env") for rule in matched_rules)
 
 
@@ -174,7 +190,7 @@ def test_too_many_environment_variables_raises_risk():
     )
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
-    assert _decision_attr(decision, "verdict") in {"review", "block", "quarantine"}
+    assert _decision_attr(decision, "verdict") == "block"
     assert "environment_size_exceeded" in matched_rules
 
 
@@ -187,7 +203,7 @@ def test_timeout_exceeded_raises_risk():
     )
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
-    assert _decision_attr(decision, "verdict") in {"review", "block", "quarantine"}
+    assert _decision_attr(decision, "verdict") == "block"
     assert "timeout_exceeded" in matched_rules
 
 
@@ -200,7 +216,7 @@ def test_negative_timeout_raises_risk():
     )
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
-    assert _decision_attr(decision, "verdict") in {"review", "block", "quarantine"}
+    assert _decision_attr(decision, "verdict") == "block"
     assert "invalid_timeout" in matched_rules
 
 
@@ -301,7 +317,7 @@ def test_review_or_block_when_python_inline_exec_used():
     )
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
-    assert _decision_attr(decision, "verdict") in {"review", "block", "quarantine"}
+    assert _decision_attr(decision, "verdict") == "block"
     assert any(rule.startswith("inline_execution") for rule in matched_rules)
 
 
@@ -314,5 +330,5 @@ def test_review_or_block_when_powershell_encoded_command_used():
     )
     matched_rules = list(_decision_attr(decision, "matched_rules", []) or [])
 
-    assert _decision_attr(decision, "verdict") in {"review", "block", "quarantine"}
+    assert _decision_attr(decision, "verdict") == "block"
     assert any(rule.startswith("encoded_command") for rule in matched_rules)

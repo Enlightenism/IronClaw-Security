@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
-from app.api.actionexecute import router
+from app.api.actionexecute import (
+    ActionExecuteRequestModel,
+    _detection_to_promptinjection,
+    _run_detection,
+    router,
+)
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+from app.services.action_guard import ActionGuardDecision
 
 app = FastAPI()
 app.include_router(router)
@@ -52,7 +62,8 @@ def test_executeaction_uses_default_ownerkey_when_not_provided() -> None:
     body = response.json()
 
     assert body["ownerkey"] == "system"
-    assert body["status"] == "allowed"
+    assert body["status"] == "review"
+    assert body["executionallowed"] is False
 
 
 def test_executeaction_preserves_trimmed_target_in_response() -> None:
@@ -78,4 +89,49 @@ def test_executeaction_preserves_trimmed_target_in_response() -> None:
     body = response.json()
 
     assert body["target"] == "https://example.com/docs"
-    assert body["status"] == "allowed"
+    assert body["status"] == "review"
+    assert body["executionallowed"] is False
+
+
+def test_executeaction_blocks_when_detection_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_detection(**_kwargs: object) -> None:
+        raise RuntimeError("detection unavailable")
+
+    monkeypatch.setattr("app.api.actionexecute.analyze_action", fail_detection)
+    request = ActionExecuteRequestModel(
+        actiontype="httpfetch",
+        target="https://example.com",
+        content="Fetch a public page.",
+        clientid="client-edge-004",
+        sessionid="session-edge-004",
+    )
+
+    promptinjection = _detection_to_promptinjection(_run_detection(request))
+
+    assert promptinjection["verdict"] == "block"
+    assert promptinjection["riskdelta"] >= RISK_THRESHOLD_BLOCK_MIN
+    assert promptinjection["shouldquarantine"] is False
+    assert promptinjection["matchedpatterns"] == ["detection_unavailable"]
+
+
+def test_executeaction_blocks_invalid_detection_verdict() -> None:
+    invalid_detection = cast(
+        ActionGuardDecision,
+        {
+            "action_type": "network_request",
+            "verdict": "quarantine",
+            "scan_id": None,
+            "summary": "",
+            "risk_score": 5,
+            "matched_patterns": [],
+            "categories": [],
+            "reasons": [],
+            "drift_report": None,
+        },
+    )
+
+    promptinjection = _detection_to_promptinjection(invalid_detection)
+
+    assert promptinjection["verdict"] == "block"
+    assert promptinjection["riskdelta"] >= RISK_THRESHOLD_BLOCK_MIN
+    assert promptinjection["shouldquarantine"] is False

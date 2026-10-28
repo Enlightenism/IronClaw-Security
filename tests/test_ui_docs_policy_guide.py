@@ -67,7 +67,7 @@ _REQUIRED_API_ENDPOINT_FIELDS = (
     "description",
 )
 
-_KNOWN_VERDICT_IDS = {"allow", "warn", "quarantine", "block"}
+_KNOWN_VERDICT_IDS = {"allow", "block"}
 
 _VALID_HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 
@@ -168,7 +168,13 @@ def test_get_docs_policy_guide_known_policy_fields_present(
     response = test_client.get(URL)
     assert response.status_code == 200
     field_ids = {f["fieldid"] for f in response.json()["fields"]}
-    for expected in ("mode", "warnthreshold", "reviewthreshold", "blockthreshold"):
+    for expected in (
+        "mode",
+        "warnthreshold",
+        "reviewthreshold",
+        "quarantinethreshold",
+        "blockthreshold",
+    ):
         assert expected in field_ids, f"expected policy field {expected!r} not found"
 
 
@@ -193,14 +199,13 @@ def test_get_docs_policy_guide_verdicts_shape(test_client: TestClient) -> None:
         assert verdict["recommendedthresholdrange"].strip()
 
 
-def test_get_docs_policy_guide_all_known_verdicts_present(
+def test_get_docs_policy_guide_has_only_allow_and_block_verdicts(
     test_client: TestClient,
 ) -> None:
     response = test_client.get(URL)
     assert response.status_code == 200
     verdict_ids = {v["verdictid"] for v in response.json()["verdicts"]}
-    for expected in _KNOWN_VERDICT_IDS:
-        assert expected in verdict_ids, f"expected verdict {expected!r} not found"
+    assert verdict_ids == _KNOWN_VERDICT_IDS
 
 
 def test_get_docs_policy_guide_verdict_ids_are_unique(test_client: TestClient) -> None:
@@ -218,6 +223,7 @@ def test_get_docs_policy_guide_block_verdict_is_hard_denied(
     block = next((v for v in response.json()["verdicts"] if v["verdictid"] == "block"), None)
     assert block is not None
     assert block["harddenied"] is True
+    assert block["executionheld"] is True
 
 
 def test_get_docs_policy_guide_allow_verdict_does_not_hold_execution(
@@ -229,16 +235,6 @@ def test_get_docs_policy_guide_allow_verdict_does_not_hold_execution(
     assert allow is not None
     assert allow["executionheld"] is False
     assert allow["harddenied"] is False
-
-
-def test_get_docs_policy_guide_quarantine_verdict_holds_execution(
-    test_client: TestClient,
-) -> None:
-    response = test_client.get(URL)
-    assert response.status_code == 200
-    quarantine = next((v for v in response.json()["verdicts"] if v["verdictid"] == "quarantine"), None)
-    assert quarantine is not None
-    assert quarantine["executionheld"] is True
 
 
 def test_get_docs_policy_guide_worked_examples_shape(test_client: TestClient) -> None:

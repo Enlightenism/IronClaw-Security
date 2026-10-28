@@ -7,6 +7,8 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
+
 
 class GateStatus(StrEnum):
     OPEN = "open"
@@ -115,62 +117,41 @@ class RemediationGate:
         reasons: list[str] = []
         evidence: list[GateEvidence] = self._build_evidence(request)
 
-        risk_score = int(request.get("risk_score", 0) or 0)
-        verdict = str(request.get("verdict", "allow")).lower()
-        review_required = bool(request.get("review_required", False))
-        quarantine_required = bool(request.get("quarantine_required", False))
+        incoming_verdict = str(request.get("verdict", "allow") or "").strip().lower()
+        risk_score, risk_score_valid = self._normalize_risk_score(request.get("risk_score", 0))
+        review_required = bool(request.get("review_required", False)) or incoming_verdict in {"warn", "review", "needs_review"} or bool(request.get("should_review", False)) or bool(request.get("shouldreview", False))
+        quarantine_required = bool(request.get("quarantine_required", False)) or incoming_verdict == "quarantine"
         secret_detected = bool(request.get("secret_detected", False))
         prompt_injection_detected = bool(request.get("prompt_injection_detected", False))
         requires_network = bool(request.get("requires_network", False))
         untrusted_output = bool(request.get("untrusted_output", False))
         malware_detected = bool(request.get("malware_detected", False))
 
+        match_request = dict(request)
+        match_request.update(
+            risk_score=risk_score,
+            incoming_verdict=incoming_verdict,
+        )
         for rule in self.rules:
-            if self._matches(rule, request):
+            if self._matches(rule, match_request):
                 matched_rules.append(rule)
                 reasons.append(rule.name)
 
-        action = RemediationAction.NONE
-        status = GateStatus.OPEN
-        allowed = True
-        redaction_required = False
-        sandbox_required = False
+        matched_signals = any(bool(request.get(key)) for key in ("matched_patterns", "matched_rules", "patterns", "should_warn", "should_block", "should_quarantine"))
+        errors_detected = bool(request.get("error")) or bool(request.get("errors"))
+        blocked = (
+            incoming_verdict != "allow" or not risk_score_valid or risk_score > RISK_THRESHOLD_ALLOW_MAX or bool(matched_rules) or matched_signals or errors_detected or review_required or quarantine_required or secret_detected or prompt_injection_detected or untrusted_output or malware_detected
+        )
+        action = RemediationAction.BLOCK if blocked else RemediationAction.NONE
+        status = GateStatus.NEEDS_REVIEW if blocked and review_required else GateStatus.CLOSED if blocked else GateStatus.OPEN
+        allowed = not blocked
+        redaction_required = secret_detected or bool(request.get("redaction_required", False))
+        sandbox_required = bool(request.get("sandbox_required", False)) or (requires_network and risk_score > RISK_THRESHOLD_ALLOW_MAX)
 
-        if malware_detected or verdict == "block":
-            action = RemediationAction.BLOCK
-            status = GateStatus.CLOSED
-            allowed = False
-        elif quarantine_required or verdict == "quarantine":
-            action = RemediationAction.QUARANTINE
-            status = GateStatus.QUARANTINED
-            allowed = False
-        elif secret_detected:
-            action = RemediationAction.APPLY_REDACTION
-            status = GateStatus.CONDITIONAL
-            redaction_required = True
-            sandbox_required = requires_network
-        elif review_required or verdict == "warn":
-            action = RemediationAction.REQUIRE_REVIEW
-            status = GateStatus.NEEDS_REVIEW
-            allowed = False
-            review_required = True
-        elif prompt_injection_detected or untrusted_output or risk_score >= 70 or (requires_network and risk_score >= 40):
-            action = RemediationAction.SANDBOX_ONLY
-            status = GateStatus.CONDITIONAL
-            sandbox_required = True
-
-        if action == RemediationAction.BLOCK:
-            reasons.append("Blocking condition met.")
-        elif action == RemediationAction.QUARANTINE:
-            reasons.append("Quarantine condition met.")
-        elif action == RemediationAction.APPLY_REDACTION:
-            reasons.append("Sensitive data requires redaction before release.")
-        elif action == RemediationAction.REQUIRE_REVIEW:
-            reasons.append("Human review required before continuation.")
-        elif action == RemediationAction.SANDBOX_ONLY:
-            reasons.append("Execution must remain inside sandbox boundaries.")
+        if blocked:
+            reasons.append("Suspicious signal detected; request blocked.")
         else:
-            reasons.append("No additional remediation required.")
+            reasons.append("No suspicious signal detected.")
 
         decision = GateDecision(
             gate_id=f"gate-{uuid4().hex}",
@@ -182,17 +163,19 @@ class RemediationGate:
             matched_rules=matched_rules,
             evidence=evidence,
             review_required=review_required,
-            quarantine_required=action == RemediationAction.QUARANTINE or quarantine_required,
+            quarantine_required=quarantine_required or any(rule.action == RemediationAction.QUARANTINE for rule in matched_rules),
             redaction_required=redaction_required,
             sandbox_required=sandbox_required,
             metadata={
-                "risk_score": risk_score,
-                "verdict": verdict,
+                "risk_score": max(risk_score, RISK_THRESHOLD_BLOCK_MIN) if blocked else risk_score,
+                "verdict": "block" if blocked else "allow",
+                "incoming_verdict": incoming_verdict,
                 "requires_network": requires_network,
                 "secret_detected": secret_detected,
                 "prompt_injection_detected": prompt_injection_detected,
                 "untrusted_output": untrusted_output,
                 "malware_detected": malware_detected,
+                "errors_detected": errors_detected,
             },
         )
         self._emit(decision)
@@ -203,23 +186,39 @@ class RemediationGate:
 
     def _matches(self, rule: RemediationRule, request: Mapping[str, Any]) -> bool:
         condition = rule.condition
+        incoming_verdict = str(request.get("incoming_verdict", request.get("verdict", ""))).lower()
 
         if condition == "malware_detected":
             return bool(request.get("malware_detected"))
         if condition == "quarantine_required":
-            return bool(request.get("quarantine_required")) or str(request.get("verdict", "")).lower() == "quarantine"
+            return bool(request.get("quarantine_required")) or incoming_verdict == "quarantine"
         if condition == "review_required":
-            return bool(request.get("review_required")) or str(request.get("verdict", "")).lower() == "warn"
+            return bool(request.get("review_required")) or bool(request.get("should_review")) or bool(request.get("shouldreview")) or incoming_verdict in {"warn", "review", "needs_review"}
         if condition == "secret_detected":
             return bool(request.get("secret_detected"))
         if condition == "prompt_injection_or_untrusted_output":
             return bool(request.get("prompt_injection_detected")) or bool(request.get("untrusted_output"))
         if condition == "high_risk_network":
-            return bool(request.get("requires_network")) and int(request.get("risk_score", 0) or 0) >= 40
+            return bool(request.get("requires_network")) and int(request.get("risk_score", 0) or 0) > RISK_THRESHOLD_ALLOW_MAX
         if condition == "high_risk_score":
-            return int(request.get("risk_score", 0) or 0) >= 70
+            return int(request.get("risk_score", 0) or 0) > RISK_THRESHOLD_ALLOW_MAX
 
         return False
+
+    def _normalize_risk_score(self, value: Any) -> tuple[int, bool]:
+        if value is None:
+            return 0, True
+        if isinstance(value, bool):
+            return RISK_THRESHOLD_BLOCK_MIN, False
+        try:
+            risk_score = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return RISK_THRESHOLD_BLOCK_MIN, False
+        if isinstance(value, float) and not value.is_integer():
+            return RISK_THRESHOLD_BLOCK_MIN, False
+        if risk_score < 0:
+            return RISK_THRESHOLD_BLOCK_MIN, False
+        return min(risk_score, 100), risk_score <= 100
 
     def _build_evidence(self, request: Mapping[str, Any]) -> list[GateEvidence]:
         evidence: list[GateEvidence] = []
@@ -265,35 +264,35 @@ class RemediationGate:
                 rule_id="rr-quarantine",
                 name="Quarantine required",
                 condition="quarantine_required",
-                action=RemediationAction.QUARANTINE,
+                action=RemediationAction.BLOCK,
                 severity="critical",
             ),
             RemediationRule(
                 rule_id="rr-review",
                 name="Human review required",
                 condition="review_required",
-                action=RemediationAction.REQUIRE_REVIEW,
+                action=RemediationAction.BLOCK,
                 severity="high",
             ),
             RemediationRule(
                 rule_id="rr-secret",
                 name="Secret detected",
                 condition="secret_detected",
-                action=RemediationAction.APPLY_REDACTION,
+                action=RemediationAction.BLOCK,
                 severity="high",
             ),
             RemediationRule(
                 rule_id="rr-untrusted",
                 name="Prompt injection or untrusted output detected",
                 condition="prompt_injection_or_untrusted_output",
-                action=RemediationAction.SANDBOX_ONLY,
+                action=RemediationAction.BLOCK,
                 severity="high",
             ),
             RemediationRule(
                 rule_id="rr-network",
                 name="High-risk network execution",
                 condition="high_risk_network",
-                action=RemediationAction.SANDBOX_ONLY,
+                action=RemediationAction.BLOCK,
                 severity="medium",
             ),
             RemediationRule(

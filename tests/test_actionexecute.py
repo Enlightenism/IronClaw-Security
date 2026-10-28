@@ -4,13 +4,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.actionexecute import router
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 
 app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
 
 
-def test_executeaction_allows_safe_request() -> None:
+def test_executeaction_reviews_network_request_without_allowlist() -> None:
     response = client.post(
         "/action/execute",
         json={
@@ -30,11 +31,11 @@ def test_executeaction_allows_safe_request() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "allowed"
-    assert body["executionallowed"] is True
-    assert body["finalriskscore"] == 0
-    assert body["promptinjection"]["flagged"] is False
-    assert body["audit"]["eventtype"] == "execution_allowed"
+    assert body["status"] == "review"
+    assert body["executionallowed"] is False
+    assert body["finalriskscore"] >= RISK_THRESHOLD_BLOCK_MIN
+    assert body["promptinjection"]["flagged"] is True
+    assert body["audit"]["eventtype"] == "execution_review"
 
 
 def test_executeaction_marks_review_for_moderate_injection_risk() -> None:
@@ -58,13 +59,15 @@ def test_executeaction_marks_review_for_moderate_injection_risk() -> None:
     body = response.json()
     assert body["status"] == "review"
     assert body["executionallowed"] is False
-    assert body["finalriskscore"] >= 25
+    assert body["finalriskscore"] >= RISK_THRESHOLD_BLOCK_MIN
     assert body["promptinjection"]["flagged"] is True
+    assert body["promptinjection"]["verdict"] == "block"
+    assert body["promptinjection"]["shouldquarantine"] is False
     assert "indirect_prompt_injection" in body["promptinjection"]["categories"]
     assert body["audit"]["eventtype"] == "execution_review"
 
 
-def test_executeaction_quarantines_high_risk_request() -> None:
+def test_executeaction_routes_high_risk_request_to_review() -> None:
     response = client.post(
         "/action/execute",
         json={
@@ -84,12 +87,13 @@ def test_executeaction_quarantines_high_risk_request() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] in {"quarantined", "denied"}
+    assert body["status"] == "review"
     assert body["executionallowed"] is False
-    assert body["finalriskscore"] >= 70
+    assert body["finalriskscore"] >= RISK_THRESHOLD_BLOCK_MIN
+    assert body["promptinjection"]["verdict"] == "block"
+    assert body["promptinjection"]["shouldquarantine"] is False
     assert body["promptinjection"]["severity"] == "critical"
-    assert body["promptinjection"]["shouldquarantine"] is True
-    assert body["audit"]["eventtype"] in {"execution_quarantined", "execution_denied"}
+    assert body["audit"]["eventtype"] == "execution_review"
 
 
 def test_executeaction_validates_required_fields() -> None:

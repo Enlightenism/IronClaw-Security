@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field, is_dataclass
-from typing import Any
+from typing import Any, Literal
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.executorboundary import executewithboundary
 from app.orchestrator.secureruntimepipeline import (
     SecureRuntimePipeline,
@@ -11,6 +12,8 @@ from app.orchestrator.secureruntimepipeline import (
 )
 
 DEFAULT_FILEPATH = "app/api/actionexecute.py"
+PolicyVerdict = Literal["allow", "block"]
+ResponseAction = Literal["allow", "block", "review"]
 
 
 @dataclass(slots=True)
@@ -25,12 +28,12 @@ class ExecutionReason:
 class ActionExecuteResult:
     executionid: str | None
     executionstate: str
-    responseaction: str
+    responseaction: ResponseAction
     responsestatus: str
     traceid: str | None
     requestid: str | None
     decisionid: str | None
-    policyverdict: str
+    policyverdict: PolicyVerdict
     riskscore: int
     shouldexecute: bool
     haltedbyboundary: bool
@@ -145,18 +148,28 @@ def _extract_summary_from_runtime_result(runtimeresult: Any) -> dict[str, Any]:
 def summarizeexecutionreceipt(receipt: Any, runtimeresult: Any) -> dict[str, Any]:
     summary = _extract_summary_from_runtime_result(runtimeresult)
 
-    executionstate = summary.get("executionstate") or getattr(receipt, "state", None) or "executed"
-    responseaction = summary.get("responseaction") or getattr(
-        receipt,
-        "responseaction",
-        None,
-    )
+    executionstate = summary.get("executionstate") or getattr(receipt, "state", None) or "denied"
     responsestatus = summary.get("responsestatus") or getattr(
         receipt,
         "responsestatus",
         None,
     )
-    policyverdict = summary.get("policyverdict") or getattr(receipt, "policyverdict", None) or "allow"
+    raw_policyverdict = summary.get("policyverdict")
+    if raw_policyverdict is None:
+        raw_policyverdict = getattr(receipt, "policyverdict", None)
+    raw_responseaction = summary.get("responseaction") or getattr(
+        receipt,
+        "responseaction",
+        None,
+    )
+    normalized_responseaction = str(raw_responseaction).strip().lower() if raw_responseaction is not None else None
+    responseaction_is_valid = normalized_responseaction in {
+        None,
+        "allow",
+        "block",
+        "review",
+    }
+    policyverdict: PolicyVerdict = "allow" if raw_policyverdict == "allow" and responseaction_is_valid and normalized_responseaction != "block" else "block"
     riskscore = _safe_int(summary.get("riskscore", getattr(receipt, "riskscore", 0)))
     shouldexecute = bool(
         summary.get("shouldexecute", getattr(receipt, "shouldexecute", False)),
@@ -164,6 +177,10 @@ def summarizeexecutionreceipt(receipt: Any, runtimeresult: Any) -> dict[str, Any
     haltedbyboundary = bool(
         summary.get("haltedbyboundary", getattr(receipt, "haltedbyboundary", False)),
     )
+    if policyverdict == "block":
+        riskscore = max(riskscore, RISK_THRESHOLD_BLOCK_MIN)
+        shouldexecute = False
+        haltedbyboundary = True
     reviewitemid = summary.get("reviewitemid", getattr(receipt, "reviewitemid", None))
     executorname = summary.get("executorname", getattr(receipt, "executorname", None))
     executorresult = summary.get("executorresult")
@@ -178,13 +195,26 @@ def summarizeexecutionreceipt(receipt: Any, runtimeresult: Any) -> dict[str, Any
     if executorresult is not None:
         normalized_executor_result = _normalize_mapping(executorresult) or (executorresult if isinstance(executorresult, dict) else {"value": executorresult})
 
-    if responseaction is None:
+    if normalized_responseaction is None:
         if executionstate == "denied":
-            responseaction = "deny"
+            responseaction = "block"
         elif executionstate == "queuedforreview":
             responseaction = "review"
+        elif policyverdict == "block":
+            responseaction = "block"
         else:
             responseaction = "allow"
+    elif normalized_responseaction == "allow":
+        responseaction = "allow"
+    elif normalized_responseaction == "review":
+        responseaction = "review"
+    elif normalized_responseaction == "block":
+        responseaction = "block"
+    else:
+        responseaction = "block"
+
+    if policyverdict == "block":
+        responseaction = "review" if executionstate == "queuedforreview" else "block"
 
     if responsestatus is None:
         if executionstate == "denied":
@@ -253,12 +283,12 @@ def executeguardedaction(
     return ActionExecuteResult(
         executionid=summary.get("executionid"),
         executionstate=str(summary["executionstate"]),
-        responseaction=str(summary["responseaction"]),
+        responseaction=summary["responseaction"],
         responsestatus=str(summary["responsestatus"]),
         traceid=summary.get("traceid"),
         requestid=summary.get("requestid"),
         decisionid=summary.get("decisionid"),
-        policyverdict=str(summary["policyverdict"]),
+        policyverdict=summary["policyverdict"],
         riskscore=_safe_int(summary["riskscore"]),
         shouldexecute=bool(summary["shouldexecute"]),
         haltedbyboundary=bool(summary["haltedbyboundary"]),

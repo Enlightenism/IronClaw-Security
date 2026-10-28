@@ -15,16 +15,42 @@ import { useCountUp } from "@/hooks/useCountUp";
 
 const VERDICT_STYLES = {
   ALLOW: "bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/25",
-  WARN: "bg-[#EAB308]/10 text-[#EAB308] border-[#EAB308]/25",
-  QUARANTINE: "bg-[#F97316]/10 text-[#F97316] border-[#F97316]/25",
   BLOCK: "bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/25",
 };
 
-const scoreColor = (s) => {
-  if (s < 30) return "#22C55E";
-  if (s < 60) return "#EAB308";
-  if (s < 85) return "#F97316";
-  return "#EF4444";
+const LEGACY_VERDICT_STYLES = {
+  WARN: "bg-[#EAB308]/10 text-[#EAB308] border-[#EAB308]/25",
+  QUARANTINE: "bg-[#F97316]/10 text-[#F97316] border-[#F97316]/25",
+};
+
+const VERDICT_COLORS = {
+  ALLOW: "#22C55E",
+  BLOCK: "#EF4444",
+};
+
+const LEGACY_VERDICT_COLORS = {
+  WARN: "#EAB308",
+  QUARANTINE: "#F97316",
+};
+
+const normalizeVerdict = (verdict) => String(verdict ?? "").toUpperCase();
+
+const verdictStyle = (verdict) => {
+  const normalized = normalizeVerdict(verdict);
+  return (
+    VERDICT_STYLES[normalized] ??
+    LEGACY_VERDICT_STYLES[normalized] ??
+    "bg-[#737373]/10 text-[#737373] border-[#737373]/25"
+  );
+};
+
+const verdictColor = (verdict) => {
+  const normalized = normalizeVerdict(verdict);
+  return (
+    VERDICT_COLORS[normalized] ??
+    LEGACY_VERDICT_COLORS[normalized] ??
+    "#737373"
+  );
 };
 
 const fmtTime = (iso) => {
@@ -226,8 +252,8 @@ const SecurityAnalysis = ({
             <span
               className="font-tech rounded px-2 py-0.5 text-[11px] font-bold"
               style={{
-                color: scoreColor(a.risk_score),
-                background: `${scoreColor(a.risk_score)}1a`,
+                color: verdictColor(a.verdict),
+                background: `${verdictColor(a.verdict)}1a`,
               }}
             >
               {a.risk_score}
@@ -235,7 +261,9 @@ const SecurityAnalysis = ({
           </td>
           <td className="px-4 py-2.5">
             <span
-              className={`rounded border px-2 py-0.5 text-[10px] font-semibold ${VERDICT_STYLES[a.verdict]}`}
+              className={`rounded border px-2 py-0.5 text-[10px] font-semibold ${verdictStyle(
+                a.verdict,
+              )}`}
             >
               {a.verdict}
             </span>

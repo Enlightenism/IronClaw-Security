@@ -6,6 +6,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.services.secrets_vault import vault
 from client import IronClawClient, ScanResult
 from supabaseclient import (
@@ -24,7 +25,7 @@ SandboxLane = Literal[
     "exfiltration",
     "high_risk_misc",
 ]
-ActionType = Literal["allow", "warn", "block", "quarantine"]
+ActionType = Literal["allow", "block"]
 ScanMode = Literal["enforce", "monitor", "strict"]
 
 app = FastAPI(title="IronClaw-Security API")
@@ -44,7 +45,7 @@ class ScanRequest(BaseModel):
 
 class ScanResponse(BaseModel):
     scan_id: str | None = None
-    verdict: str
+    verdict: ActionType
     action: ActionType
     mode: ScanMode = "enforce"
     summary: str
@@ -245,45 +246,34 @@ def _update_scan_history_status_row(
 # --- Local decision helpers ---
 
 
-def _normalize_action(verdict: str) -> ActionType:
-    v = verdict.lower()
-    if v in ("allow",):
+def _normalize_action(verdict: Any) -> ActionType:
+    if str(verdict or "").strip().lower() == "allow":
         return "allow"
-    if v in ("warn", "warning"):
-        return "warn"
-    if v in ("quarantine", "quarantined"):
-        return "quarantine"
     return "block"
 
 
 def _apply_mode_to_action(action: ActionType, mode: ScanMode) -> ActionType:
-    if mode == "monitor":
-        if action in ("block", "quarantine"):
-            return "warn"
-        return action
-
-    if mode == "strict":
-        if action == "warn":
-            return "quarantine"
-        return action
-
-    return action
+    return "allow" if action == "allow" else "block"
 
 
 def _record_history_from_result(result: ScanResult, meta: dict | None = None) -> None:
     meta = meta or {}
+    verdict = _normalize_action(result.verdict)
+    risk_score = int(result.risk_score or 0)
+    if verdict == "block":
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
     history_row: dict[str, Any] = {
         "scan_id": getattr(result, "scan_id", None),
         "target_type": result.target_type,
         "target_value": result.target_value[:5000],
-        "verdict": result.verdict,
-        "risk_score": result.risk_score,
+        "verdict": verdict,
+        "risk_score": risk_score,
         "matched_patterns": getattr(result, "matched_patterns", []),
         "summary": result.summary,
         "sandbox_lane": getattr(result, "sandbox_lane", "none"),
         "quarantine_reason": getattr(result, "quarantine_reason", None),
         "review_status": getattr(result, "review_status", "none"),
-        "untrusted": getattr(result, "untrusted", False),
+        "untrusted": bool(getattr(result, "untrusted", False)) or verdict == "block",
         "max_severity": getattr(result, "max_severity", None),
         "primary_category": getattr(result, "primary_category", None),
         "explanation": getattr(result, "explanation", None),
@@ -309,16 +299,19 @@ def _scan_result_to_response(
 ) -> ScanResponse:
     base_action = _normalize_action(result.verdict)
     final_action = _apply_mode_to_action(base_action, mode)
+    risk_score = int(result.risk_score or 0)
+    if final_action == "block":
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
 
     return ScanResponse(
         scan_id=getattr(result, "scan_id", None),
-        verdict=result.verdict,
+        verdict=final_action,
         action=final_action,
         mode=mode,
         summary=result.summary,
         target_type=result.target_type,
         target_value=result.target_value,
-        risk_score=result.risk_score,
+        risk_score=risk_score,
         matched_patterns=getattr(result, "matched_patterns", []),
         risky_files=getattr(result, "risky_files", []),
         checks_loaded=getattr(result, "checks_loaded", []),
@@ -327,7 +320,7 @@ def _scan_result_to_response(
         review_status=getattr(result, "review_status", "none"),
         reviewer=None,
         reviewed_at=None,
-        untrusted=getattr(result, "untrusted", False),
+        untrusted=bool(getattr(result, "untrusted", False)) or final_action == "block",
         sandbox_lane=getattr(result, "sandbox_lane", "none"),
         timestamp=getattr(result, "timestamp", None),
         max_severity=getattr(result, "max_severity", None),
@@ -354,79 +347,63 @@ def _fetch_related_history(
         if (session_id and row.get("session_id") == session_id) or (user_id and row.get("user_id") == user_id):
             related_rows.append(row)
 
-    items = [
-        ScanHistoryItem(
-            id=row.get("id"),
-            created_at=row.get("created_at"),
-            scan_id=row.get("scan_id"),
-            verdict=row["verdict"],
-            action=_normalize_action(row["verdict"]),
-            mode="enforce",
-            summary=row["summary"],
-            target_type=row["target_type"],
-            target_value=row["target_value"],
-            risk_score=row["risk_score"],
-            matched_patterns=row.get("matched_patterns", []),
-            risky_files=row.get("risky_files", []),
-            checks_loaded=row.get("checks_loaded", []),
-            failed_checks=row.get("failed_checks", []),
-            quarantine_reason=row.get("quarantine_reason"),
-            review_status=row.get("review_status", "none"),
-            reviewer=row.get("reviewer"),
-            reviewed_at=row.get("reviewed_at"),
-            untrusted=row.get("untrusted", False),
-            sandbox_lane=row.get("sandbox_lane", "none"),
-            timestamp=row.get("timestamp"),
-            max_severity=row.get("max_severity"),
-            primary_category=row.get("primary_category"),
-            explanation=row.get("explanation"),
-            source=row.get("source"),
-            session_id=row.get("session_id"),
-            user_id=row.get("user_id"),
-            context=row.get("context"),
-        )
-        for row in related_rows
-    ]
-    return items
+    return [_scan_history_row_to_item(row) for row in related_rows]
+
+
+def _scan_history_row_to_item(row: dict[str, Any]) -> ScanHistoryItem:
+    verdict = _normalize_action(row.get("verdict"))
+    risk_score = int(row.get("risk_score") or 0)
+    if verdict == "block":
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
+
+    return ScanHistoryItem(
+        id=row.get("id"),
+        created_at=row.get("created_at"),
+        scan_id=row.get("scan_id"),
+        verdict=verdict,
+        action=verdict,
+        mode="enforce",
+        summary=row["summary"],
+        target_type=row["target_type"],
+        target_value=row["target_value"],
+        risk_score=risk_score,
+        matched_patterns=row.get("matched_patterns", []),
+        risky_files=row.get("risky_files", []),
+        checks_loaded=row.get("checks_loaded", []),
+        failed_checks=row.get("failed_checks", []),
+        quarantine_reason=row.get("quarantine_reason"),
+        review_status=row.get("review_status", "none"),
+        reviewer=row.get("reviewer"),
+        reviewed_at=row.get("reviewed_at"),
+        untrusted=bool(row.get("untrusted", False)) or verdict == "block",
+        sandbox_lane=row.get("sandbox_lane", "none"),
+        timestamp=row.get("timestamp"),
+        max_severity=row.get("max_severity"),
+        primary_category=row.get("primary_category"),
+        explanation=row.get("explanation"),
+        source=row.get("source"),
+        session_id=row.get("session_id"),
+        user_id=row.get("user_id"),
+        context=row.get("context"),
+    )
 
 
 def _compute_brain_decision(
     scan: ScanResponse,
     related_history: list[ScanHistoryItem],
 ) -> BrainDecision:
-    if scan.action == "allow":
-        base = BrainDecision(
-            final_action="allow",
-            confidence=0.95,
-            reason="No risky patterns detected; content appears safe to use.",
-            recommended_mode=scan.mode,
-        )
-    elif scan.action == "warn":
-        base = BrainDecision(
-            final_action="warn",
-            confidence=0.85,
-            reason="Low to moderate risk patterns detected; proceed with caution and consider user confirmation.",
-            recommended_mode=scan.mode,
-        )
-    elif scan.action == "quarantine":
-        base = BrainDecision(
-            final_action="quarantine",
-            confidence=0.9,
-            reason="Risky patterns detected; content was quarantined by the engine and should not be executed directly.",
-            recommended_mode="enforce",
-        )
-    else:
-        base = BrainDecision(
-            final_action="block",
-            confidence=0.95,
-            reason="High risk detected; execution or use of this content should be blocked.",
-            recommended_mode="enforce",
-        )
+    base_action = _normalize_action(scan.action)
+    base = BrainDecision(
+        final_action=base_action,
+        confidence=0.95,
+        reason=("No risky patterns detected; content appears safe to use." if base_action == "allow" else "Suspicious activity detected; execution or use of this content is blocked."),
+        recommended_mode=scan.mode if base_action == "allow" else "enforce",
+    )
 
     if not related_history:
         return base
 
-    prior_high_risk = [h for h in related_history if h.verdict in ("quarantine", "block") or h.sandbox_lane in ("prompt_injection", "code_execution", "exfiltration")]
+    prior_high_risk = [h for h in related_history if h.verdict == "block" or h.sandbox_lane in ("prompt_injection", "code_execution", "exfiltration")]
 
     if not prior_high_risk:
         return base
@@ -435,19 +412,11 @@ def _compute_brain_decision(
     boosted_confidence = min(1.0, base.confidence + 0.05)
     extra_reason = f" There are {count} prior high-risk events for this session or user, indicating potential ongoing prompt abuse or malicious behavior."
 
-    if base.final_action == "warn" and count >= 2:
-        return BrainDecision(
-            final_action="quarantine",
-            confidence=min(1.0, boosted_confidence + 0.05),
-            reason=("Repeated suspicious activity was observed across related history. The current event should be quarantined pending further review." + extra_reason),
-            recommended_mode="enforce",
-        )
-
     if base.final_action == "allow" and count >= 3:
         return BrainDecision(
-            final_action="warn",
-            confidence=0.85,
-            reason=("The current content appears safe on its own, but related history shows repeated high-risk activity. Proceed with caution." + extra_reason),
+            final_action="block",
+            confidence=0.95,
+            reason=("Repeated high-risk activity was observed across related history. The current event is blocked." + extra_reason),
             recommended_mode="enforce",
         )
 
@@ -480,39 +449,7 @@ async def history_endpoint(
     if rows is None:
         raise HTTPException(status_code=502, detail="History query failed")
 
-    items = [
-        ScanHistoryItem(
-            id=row.get("id"),
-            created_at=row.get("created_at"),
-            scan_id=row.get("scan_id"),
-            verdict=row["verdict"],
-            action=_normalize_action(row["verdict"]),
-            mode="enforce",
-            summary=row["summary"],
-            target_type=row["target_type"],
-            target_value=row["target_value"],
-            risk_score=row["risk_score"],
-            matched_patterns=row.get("matched_patterns", []),
-            risky_files=row.get("risky_files", []),
-            checks_loaded=row.get("checks_loaded", []),
-            failed_checks=row.get("failed_checks", []),
-            quarantine_reason=row.get("quarantine_reason"),
-            review_status=row.get("review_status", "none"),
-            reviewer=row.get("reviewer"),
-            reviewed_at=row.get("reviewed_at"),
-            untrusted=row.get("untrusted", False),
-            sandbox_lane=row.get("sandbox_lane", "none"),
-            timestamp=row.get("timestamp"),
-            max_severity=row.get("max_severity"),
-            primary_category=row.get("primary_category"),
-            explanation=row.get("explanation"),
-            source=row.get("source"),
-            session_id=row.get("session_id"),
-            user_id=row.get("user_id"),
-            context=row.get("context"),
-        )
-        for row in rows
-    ]
+    items = [_scan_history_row_to_item(row) for row in rows]
 
     return ScanHistoryResponse(count=len(items), items=items)
 

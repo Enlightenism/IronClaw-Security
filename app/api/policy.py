@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, model_validator
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.core.auth import require_api_key
 from app.orchestrator.policy_engine import (
     PolicyContext,
@@ -60,13 +61,12 @@ def _engine_eval_to_schema_result(
     evaluation: PolicyEvaluation,
     policy_version: str | None = None,
 ) -> PolicyEvaluationResult:
-    try:
-        verdict = PolicyEnforcementMode(evaluation.final_effect)
-    except ValueError:
-        verdict = PolicyEnforcementMode.allow
+    verdict = "allow" if evaluation.final_effect == PolicyEnforcementMode.allow else "block"
 
     matched_ids = [m.rule_id for m in evaluation.matched_rules]
     risk = evaluation.context.risk_score if evaluation.context else 0
+    if verdict == "block":
+        risk = max(risk, RISK_THRESHOLD_BLOCK_MIN)
 
     try:
         severity = PolicySeverity.high if risk >= 70 else (PolicySeverity.medium if risk >= 40 else PolicySeverity.low)
@@ -99,7 +99,7 @@ class GuardBundleRequest(BaseModel):
 
 
 class GuardBundleResponse(BaseModel):
-    highest_verdict: str
+    highest_verdict: Literal["allow", "block"]
     should_halt: bool
     should_warn: bool
     user_prompt: str | None = None
@@ -372,6 +372,7 @@ def guard_bundle(request: Request, body: GuardBundleRequest) -> GuardBundleRespo
             sources[field] = val.strip()
 
     verdicts: list[PolicyEvaluationResult] = []
+    evaluation_failed = False
     for field, _text in sources.items():
         context = PolicyContext(
             agent_id="guard-bundle",
@@ -393,21 +394,18 @@ def guard_bundle(request: Request, body: GuardBundleRequest) -> GuardBundleRespo
             verdicts.append(_engine_eval_to_schema_result(evaluation, policy_version=_policy_config.get("version")))
         except Exception as exc:
             _log.error("policy.guard_bundle: engine error on field=%s: %s", field, exc)
+            evaluation_failed = True
 
-    if not verdicts:
-        highest_verdict = "allow"
-        should_halt = False
-        should_warn = False
-        risk_score = 0
-        reasoning = "no evaluable content"
-    else:
-        risk_score = max(v.risk_score for v in verdicts)
-        halt_verdicts = {PolicyEnforcementMode.block}
-        warn_verdicts = {PolicyEnforcementMode.warn}
-        should_halt = any(v.verdict in halt_verdicts for v in verdicts)
-        should_warn = any(v.verdict in warn_verdicts for v in verdicts)
-        highest_verdict = "block" if should_halt else ("warn" if should_warn else "allow")
-        reasoning = "; ".join(v.reasoning for v in verdicts if v.reasoning)
+    risk_score = max((v.risk_score for v in verdicts), default=0)
+    should_halt = evaluation_failed or not verdicts or any(v.verdict != PolicyEnforcementMode.allow for v in verdicts)
+    should_warn = False
+    highest_verdict = "block" if should_halt else "allow"
+    reasoning_parts = [v.reasoning for v in verdicts if v.reasoning]
+    if evaluation_failed:
+        reasoning_parts.append("policy evaluation failed")
+    elif not verdicts:
+        reasoning_parts.append("no evaluable content")
+    reasoning = "; ".join(reasoning_parts)
 
     return GuardBundleResponse(
         highest_verdict=highest_verdict,

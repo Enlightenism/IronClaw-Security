@@ -218,6 +218,7 @@ class TestReviewDetail:
 
     def test_review_203_mid_risk_queued(self, client: TestClient) -> None:
         data = client.get("/ui/reviews/detail/review-203").json()
-        assert data["policyverdict"] == "review"
+        assert data["policyverdict"] == "block"
         assert data["responsestatus"] == "queuedforreview"
-        assert data["shouldexecute"] is True
+        assert data["shouldexecute"] is False
+        assert data["haltedbyboundary"] is True

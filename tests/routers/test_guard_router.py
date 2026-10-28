@@ -11,6 +11,7 @@ import pytest
 import app.guard_router as _gr
 from app.guard_router import (
     GuardBundleVerdict,
+    _normalize_guard_verdict,
     router,
 )
 
@@ -41,11 +42,25 @@ _BASE_PAYLOAD: dict[str, Any] = {
 
 _ALLOW_VERDICT = GuardBundleVerdict(verdict="allow", reason="", truncated=False, metadata={})
 _BLOCK_VERDICT = GuardBundleVerdict(verdict="block", reason="Blocked by policy.", truncated=True, metadata={})
-_WARN_VERDICT = GuardBundleVerdict(verdict="warn", reason="Elevated risk.", truncated=False, metadata={})
 
 
 def _mock_guard(verdict: GuardBundleVerdict) -> AsyncMock:
     return AsyncMock(return_value=verdict)
+
+
+@pytest.mark.parametrize(
+    ("raw_verdict", "expected"),
+    [
+        ("allow", "allow"),
+        ("block", "block"),
+        ("warn", "block"),
+        ("quarantine", "block"),
+        (None, "block"),
+        ("invalid", "block"),
+    ],
+)
+def test_guard_verdict_normalization_fails_closed(raw_verdict: Any, expected: str) -> None:
+    assert _normalize_guard_verdict(raw_verdict) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -76,13 +91,6 @@ class TestGuardProxySummaryShape:
         data = resp.json()
         assert data["verdict"] == "block"
         assert data["truncated"] is True
-
-    def test_warn_verdict_shape(self, client: TestClient):
-        with patch.object(_gr, "scan_with_policy_guard", _mock_guard(_WARN_VERDICT)):
-            resp = client.post(_PROXY_URL, json=_BASE_PAYLOAD)
-        data = resp.json()
-        assert data["verdict"] == "warn"
-        assert data["truncated"] is False
 
     def test_enforce_mode_block_sets_truncated_true(self, client: TestClient):
         verdict = GuardBundleVerdict(verdict="block", reason="blocked", truncated=False, metadata={})

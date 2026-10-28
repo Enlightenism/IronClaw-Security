@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+
 router = APIRouter(
     prefix="/ui/request",
     tags=["request-stream"],
@@ -64,11 +66,11 @@ def _build_placeholder_items() -> list[RequestStreamItem]:
             sessionid="sess-alpha-001",
             route="/guard/execute",
             method="POST",
-            riskscore=58,
-            policyverdict="review",
+            riskscore=max(RISK_THRESHOLD_BLOCK_MIN, 58),
+            policyverdict="block",
             executionstate="dryrun",
             responsestatus="queuedforreview",
-            summary="Mid-risk request was routed to manual review.",
+            summary="Suspicious request was blocked and routed to manual review.",
         ),
         RequestStreamItem(
             requestid="req-003",
@@ -77,7 +79,7 @@ def _build_placeholder_items() -> list[RequestStreamItem]:
             sessionid="sess-beta-004",
             route="/guard/execute",
             method="POST",
-            riskscore=94,
+            riskscore=max(RISK_THRESHOLD_BLOCK_MIN, 94),
             policyverdict="block",
             executionstate="denied",
             responsestatus="denied",
@@ -96,7 +98,7 @@ def get_request_stream() -> RequestStreamResponse:
         totals=RequestStreamTotals(
             total=len(items),
             allow=sum(1 for item in items if item.policyverdict == "allow"),
-            review=sum(1 for item in items if item.policyverdict == "review"),
+            review=sum(1 for item in items if item.responsestatus == "queuedforreview"),
             block=sum(1 for item in items if item.policyverdict == "block"),
         ),
     )

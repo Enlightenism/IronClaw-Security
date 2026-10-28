@@ -91,12 +91,13 @@ print(result.scan_id)  # UUID for audit trail
 
 ## Step 4 — Interpret the Verdict
 
-| Verdict      | Your action                                    |
-| ------------ | ---------------------------------------------- |
-| `allow`      | Proceed normally                               |
-| `warn`       | Proceed — log the warning, monitor the session |
-| `quarantine` | Do not proceed — submit to review queue        |
-| `block`      | Do not proceed — reject the action entirely    |
+| Verdict | Your action |
+| --- | --- |
+| `allow` | Proceed normally |
+| `block` | Do not proceed; investigate the reason |
+
+Blocked items may be isolated for operational review, but quarantine is not a
+separate verdict.
 
 ---
 
@@ -105,7 +106,7 @@ print(result.scan_id)  # UUID for audit trail
 ```python
 result = client.scan(content="read_file('/etc/passwd')", context="tool_call", agent_id="agent-001", tool_name="read_file", tool_args={"path": "/etc/passwd"})
 
-if result.verdict in ("block", "quarantine"):
+if result.verdict == "block":
     raise PermissionError(f"IronClaw blocked tool call: {result.reason}")
 ```
 

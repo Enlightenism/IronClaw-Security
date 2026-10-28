@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.core.auth import require_api_key
 
 router = APIRouter(
@@ -66,7 +67,7 @@ _SAMPLE_REVIEWS: list[dict[str, Any]] = [
         "status": "pending",
         "action_type": "shell_execute",
         "target": "rm -rf /workspace",
-        "risk_score": 97,
+        "risk_score": max(RISK_THRESHOLD_BLOCK_MIN, 97),
         "created_at": _utc_now_iso(),
         "updated_at": _utc_now_iso(),
         "requested_by": "client-alpha",
@@ -91,13 +92,13 @@ _SAMPLE_REVIEWS: list[dict[str, Any]] = [
         "status": "pending",
         "action_type": "http_fetch",
         "target": "https://unknown.example/payload",
-        "risk_score": 72,
+        "risk_score": max(RISK_THRESHOLD_BLOCK_MIN, 72),
         "created_at": _utc_now_iso(),
         "updated_at": _utc_now_iso(),
         "requested_by": "client-beta",
         "session_id": "sess-002",
         "actor_id": "actor-002",
-        "policy_verdict": "review",
+        "policy_verdict": "block",
         "recommended_action": "approve",
         "final_action": None,
         "reason": "External content source should be reviewed before release.",

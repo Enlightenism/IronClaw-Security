@@ -10,7 +10,12 @@ from app.adapters.rebuff_adapter import (
     evaluate_rebuff_request,
     summarize_rebuff_adapter_response,
 )
-from app.orchestrator.policy_enforcer import evaluate_policy, initialize_policy_engine
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+from app.orchestrator.policy_enforcer import (
+    PolicyDecision,
+    evaluate_policy,
+    initialize_policy_engine,
+)
 from app.services.integration_registry import IntegrationRecord
 
 # ---------- Fixtures ----------
@@ -126,7 +131,7 @@ def test_rebuff_request_to_dict_roundtrip() -> None:
 def test_adapt_policy_decision_returns_valid_verdict() -> None:
     req = build_rebuff_adapter_request(action_type="scan_prompt", target="user-input")
     resp = evaluate_rebuff_request(_ENGINE, req)
-    assert resp.verdict in {"allow", "warn", "quarantine", "block"}
+    assert resp.verdict in {"allow", "block"}
     assert isinstance(resp.risk_score, int)
     assert resp.adapter_name == "ironclaw-rebuff"
     assert resp.platform == "rebuff"
@@ -136,10 +141,32 @@ def test_adapt_policy_decision_verdicts_are_consistent() -> None:
     req = build_rebuff_adapter_request(action_type="scan_completion", target="llm-output")
     resp = evaluate_rebuff_request(_ENGINE, req, mode="monitor")
     assert resp.should_allow == (resp.verdict == "allow")
-    assert resp.should_warn == (resp.verdict == "warn")
-    assert resp.should_quarantine == (resp.verdict == "quarantine")
+    assert resp.should_warn is False
+    assert resp.should_quarantine is False
     assert resp.should_block == (resp.verdict == "block")
-    assert resp.should_hold == (resp.verdict in {"warn", "quarantine", "block"})
+    assert resp.should_hold == (resp.verdict == "block")
+
+
+def test_legacy_warning_decision_fails_closed() -> None:
+    decision = PolicyDecision(
+        decision_id="legacy-warning",
+        verdict="warn",
+        risk_score=15,
+        risk_level="low",
+        mode="enforce",
+        allow_execution=True,
+        requires_review=True,
+    )
+
+    resp = adapt_policy_decision_to_rebuff(decision)
+
+    assert resp.verdict == "block"
+    assert resp.should_allow is False
+    assert resp.should_warn is False
+    assert resp.should_quarantine is False
+    assert resp.should_block is True
+    assert resp.should_hold is True
+    assert resp.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
 
 def test_adapt_policy_decision_trace_id_propagated() -> None:

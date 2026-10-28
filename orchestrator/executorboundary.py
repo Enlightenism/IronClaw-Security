@@ -148,8 +148,8 @@ class ExecutorBoundary:
             self._emit(decision)
             return decision
 
-        allowed = execution_result.status not in {"blocked", "quarantined"}
-        status = "completed" if allowed else execution_result.status
+        allowed = execution_result.verdict == PolicyVerdict.ALLOW.value and execution_result.allowed is True and execution_result.status == "completed"
+        status = "completed" if allowed else "blocked"
 
         decision = BoundaryDecision(
             boundary_id=f"bnd-{uuid4().hex}",
@@ -157,7 +157,7 @@ class ExecutorBoundary:
             status=status,
             request_id=execution_result.request_id,
             execution_id=execution_result.execution_id,
-            verdict=execution_result.verdict,
+            verdict=(PolicyVerdict.ALLOW.value if allowed else PolicyVerdict.BLOCK.value),
             violations=[],
             limits=active_limits.to_dict(),
             execution=execution_result.to_dict(),
@@ -300,23 +300,17 @@ class ExecutorBoundary:
                 ),
             )
 
-        if execution_result.verdict == PolicyVerdict.QUARANTINE.value:
-            violations.append(
-                BoundaryViolation(
-                    code="quarantined_execution",
-                    message="Execution was quarantined by the secure runtime pipeline.",
-                    severity="critical",
-                    details={"execution_status": execution_result.status},
-                ),
-            )
-
-        if execution_result.verdict == PolicyVerdict.BLOCK.value:
+        if execution_result.verdict != PolicyVerdict.ALLOW.value or execution_result.allowed is not True or execution_result.status != "completed":
             violations.append(
                 BoundaryViolation(
                     code="blocked_execution",
-                    message="Execution was blocked by the secure runtime pipeline.",
+                    message=("Execution did not return an explicit successful allow decision from the secure runtime pipeline."),
                     severity="critical",
-                    details={"execution_status": execution_result.status},
+                    details={
+                        "execution_status": execution_result.status,
+                        "execution_verdict": execution_result.verdict,
+                        "execution_allowed": execution_result.allowed,
+                    },
                 ),
             )
 

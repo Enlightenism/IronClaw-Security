@@ -10,6 +10,7 @@ import re
 from typing import Any
 import zipfile
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.detection.artifactanalyzer import analyze_artifact_dict
 from app.detection.downloadanalyzer import analyze_download_dict
 from app.detection.outputsanitizer import build_output_sanitizer
@@ -169,9 +170,9 @@ class FileReturnPolicy:
 
 @dataclass(slots=True)
 class FileReturnGuard:
-    review_threshold: int = 20
-    block_threshold: int = 50
-    quarantine_threshold: int = 80
+    review_threshold: int = RISK_THRESHOLD_ALLOW_MAX + 1
+    block_threshold: int = RISK_THRESHOLD_BLOCK_MIN
+    quarantine_threshold: int = RISK_THRESHOLD_BLOCK_MIN
     max_file_size_bytes: int = 10 * 1024 * 1024
     max_text_inspection_bytes: int = 256 * 1024
     allowed_extensions: set[str] = field(default_factory=lambda: set(DEFAULT_ALLOWED_EXTENSIONS))
@@ -443,12 +444,8 @@ class FileReturnGuard:
         file_inspection = inspection_result.as_dict()
         file_inspection_risk = int(file_inspection.get("riskdelta", 0) or 0)
         risk_delta += file_inspection_risk
-        if file_inspection.get("shouldquarantine"):
-            matched_rules.append("fileinspection:quarantine")
-        elif file_inspection.get("blocked"):
+        if file_inspection.get("shouldquarantine") or file_inspection.get("shouldblock") or file_inspection.get("blocked") or file_inspection.get("shouldreview"):
             matched_rules.append("fileinspection:block")
-        elif file_inspection.get("shouldreview"):
-            matched_rules.append("fileinspection:review")
         for item in file_inspection.get("reasons", []) or []:
             if isinstance(item, Mapping):
                 reasons.append(
@@ -697,12 +694,8 @@ class FileReturnGuard:
                     ),
                 )
 
-        if analysis.get("shouldquarantine"):
-            matched_rules.append(f"{source_default}:quarantine")
-        elif analysis.get("shouldblock") or analysis.get("blocked"):
+        if analysis.get("shouldquarantine") or analysis.get("shouldblock") or analysis.get("blocked") or analysis.get("shouldreview") or analysis.get("matchedpatterns") or analysis.get("matched_patterns"):
             matched_rules.append(f"{source_default}:block")
-        elif analysis.get("shouldreview"):
-            matched_rules.append(f"{source_default}:review")
 
         return risk_delta, reasons, matched_rules
 
@@ -723,41 +716,31 @@ class FileReturnGuard:
         file_inspection: dict[str, Any],
     ) -> FileReturnPolicy:
         normalized_risk = max(0, min(100, int(risk_delta)))
-
-        verdict = "allow"
-        allowed = True
-        should_review = False
-        should_block = False
-        should_quarantine = False
-
-        should_quarantine = bool(artifact_analysis.get("shouldquarantine")) or bool(download_analysis.get("shouldquarantine")) or bool(file_inspection.get("shouldquarantine"))
-        should_review = bool(artifact_analysis.get("shouldreview")) or bool(download_analysis.get("shouldreview")) or bool(file_inspection.get("shouldreview"))
-        should_block = bool(artifact_analysis.get("shouldblock")) or bool(download_analysis.get("shouldblock")) or bool(download_analysis.get("blocked")) or bool(file_inspection.get("blocked"))
-
-        if normalized_risk >= self.quarantine_threshold or should_quarantine:
-            verdict = "quarantine"
-            allowed = False
-            should_block = True
-            should_quarantine = True
-            should_review = False
-        elif normalized_risk >= self.block_threshold or output_sanitization.get("blocked") or should_block:
-            verdict = "block"
-            allowed = False
-            should_block = True
-        elif normalized_risk >= self.review_threshold or should_review:
-            verdict = "review"
-            should_review = True
-
         deduped_rules = list(dict.fromkeys(item for item in matched_rules if item))
+        should_review = bool(artifact_analysis.get("shouldreview")) or bool(download_analysis.get("shouldreview")) or bool(file_inspection.get("shouldreview")) or normalized_risk >= self.review_threshold
+        should_block = (
+            bool(deduped_rules)
+            or normalized_risk > RISK_THRESHOLD_ALLOW_MAX
+            or bool(output_sanitization.get("blocked"))
+            or bool(artifact_analysis.get("shouldblock"))
+            or bool(download_analysis.get("shouldblock"))
+            or bool(download_analysis.get("blocked"))
+            or bool(file_inspection.get("shouldquarantine"))
+            or bool(file_inspection.get("shouldblock"))
+            or bool(file_inspection.get("blocked"))
+            or should_review
+        )
+        final_risk = max(normalized_risk, RISK_THRESHOLD_BLOCK_MIN) if should_block else normalized_risk
+
         materialized_reasons = self._dedupe_reasons(reasons)
 
         return FileReturnPolicy(
-            verdict=verdict,
-            allowed=allowed,
+            verdict="block" if should_block else "allow",
+            allowed=not should_block,
             should_review=should_review,
             should_block=should_block,
-            should_quarantine=should_quarantine,
-            risk_delta=normalized_risk,
+            should_quarantine=False,
+            risk_delta=final_risk,
             path=path,
             filename=filename,
             extension=extension,
@@ -785,9 +768,9 @@ class FileReturnGuard:
 
 def initialize_filereturnguard(
     *,
-    review_threshold: int = 20,
-    block_threshold: int = 50,
-    quarantine_threshold: int = 80,
+    review_threshold: int = RISK_THRESHOLD_ALLOW_MAX + 1,
+    block_threshold: int = RISK_THRESHOLD_BLOCK_MIN,
+    quarantine_threshold: int = RISK_THRESHOLD_BLOCK_MIN,
     max_file_size_bytes: int = 10 * 1024 * 1024,
     max_text_inspection_bytes: int = 256 * 1024,
     allowed_extensions: Iterable[str] | None = None,

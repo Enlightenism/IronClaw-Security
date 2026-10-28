@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
+
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 
 router = APIRouter(tags=["request-stream"])
 
@@ -58,7 +60,7 @@ class RequestStreamItem(BaseModel):
     route: str
     method: str
     source: str
-    policy_verdict: str
+    policy_verdict: Literal["allow", "block"]
     execution_state: str
     review_state: str
     response_status: str
@@ -118,13 +120,13 @@ def _seed_items() -> list[RequestStreamItem]:
             "route": "/guard/action",
             "method": "POST",
             "source": "policy",
-            "policy_verdict": "warn",
-            "execution_state": "review",
+            "policy_verdict": "block",
+            "execution_state": "blocked",
             "review_state": "pending",
-            "response_status": "202 Accepted",
-            "risk_score": 52,
+            "response_status": "403 Forbidden",
+            "risk_score": max(52, RISK_THRESHOLD_BLOCK_MIN),
             "target": "shell://powershell.exe",
-            "summary": "Shell command routed to review because policy matched elevated execution behavior.",
+            "summary": "Shell command blocked after policy matched elevated execution behavior; sent for operator review.",
             "trace_id": "trace_ops_0002",
             "units_consumed": 4,
             "latency_ms": 233,
@@ -138,13 +140,13 @@ def _seed_items() -> list[RequestStreamItem]:
             "route": "/scan",
             "method": "POST",
             "source": "scan",
-            "policy_verdict": "quarantine",
+            "policy_verdict": "block",
             "execution_state": "blocked",
             "review_state": "queued",
             "response_status": "403 Forbidden",
-            "risk_score": 81,
+            "risk_score": max(81, RISK_THRESHOLD_BLOCK_MIN),
             "target": "prompt://upload/intake.txt",
-            "summary": "Prompt payload quarantined after multi-pattern injection indicators were detected.",
+            "summary": "Prompt payload blocked after multi-pattern injection indicators were detected and isolated for operational review.",
             "trace_id": "trace_prod_1841",
             "units_consumed": 2,
             "latency_ms": 141,
@@ -218,13 +220,13 @@ def _seed_items() -> list[RequestStreamItem]:
             "route": "/guard/action-policy",
             "method": "POST",
             "source": "policy",
-            "policy_verdict": "warn",
-            "execution_state": "review",
-            "review_state": "approved",
-            "response_status": "200 OK",
-            "risk_score": 47,
+            "policy_verdict": "block",
+            "execution_state": "blocked",
+            "review_state": "pending",
+            "response_status": "403 Forbidden",
+            "risk_score": max(47, RISK_THRESHOLD_BLOCK_MIN),
             "target": "git://repo/feature-branch",
-            "summary": "Git operation required review and was later approved by operator.",
+            "summary": "Git operation blocked after policy matched elevated execution behavior and queued for operator review.",
             "trace_id": "trace_dev_9012",
             "units_consumed": 3,
             "latency_ms": 201,
@@ -279,7 +281,7 @@ def _seed_items() -> list[RequestStreamItem]:
                 flagged=entry["flagged"],
                 metadata={
                     "operator_visible": True,
-                    "requires_followup": entry["policy_verdict"] in {"warn", "quarantine", "block"},
+                    "requires_followup": entry["policy_verdict"] == "block",
                 },
             ),
         )
@@ -314,7 +316,7 @@ def _build_filter_options(
 
 @router.get("/ui/guard/request-stream", response_model=RequestStreamResponse)
 def get_request_stream(
-    policy_verdict: str | None = Query(default=None),
+    policy_verdict: Literal["allow", "block"] | None = Query(default=None),
     execution_state: str | None = Query(default=None),
     source: str | None = Query(default=None),
     review_state: str | None = Query(default=None),

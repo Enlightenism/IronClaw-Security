@@ -6,7 +6,7 @@ from threading import Lock
 from typing import Any, Literal
 
 PolicyMode = Literal["monitor", "enforce", "lockdown"]
-PolicyDecision = Literal["allow", "warn", "quarantine", "block"]
+PolicyDecision = Literal["allow", "block"]
 
 
 def _utcnow() -> datetime:
@@ -58,7 +58,7 @@ class PolicyStore:
         self._settings = PolicySettingsRecord(
             policy_id="ironclaw-default-policy",
             mode="enforce",
-            default_decision="quarantine",
+            default_decision="block",
             require_human_review_for_quarantine=False,
             sandbox_all_untrusted_content=True,
             block_high_risk_tool_calls=True,
@@ -96,7 +96,7 @@ class PolicyStore:
             self._settings = PolicySettingsRecord(
                 policy_id=self._settings.policy_id,
                 mode=mode,
-                default_decision=default_decision,
+                default_decision="allow" if default_decision == "allow" else "block",
                 require_human_review_for_quarantine=require_human_review_for_quarantine,
                 sandbox_all_untrusted_content=sandbox_all_untrusted_content,
                 block_high_risk_tool_calls=block_high_risk_tool_calls,

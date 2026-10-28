@@ -4,11 +4,16 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.coordination_state import CoordinationSnapshot
-from app.orchestrator.execution_plan import ExecutionPlan
+from app.orchestrator.execution_plan import (
+    ExecutionPlan,
+    normalize_plan_verdict,
+    normalized_plan_risk_score,
+)
 from app.orchestrator.orchestrator import IronClawOrchestrator
 from app.orchestrator.runtime_session import (
     RuntimeSession,
@@ -60,9 +65,18 @@ class SupervisorEscalation:
     file_path: str
     level: EscalationLevel
     reason: str
-    verdict: str
+    verdict: Literal["allow", "block"]
     risk_score: int
     created_at: str = field(default_factory=_utc_now_iso)
+
+    def __post_init__(self) -> None:
+        risk_score_is_valid = isinstance(self.risk_score, int) and not isinstance(self.risk_score, bool) and 0 <= self.risk_score <= 100
+        risk_score = self.risk_score if risk_score_is_valid else RISK_THRESHOLD_BLOCK_MIN
+        verdict = "allow" if self.verdict == "allow" and risk_score_is_valid and risk_score <= RISK_THRESHOLD_ALLOW_MAX else "block"
+        if verdict == "block":
+            risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
+        self.verdict = verdict
+        self.risk_score = risk_score
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -158,7 +172,7 @@ def _merge_rules(raw: Any) -> list[str]:
 class _SupervisedResult:
     session_id: str
     tool_name: str
-    verdict: str
+    verdict: Literal["allow", "block"]
     allowed: bool
     should_review: bool
     should_block: bool
@@ -234,34 +248,34 @@ class _InjectedSupervisor:
             result = _SupervisedResult(
                 session_id=session_id,
                 tool_name=tool_name,
-                verdict="quarantine",
+                verdict="block",
                 allowed=False,
                 should_review=False,
                 should_block=True,
-                should_quarantine=True,
+                should_quarantine=False,
                 risk_delta=0,
                 matched_rules=["supervisor:missing_session_id"],
                 reasons=[],
                 pipeline_decision={},
             )
-            self._emit({"event": "quarantine", "reason": "missing_session_id", "session_id": session_id})
+            self._emit({"event": "block", "reason": "missing_session_id", "session_id": session_id})
             return result
 
         if not tool_name:
             result = _SupervisedResult(
                 session_id=session_id,
                 tool_name=tool_name,
-                verdict="quarantine",
+                verdict="block",
                 allowed=False,
                 should_review=False,
                 should_block=True,
-                should_quarantine=True,
+                should_quarantine=False,
                 risk_delta=0,
                 matched_rules=["supervisor:missing_tool_name"],
                 reasons=[],
                 pipeline_decision={},
             )
-            self._emit({"event": "quarantine", "reason": "missing_tool_name", "session_id": session_id})
+            self._emit({"event": "block", "reason": "missing_tool_name", "session_id": session_id})
             return result
 
         cwd = kwargs.get("cwd")
@@ -275,18 +289,113 @@ class _InjectedSupervisor:
         )
 
         pipeline_dict = _as_dict(pipeline_decision)
-        verdict = _text(getattr(pipeline_decision, "verdict", pipeline_dict.get("verdict", "allow"))).lower() or "allow"
-        allowed = bool(getattr(pipeline_decision, "allowed", pipeline_dict.get("allowed", True)))
-        should_review = bool(getattr(pipeline_decision, "should_review", pipeline_dict.get("shouldreview", False)))
-        should_block = bool(getattr(pipeline_decision, "should_block", pipeline_dict.get("shouldblock", False)))
-        should_quarantine = bool(getattr(pipeline_decision, "should_quarantine", pipeline_dict.get("shouldquarantine", False)))
-        risk_delta = _clamp_int(getattr(pipeline_decision, "risk_delta", pipeline_dict.get("riskdelta", 0)))
+        raw_verdict = _text(
+            getattr(pipeline_decision, "verdict", pipeline_dict.get("verdict")),
+        ).lower()
+        raw_allowed = getattr(
+            pipeline_decision,
+            "allowed",
+            pipeline_dict.get("allowed"),
+        )
+        should_review = bool(
+            getattr(
+                pipeline_decision,
+                "should_review",
+                pipeline_dict.get(
+                    "shouldreview",
+                    pipeline_dict.get("should_review", False),
+                ),
+            ),
+        )
+        should_block_signal = bool(
+            getattr(
+                pipeline_decision,
+                "should_block",
+                pipeline_dict.get(
+                    "shouldblock",
+                    pipeline_dict.get("should_block", False),
+                ),
+            ),
+        )
+        should_warn = bool(
+            getattr(
+                pipeline_decision,
+                "should_warn",
+                pipeline_dict.get("shouldwarn", pipeline_dict.get("should_warn", False)),
+            ),
+        )
+        should_halt = bool(
+            getattr(
+                pipeline_decision,
+                "should_halt",
+                pipeline_dict.get("shouldhalt", pipeline_dict.get("should_halt", False)),
+            ),
+        )
+        should_quarantine = bool(
+            getattr(
+                pipeline_decision,
+                "should_quarantine",
+                pipeline_dict.get(
+                    "shouldquarantine",
+                    pipeline_dict.get("should_quarantine", False),
+                ),
+            ),
+        )
+        risk_delta = _clamp_int(
+            getattr(
+                pipeline_decision,
+                "risk_delta",
+                pipeline_dict.get("riskdelta", pipeline_dict.get("risk_delta", 0)),
+            ),
+        )
 
-        raw_rules = getattr(pipeline_decision, "matched_rules", pipeline_dict.get("matchedrules", None)) or []
-        raw_reasons = getattr(pipeline_decision, "reasons", pipeline_dict.get("reasons", None)) or []
+        raw_rules = (
+            getattr(
+                pipeline_decision,
+                "matched_rules",
+                pipeline_dict.get("matchedrules", pipeline_dict.get("matched_rules")),
+            )
+            or []
+        )
+        raw_reasons = (
+            getattr(
+                pipeline_decision,
+                "reasons",
+                pipeline_dict.get("reasons"),
+            )
+            or []
+        )
 
         matched_rules = _merge_rules(raw_rules)
         reasons = _merge_reasons(raw_reasons)
+        allowed = raw_verdict == "allow" and raw_allowed is True and not should_review and not should_block_signal and not should_warn and not should_halt and not should_quarantine and not matched_rules
+        verdict = "allow" if allowed else "block"
+        should_block = verdict == "block"
+        if should_block and not reasons:
+            reasons.append(
+                {
+                    "source": "supervisor",
+                    "label": "Policy blocked",
+                    "details": "The pipeline did not return an explicit clean allow decision.",
+                },
+            )
+        pipeline_dict["verdict"] = verdict
+        for key in ("policy_verdict", "policyverdict"):
+            if key in pipeline_dict:
+                pipeline_dict[key] = verdict
+        pipeline_dict["allowed"] = allowed
+        for key in ("shouldblock", "should_block", "shouldhalt", "should_halt"):
+            if key in pipeline_dict:
+                pipeline_dict[key] = should_block
+        for key in ("shouldquarantine", "should_quarantine"):
+            if key in pipeline_dict:
+                pipeline_dict[key] = False
+        for key in ("shouldwarn", "should_warn"):
+            if key in pipeline_dict:
+                pipeline_dict[key] = False
+        for key in ("shouldreview", "should_review"):
+            if key in pipeline_dict:
+                pipeline_dict[key] = should_review
 
         result = _SupervisedResult(
             session_id=session_id,
@@ -295,7 +404,7 @@ class _InjectedSupervisor:
             allowed=allowed,
             should_review=should_review,
             should_block=should_block,
-            should_quarantine=should_quarantine,
+            should_quarantine=False,
             risk_delta=risk_delta,
             matched_rules=matched_rules,
             reasons=reasons,
@@ -312,7 +421,7 @@ class _InjectedSupervisor:
             }
         )
 
-        if should_review and verdict == "review":
+        if should_review and verdict == "block":
             self._enqueue(
                 {
                     "session_id": session_id,
@@ -363,24 +472,13 @@ def _session_key(file_path: str, agent_id: str | None = None) -> str:
 
 
 def _escalation_level_for_plan(plan: ExecutionPlan) -> EscalationLevel | None:
-    verdict = getattr(plan, "verdict", None)
-    risk_score = int(getattr(plan, "risk_score", 0) or 0)
-    if verdict == "block":
-        return "critical"
-    if verdict == "quarantine":
-        return "high"
-    if verdict == "warn" and risk_score >= 70:
-        return "medium"
-    return None
+    return "critical" if normalize_plan_verdict(plan) == "block" else None
 
 
 def _escalation_reason(plan: ExecutionPlan) -> str:
-    verdict = getattr(plan, "verdict", None)
-    if verdict == "block":
+    if normalize_plan_verdict(plan) == "block":
         return "Supervisor detected a blocked execution plan requiring immediate halt."
-    if verdict == "quarantine":
-        return "Supervisor detected a quarantined plan requiring controlled isolation."
-    return "Supervisor detected elevated risk requiring review."
+    return "Supervisor accepted a clean execution plan."
 
 
 def _status_from_history(
@@ -393,8 +491,8 @@ def _status_from_history(
         return "critical"
     if any(item.level == "high" for item in escalations_list):
         return "elevated"
-    if any(getattr(record.execution_plan, "verdict", None) == "warn" for record in history_list):
-        return "monitoring"
+    if any(normalize_plan_verdict(record.execution_plan) == "block" for record in history_list):
+        return "critical"
     if history_list:
         return "active"
     return "ready"
@@ -471,8 +569,8 @@ def run_supervised_request(
                 file_path=getattr(updated_session, "file_path", request.file_path),
                 level=escalation_level,
                 reason=_escalation_reason(routed_result.execution_plan),
-                verdict=getattr(routed_result.execution_plan, "verdict", "unknown"),
-                risk_score=int(getattr(routed_result.execution_plan, "risk_score", 0) or 0),
+                verdict=normalize_plan_verdict(routed_result.execution_plan),
+                risk_score=normalized_plan_risk_score(routed_result.execution_plan),
             ),
         )
     updated_supervisor = SupervisorSnapshot(

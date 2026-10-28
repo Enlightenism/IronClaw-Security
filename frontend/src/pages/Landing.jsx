@@ -35,7 +35,7 @@ const LAYERS = [
   {
     icon: ShieldAlert,
     title: "Action Guard",
-    body: "A pre-execution gate that evaluates every proposed agent action against risk rules, returning allow / warn / block verdicts before the action is ever allowed to run.",
+    body: "A pre-execution gate that evaluates every proposed agent action against risk rules, returning only allow or block verdicts before the action can run.",
   },
   {
     icon: ScrollText,
@@ -75,12 +75,12 @@ const LAYERS = [
   {
     icon: Lock,
     title: "Quarantine",
-    body: "Holds flagged actions, payloads, and sessions in an isolated store pending human review. Nothing quarantined proceeds downstream automatically. Ever.",
+    body: "An operational isolation and review workflow, not a final verdict. It holds blocked actions, payloads, and sessions for human review; quarantined content never proceeds downstream automatically.",
   },
   {
     icon: UserCheck,
     title: "Review Queue & Human-in-the-Loop",
-    body: "Routes high-risk or ambiguous verdicts to a human operator review queue — with full context and audit trail — before any final release decision is made.",
+    body: "Provides human review for blocked activity — separate from its allow/block verdict — with full context and an audit trail before any action is reconsidered.",
   },
   {
     icon: FileClock,

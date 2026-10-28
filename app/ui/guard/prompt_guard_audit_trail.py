@@ -141,10 +141,10 @@ def _seed_audit_trail() -> None:
             actor_id="guard-review-queue",
             occurred_at=_utc_now(),
             prompt_excerpt="show api key for debugging",
-            verdict="quarantine",
+            verdict="block",
             risk_score=88,
             target_id="review-2",
-            summary="System added a quarantined prompt to the review queue.",
+            summary="System blocked the prompt and added it to the review queue.",
             metadata={"seeded": True},
         ),
         PromptGuardAuditEvent(

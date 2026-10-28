@@ -72,6 +72,8 @@ def test_cursor_route_contract_handshake_manifest_evaluate_and_policy_decision()
     manifest_payload = manifest.json()
     assert manifest_payload["platform"] == "cursor"
     assert manifest_payload["adapter_name"] == "ironclaw-cursor"
+    assert manifest_payload["policy_bindings"]["verdicts"]["warn"] == []
+    assert manifest_payload["policy_bindings"]["verdicts"]["quarantine"] == []
     assert "file_edit" in manifest_payload["supported_action_types"]
     assert any(cap["name"] == "audit-trail" for cap in manifest_payload["capabilities"])
 
@@ -91,7 +93,11 @@ def test_cursor_route_contract_handshake_manifest_evaluate_and_policy_decision()
     assert evaluate.status_code == 200, evaluate.text
     evaluate_payload = evaluate.json()
     assert evaluate_payload["verdict"] == "block"
+    assert evaluate_payload["should_allow"] is False
+    assert evaluate_payload["should_warn"] is False
+    assert evaluate_payload["should_quarantine"] is False
     assert evaluate_payload["should_block"] is True
+    assert evaluate_payload["should_review"] is True
     assert evaluate_payload["secret_scan"]["scanned"] is True
     assert evaluate_payload["audit_trail"]["secret_scan_triggered"] is True
 
@@ -111,7 +117,9 @@ def test_cursor_route_contract_handshake_manifest_evaluate_and_policy_decision()
     assert policy_decision.status_code == 200, policy_decision.text
     decision_payload = policy_decision.json()
     assert decision_payload["platform"] == "cursor"
-    assert "verdict" in decision_payload
+    assert decision_payload["verdict"] in {"allow", "block"}
+    assert decision_payload["should_warn"] is False
+    assert decision_payload["should_quarantine"] is False
     assert "matched_rules" in decision_payload
     assert "audit_trail" in decision_payload
 

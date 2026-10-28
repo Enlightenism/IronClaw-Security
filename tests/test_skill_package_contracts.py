@@ -5,6 +5,8 @@ import importlib
 from pydantic import TypeAdapter, ValidationError
 import pytest
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+
 
 def _contracts():
     return importlib.import_module("ironclawskill.contracts")
@@ -282,23 +284,18 @@ def test_response_payload_defaults_allowed_from_verdict():
     )
     assert allow_payload.allowed is True
 
-    review_payload = contracts.SkillResponsePayload(
-        verdict="review",
-        summary="review required",
-    )
-    assert review_payload.allowed is False
-
     block_payload = contracts.SkillResponsePayload(
         verdict="block",
         summary="blocked",
     )
     assert block_payload.allowed is False
+    assert block_payload.shouldhalt is True
+    assert block_payload.shouldwarn is False
+    assert block_payload.metadata.riskscore == RISK_THRESHOLD_BLOCK_MIN
 
-    error_payload = contracts.SkillResponsePayload(
-        verdict="error",
-        summary="errored",
-    )
-    assert error_payload.allowed is False
+    for verdict in ("review", "error"):
+        with pytest.raises(ValidationError):
+            contracts.SkillResponsePayload(verdict=verdict, summary="not a final verdict")
 
 
 def test_buildskillsuccessresponse_shape_is_stable():
@@ -306,7 +303,7 @@ def test_buildskillsuccessresponse_shape_is_stable():
 
     response = contracts.buildskillsuccessresponse(
         operation="scan",
-        verdict="review",
+        verdict="block",
         summary="Prompt injection indicators detected.",
         shouldhalt=False,
         shouldwarn=True,
@@ -332,10 +329,10 @@ def test_buildskillsuccessresponse_shape_is_stable():
     assert response.requestid == "req_success"
     assert response.errorcode is None
 
-    assert response.payload.verdict == "review"
+    assert response.payload.verdict == "block"
     assert response.payload.summary == "Prompt injection indicators detected."
-    assert response.payload.shouldhalt is False
-    assert response.payload.shouldwarn is True
+    assert response.payload.shouldhalt is True
+    assert response.payload.shouldwarn is False
     assert response.payload.allowed is False
 
     assert response.payload.metadata.scanid == "scan_123"
@@ -377,16 +374,16 @@ def test_buildskillerrorresponse_shape_is_stable():
     assert response.requestid == "req_error"
     assert response.errorcode == "guardedexecutionfailed"
 
-    assert response.payload.verdict == "error"
+    assert response.payload.verdict == "block"
     assert response.payload.summary == "Guarded execution failed."
     assert response.payload.shouldhalt is True
-    assert response.payload.shouldwarn is True
+    assert response.payload.shouldwarn is False
     assert response.payload.allowed is False
 
     assert response.payload.metadata.scanid is None
     assert response.payload.metadata.decisionsource == "unknown"
     assert response.payload.metadata.matchedpatterns == []
-    assert response.payload.metadata.riskscore is None
+    assert response.payload.metadata.riskscore == RISK_THRESHOLD_BLOCK_MIN
 
     assert len(response.payload.reasons) == 1
     assert response.payload.reasons[0].source == "runtime"

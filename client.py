@@ -7,7 +7,9 @@ import requests
 from requests import Response
 from requests.exceptions import RequestException, Timeout
 
-Verdict = Literal["allow", "warn", "quarantine", "block"]
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+
+Verdict = Literal["allow", "block"]
 TargetType = Literal["text", "url", "githubrepo", "archive"]
 ContextType = Literal["user_prompt", "retrieved_doc", "tool_output", "model_output"]
 SandboxLane = Literal[
@@ -26,6 +28,15 @@ ActionType = Literal[
 ]
 
 PolicyMode = Literal["enforce", "review", "observe"]
+
+
+def _normalize_verdict(value: Any) -> Verdict:
+    return "allow" if value == "allow" else "block"
+
+
+def _normalize_risk_score(value: Any, verdict: Verdict) -> int:
+    score = int(value or 0)
+    return max(score, RISK_THRESHOLD_BLOCK_MIN) if verdict == "block" else score
 
 
 class IronClawClientError(Exception):
@@ -67,11 +78,11 @@ class ScanResult:
 
     @property
     def is_quarantined(self) -> bool:
-        return self.verdict == "quarantine"
+        return False
 
     @property
     def is_warn(self) -> bool:
-        return self.verdict == "warn"
+        return False
 
     @property
     def is_allow(self) -> bool:
@@ -89,7 +100,7 @@ class GuardedText:
     original_text: str
     effective_text: str
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
 
 
 @dataclass
@@ -100,7 +111,7 @@ class PromptGuardResult:
     model_output: GuardedText | None
     highest_verdict: Verdict
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
 
 
 @dataclass
@@ -113,7 +124,7 @@ class GuardActionResult:
     risk_score: int
     matched_patterns: list[str] = field(default_factory=list)
     should_halt: bool = False
-    should_warn: bool = False
+    should_warn: Literal[False] = False
     client_id: str | None = None
     session_id: str | None = None
 
@@ -126,7 +137,7 @@ class GuardActionPolicyResult:
     verdict: Verdict
     summary: str
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     client_id: str | None = None
     session_id: str | None = None
 
@@ -142,7 +153,7 @@ class GuardActionDecisionResult:
     risk_score: int
     matched_patterns: list[str] = field(default_factory=list)
     should_halt: bool = False
-    should_warn: bool = False
+    should_warn: Literal[False] = False
     client_id: str | None = None
     session_id: str | None = None
 
@@ -222,11 +233,11 @@ class IronClawClient:
 
         return ScanResult(
             scan_id=data.get("scan_id"),
-            verdict=data["verdict"],
+            verdict=_normalize_verdict(data.get("verdict")),
             summary=data["summary"],
             target_type=data["target_type"],
             target_value=data["target_value"],
-            risk_score=data["risk_score"],
+            risk_score=_normalize_risk_score(data.get("risk_score"), _normalize_verdict(data.get("verdict"))),
             matched_patterns=data.get("matched_patterns", []),
             risky_files=data.get("risky_files", []),
             checks_loaded=data.get("checks_loaded", []),
@@ -264,27 +275,29 @@ class IronClawClient:
             if item is None:
                 return None
 
+            verdict = _normalize_verdict(item.get("verdict"))
             return GuardedText(
                 context_type=item["context_type"],
-                verdict=item["verdict"],
+                verdict=verdict,
                 scan_id=item.get("scan_id"),
                 summary=item["summary"],
-                risk_score=item["risk_score"],
+                risk_score=_normalize_risk_score(item.get("risk_score"), verdict),
                 matched_patterns=item["matched_patterns"],
                 original_text=item["original_text"],
                 effective_text=item["effective_text"],
-                should_halt=item["should_halt"],
-                should_warn=item["should_warn"],
+                should_halt=verdict == "block",
+                should_warn=False,
             )
 
+        highest_verdict = _normalize_verdict(data.get("highest_verdict"))
         return PromptGuardResult(
             user_prompt=_make_guarded(data.get("user_prompt")),
             retrieved_doc=_make_guarded(data.get("retrieved_doc")),
             tool_output=_make_guarded(data.get("tool_output")),
             model_output=_make_guarded(data.get("model_output")),
-            highest_verdict=data["highest_verdict"],
-            should_halt=data["should_halt"],
-            should_warn=data["should_warn"],
+            highest_verdict=highest_verdict,
+            should_halt=highest_verdict == "block",
+            should_warn=False,
         )
 
     # Action guard: scan --------------------------------------------------
@@ -305,17 +318,18 @@ class IronClawClient:
             "session_id": session_id,
         }
         data = self._post("/guard/action", payload)
+        verdict = _normalize_verdict(data.get("verdict"))
 
         return GuardActionResult(
             action_type=data["action_type"],
             target=data.get("target"),
             content=data.get("content"),
-            verdict=data["verdict"],
+            verdict=verdict,
             summary=data["summary"],
-            risk_score=data["risk_score"],
+            risk_score=_normalize_risk_score(data.get("risk_score"), verdict),
             matched_patterns=data.get("matched_patterns", []),
-            should_halt=data.get("should_halt", False),
-            should_warn=data.get("should_warn", False),
+            should_halt=verdict == "block",
+            should_warn=False,
             client_id=data.get("client_id"),
             session_id=data.get("session_id"),
         )
@@ -338,15 +352,16 @@ class IronClawClient:
             "session_id": session_id,
         }
         data = self._post("/guard/action-policy", payload)
+        verdict = _normalize_verdict(data.get("verdict"))
 
         return GuardActionPolicyResult(
             action_type=data["action_type"],
             target=data.get("target"),
             policy_mode=data["policy_mode"],
-            verdict=data["verdict"],
+            verdict=verdict,
             summary=data["summary"],
-            should_halt=data["should_halt"],
-            should_warn=data["should_warn"],
+            should_halt=verdict == "block",
+            should_warn=False,
             client_id=data.get("client_id"),
             session_id=data.get("session_id"),
         )
@@ -369,18 +384,19 @@ class IronClawClient:
             "session_id": session_id,
         }
         data = self._post("/guard/action-decision", payload)
+        verdict = _normalize_verdict(data.get("verdict"))
 
         return GuardActionDecisionResult(
             action_type=data["action_type"],
             target=data.get("target"),
             policy_mode=data["policy_mode"],
-            verdict=data["verdict"],
+            verdict=verdict,
             decision_source=data["decision_source"],
             summary=data["summary"],
-            risk_score=data["risk_score"],
+            risk_score=_normalize_risk_score(data.get("risk_score"), verdict),
             matched_patterns=data.get("matched_patterns", []),
-            should_halt=data.get("should_halt", False),
-            should_warn=data.get("should_warn", False),
+            should_halt=verdict == "block",
+            should_warn=False,
             client_id=data.get("client_id"),
             session_id=data.get("session_id"),
         )

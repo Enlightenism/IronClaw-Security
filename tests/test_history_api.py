@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
+from typing import Any
 
+from fastapi.testclient import TestClient
+import pytest
+
+from app.api import history as history_api
 from app.orchestrator.security_audit_log import (
     initialize_security_audit_log,
     record_policy_decision,
 )
+from app.services import history as history_service
 from app.services.audit_log_service import set_audit_log
 
 
@@ -141,3 +146,87 @@ def test_history_events_allows_access_with_api_key(test_client: TestClient) -> N
 def test_history_events_rejects_invalid_limit(test_client: TestClient) -> None:
     response = test_client.get("/history/events?limit=0")
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize("verdict", ["block", "quarantine"])
+def test_scan_history_defaults_block_records_to_pending_and_untrusted(
+    verdict: str,
+) -> None:
+    item = history_service._normalize_record(
+        {"scan_id": "scan-review-001", "verdict": verdict},
+    )
+
+    assert item["review_status"] == "pending"
+    assert item["untrusted"] is True
+
+
+@pytest.mark.parametrize("verdict", ["block", "quarantine"])
+def test_review_scan_record_keeps_block_after_approval(
+    monkeypatch: pytest.MonkeyPatch,
+    verdict: str,
+) -> None:
+    item = {
+        "scan_id": "scan-review-002",
+        "verdict": verdict,
+        "summary": "A suspicious pattern was detected.",
+        "target_type": "text",
+        "target_value": "suspicious input",
+        "risk_score": 90,
+        "matched_patterns": ["suspicious-pattern"],
+        "review_status": "pending",
+        "untrusted": True,
+    }
+    recorded_updates: dict[str, object] = {}
+
+    monkeypatch.setattr(history_api, "get_scan_by_id", lambda _: item)
+
+    def update_scan_by_id(
+        _scan_id: str,
+        updates: dict[str, Any],
+    ) -> dict[str, Any]:
+        recorded_updates.update(updates)
+        return {**item, **updates}
+
+    monkeypatch.setattr(history_api, "update_scan_by_id", update_scan_by_id)
+    result = history_api.review_scan_record(
+        "scan-review-002",
+        history_api.ReviewRequest(action="approve"),
+    )
+
+    assert recorded_updates["verdict"] == "block"
+    assert recorded_updates["untrusted"] is True
+    assert result.verdict == "block"
+    assert result.review_status == "approved"
+    assert result.untrusted is True
+
+
+@pytest.mark.parametrize("verdict", ["block", "quarantine"])
+def test_history_service_review_accepts_block_and_legacy_quarantine(
+    monkeypatch: pytest.MonkeyPatch,
+    verdict: str,
+) -> None:
+    item = {
+        "scan_id": "scan-review-003",
+        "verdict": verdict,
+        "summary": "A suspicious pattern was detected.",
+    }
+    recorded_updates: dict[str, object] = {}
+
+    monkeypatch.setattr(history_service, "get_scan_by_id", lambda _: item)
+
+    def update_scan_by_id(
+        _scan_id: str,
+        updates: dict[str, Any],
+    ) -> dict[str, Any]:
+        recorded_updates.update(updates)
+        return {**item, **updates}
+
+    monkeypatch.setattr(history_service, "update_scan_by_id", update_scan_by_id)
+    result = history_service.review_scan("scan-review-003", "approve")
+    assert result is not None
+    result = history_service.apply_review_action(result, "approve")
+
+    assert recorded_updates["verdict"] == "block"
+    assert result["verdict"] == "block"
+    assert result["review_status"] == "approved"
+    assert result["untrusted"] is True

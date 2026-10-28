@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from app.orchestrator.policy_enforcer import PolicyDecision
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
+from app.orchestrator.policy_enforcer import PolicyDecision, PolicyVerdict
 from app.orchestrator.review_queue import (
     ReviewItem,
     ReviewQueue,
@@ -16,7 +17,7 @@ from app.orchestrator.security_audit_log import (
     record_policy_decision,
 )
 
-ResponseAction = Literal["allow", "warn", "quarantine", "block", "review"]
+ResponseAction = Literal["allow", "block"]
 ResponseStatus = Literal["completed", "queued_for_review", "denied"]
 
 
@@ -63,7 +64,22 @@ def coordinate_response(
     session_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> ResponseCoordinatorResult:
-    normalized_verdict = decision.verdict.strip().lower()
+    risk_score_is_valid = isinstance(decision.risk_score, int) and not isinstance(decision.risk_score, bool) and 0 <= decision.risk_score <= 100
+    risk_score = decision.risk_score if risk_score_is_valid else RISK_THRESHOLD_BLOCK_MIN
+    should_block = decision.verdict != "allow" or decision.allow_execution is not True or not risk_score_is_valid or risk_score > RISK_THRESHOLD_ALLOW_MAX or bool(decision.matched_rules) or decision.requires_review
+    normalized_verdict: PolicyVerdict = "block" if should_block else "allow"
+    reasons = list(decision.reasons)
+    if should_block and not reasons:
+        reasons.append(
+            "Response coordinator blocked a non-allow or invalid policy decision.",
+        )
+    decision = replace(
+        decision,
+        verdict=normalized_verdict,
+        allow_execution=not should_block,
+        risk_score=(max(risk_score, RISK_THRESHOLD_BLOCK_MIN) if should_block else risk_score),
+        reasons=reasons,
+    )
     response_action = _map_verdict_to_action(normalized_verdict)
     response_reason = _build_response_reason(decision)
 
@@ -94,7 +110,7 @@ def coordinate_response(
         metadata=enriched_metadata,
     )
 
-    if _should_queue_for_review(decision, response_action):
+    if _should_queue_for_review(decision):
         review_item = create_review_item(
             actor_id=actor_id,
             action_type=action_type,
@@ -116,7 +132,7 @@ def coordinate_response(
 
         response = CoordinatedResponse(
             response_id=_build_response_id(),
-            action="review" if decision.requires_review else response_action,
+            action=response_action,
             status="queued_for_review",
             reason=response_reason,
             decision_id=decision.decision_id,
@@ -178,15 +194,7 @@ def summarize_coordinated_response(result: ResponseCoordinatorResult) -> dict[st
 
 
 def _map_verdict_to_action(verdict: str) -> ResponseAction:
-    if verdict == "allow":
-        return "allow"
-    if verdict == "warn":
-        return "warn"
-    if verdict == "quarantine":
-        return "quarantine"
-    if verdict == "block":
-        return "block"
-    return "review"
+    return "allow" if verdict == "allow" else "block"
 
 
 def _build_response_reason(decision: PolicyDecision) -> str:
@@ -201,13 +209,8 @@ def _build_review_reason(decision: PolicyDecision) -> str:
 
 def _should_queue_for_review(
     decision: PolicyDecision,
-    response_action: ResponseAction,
 ) -> bool:
-    if response_action == "quarantine":
-        return True
-    if decision.requires_review:
-        return True
-    return False
+    return decision.requires_review
 
 
 def _build_response_id() -> str:

@@ -170,6 +170,29 @@ def test_get_docs_api_reference_all_known_groups_present(
         assert gid in group_ids, f"expected group {gid!r} not found"
 
 
+def test_get_docs_api_reference_guard_verdict_documents_allow_and_block(
+    test_client: TestClient,
+) -> None:
+    response = test_client.get(URL)
+    assert response.status_code == 200
+    guard_group = next(
+        (group for group in response.json()["groups"] if group["groupid"] == "guard"),
+        None,
+    )
+    assert guard_group is not None
+    guard_action = next(
+        (route for route in guard_group["routes"] if route["path"] == "/guard/action"),
+        None,
+    )
+    assert guard_action is not None
+    verdict_field = next(
+        (field for field in guard_action["responsefields"] if field["name"] == "verdict"),
+        None,
+    )
+    assert verdict_field is not None
+    assert verdict_field["description"] == "Final policy decision: allow | block."
+
+
 def test_get_docs_api_reference_group_ids_are_unique(test_client: TestClient) -> None:
     response = test_client.get(URL)
     assert response.status_code == 200

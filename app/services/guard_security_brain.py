@@ -3,12 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import logging
+import math
 from pathlib import Path
 import re
 import time
 from typing import Any, Literal
 
-from app.core.settings import get_settings
+from app.config import (
+    GUARD_ENABLED,
+    GUARD_MODEL_PATH,
+    GUARD_THRESHOLD,
+    RISK_THRESHOLD_ALLOW_MAX,
+    RISK_THRESHOLD_BLOCK_MIN,
+)
 from app.services.prompt_guard import classify_prompt_guard
 
 logger = logging.getLogger(__name__)
@@ -17,16 +24,8 @@ logger = logging.getLogger(__name__)
 # Types
 # ---------------------------------------------------------------------------
 
-GuardSecurityVerdict = Literal["allow", "warn", "quarantine", "block"]
+GuardSecurityVerdict = Literal["allow", "block"]
 GuardMode = Literal["disabled", "assist", "enforce", "strict"]
-
-# ---------------------------------------------------------------------------
-# Threshold constants
-# ---------------------------------------------------------------------------
-
-_BLOCK_MIN: int = 90
-_QUARANTINE_MIN: int = 70
-_WARN_MIN: int = 40
 
 # ---------------------------------------------------------------------------
 # Signal taxonomy
@@ -44,6 +43,8 @@ SIG_ROLE_OVERRIDE = "role-override"
 SIG_TOOL_CHAIN_ABUSE = "tool-chain-abuse"
 SIG_DATA_BOUNDARY = "data-boundary-violation"
 SIG_PROMPT_GUARD = "prompt-guard-malicious"
+SIG_PROMPT_GUARD_UNAVAILABLE = "prompt-guard-unavailable"
+SIG_SCAN_UNAVAILABLE = "scan-unavailable"
 SIG_KEYWORD_FASTPATH = "keyword-fastpath-triggered"
 
 # ---------------------------------------------------------------------------
@@ -246,20 +247,12 @@ def _target_penalty(target: str) -> tuple[int, list[str], list[str]]:
 
 
 def _verdict_from_score(risk_score: int) -> GuardSecurityVerdict:
-    if risk_score >= _BLOCK_MIN:
-        return "block"
-    if risk_score >= _QUARANTINE_MIN:
-        return "quarantine"
-    if risk_score >= _WARN_MIN:
-        return "warn"
-    return "allow"
+    return "block" if risk_score > RISK_THRESHOLD_ALLOW_MAX else "allow"
 
 
 def _summary_from_verdict(verdict: GuardSecurityVerdict) -> str:
     return {
-        "block": "IronClaw-Security recommends blocking the request.",
-        "quarantine": "IronClaw-Security recommends quarantining the request.",
-        "warn": "IronClaw-Security recommends warning on the request.",
+        "block": "IronClaw-Security blocked the request.",
         "allow": "IronClaw-Security found no material risk indicators.",
     }[verdict]
 
@@ -367,79 +360,77 @@ def evaluate_guard_security_request(
     """
     Evaluation pipeline:
 
-    1. Mode disabled gate — short-circuit to allow only when mode == "disabled".
-    2. Keyword fast-path — always runs regardless of GUARD_ENABLED.
-       If risk >= _BLOCK_MIN, skip local inference (already definitive).
-    3. Local prompt-guard inference — only when enabled and risk is ambiguous.
-    4. Action-type and target penalties applied.
-    5. Final verdict derived from composite risk score.
+    1. Keyword, action-type, and target checks run in every mode.
+    2. Local Prompt Guard runs whenever GUARD_ENABLED is true.
+    3. Any signal or scan error blocks; only a clean result can allow.
     """
     t_start = time.perf_counter()
-    settings = get_settings()
-    model_name = Path(settings.guard_model_path).name or "prompt-guard-86m-local"
+    model_name = Path(GUARD_MODEL_PATH).name or "prompt-guard-86m-local"
 
-    # --- gate: mode disabled only (GUARD_ENABLED does not block keyword scan) ---
-    if mode == "disabled":
-        return GuardSecurityDecision(
-            mode=mode,
-            verdict="allow",
-            risk_score=0,
-            summary="IronClaw-Security local prompt guard is disabled.",
-            reasoning=["Security evaluation was skipped because mode is disabled."],
-            signals=[],
-            model_name=model_name,
-            request=request.to_dict(),
-            metadata=dict(extra_metadata or {}),
-            confidence=1.0,
-            latency_ms=0.0,
-        )
-
-    # --- phase 1: keyword fast-path (always runs) --------------------------
-    combined_content = f"{request.action_type} {request.target} {request.content}"
-    kw_risk, kw_signals, kw_reasoning = _keyword_scan(combined_content)
-
-    at_penalty, at_signals, at_reasoning = _action_type_penalty(request.action_type)
-    tgt_penalty, tgt_signals, tgt_reasoning = _target_penalty(request.target)
-
-    risk_score = min(kw_risk + at_penalty + tgt_penalty, 100)
-    signals: list[str] = list(dict.fromkeys(kw_signals + at_signals + tgt_signals))
-    reasoning: list[str] = kw_reasoning + at_reasoning + tgt_reasoning
+    scan_error = False
+    try:
+        combined_content = f"{request.action_type} {request.target} {request.content}"
+        kw_risk, kw_signals, kw_reasoning = _keyword_scan(combined_content)
+        at_penalty, at_signals, at_reasoning = _action_type_penalty(request.action_type)
+        tgt_penalty, tgt_signals, tgt_reasoning = _target_penalty(request.target)
+        risk_score = min(kw_risk + at_penalty + tgt_penalty, 100)
+        signals: list[str] = list(dict.fromkeys(kw_signals + at_signals + tgt_signals))
+        reasoning: list[str] = kw_reasoning + at_reasoning + tgt_reasoning
+    except Exception:  # noqa: BLE001
+        logger.exception("guard_security_brain: scan failed; blocking request")
+        kw_risk = 0
+        risk_score = 0
+        signals = [SIG_SCAN_UNAVAILABLE]
+        reasoning = ["Security scan unavailable (scan_unavailable); request blocked."]
+        scan_error = True
 
     guard_used = False
     guard_score: float | None = None
-    if settings.guard_enabled and request.content.strip() and risk_score < _BLOCK_MIN:
-        guard_result = classify_prompt_guard(
-            request.content,
-            model_path=settings.guard_model_path,
-            threshold=settings.guard_threshold,
-        )
+    guard_error = False
+    if GUARD_ENABLED:
         guard_used = True
-        guard_score = guard_result.malicious_score
-        model_name = guard_result.model_name
-        if guard_result.is_malicious:
-            risk_score = max(risk_score, _BLOCK_MIN)
-            signals.append(SIG_PROMPT_GUARD)
-            reasoning.append("The local prompt guard classified the request as malicious.")
+        try:
+            guard_result = classify_prompt_guard(
+                request.content,
+                model_path=GUARD_MODEL_PATH,
+                threshold=GUARD_THRESHOLD,
+            )
+            raw_guard_score = guard_result.malicious_score
+            if isinstance(raw_guard_score, bool) or not isinstance(raw_guard_score, (int, float)) or not math.isfinite(raw_guard_score) or not 0.0 <= raw_guard_score <= 1.0:
+                raise ValueError("Prompt Guard returned an invalid malicious score.")
+            if not isinstance(guard_result.label, str) or not guard_result.label:
+                raise ValueError("Prompt Guard returned an invalid label.")
+            if not isinstance(guard_result.model_name, str) or not guard_result.model_name:
+                raise ValueError("Prompt Guard returned an invalid model name.")
 
-    confidence = 0.85 if guard_used else 0.60
+            guard_score = float(raw_guard_score)
+            model_name = guard_result.model_name
+            if guard_score >= GUARD_THRESHOLD or guard_result.label != "BENIGN" or guard_result.is_malicious:
+                risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
+                signals.append(SIG_PROMPT_GUARD)
+                reasoning.append("The local prompt guard classified the request as malicious.")
+        except Exception:  # noqa: BLE001
+            logger.exception("guard_security_brain: Prompt Guard unavailable; blocking request")
+            signals.append(SIG_PROMPT_GUARD_UNAVAILABLE)
+            reasoning.append("Prompt Guard unavailable (prompt_guard_unavailable); request blocked.")
+            guard_error = True
 
-    # --- strict mode: never downgrade below quarantine when signals exist --
-    if mode == "strict" and risk_score < _QUARANTINE_MIN and signals:
-        risk_score = max(risk_score, _QUARANTINE_MIN)
-        reasoning.append("Strict mode: any detected signal forces minimum quarantine threshold.")
-
+    confidence = 0.0 if guard_error else 0.85 if guard_used else 0.60
     risk_score = min(risk_score, 100)
-    verdict = _verdict_from_score(risk_score)
+    verdict = "block" if scan_error or guard_error or signals else _verdict_from_score(risk_score)
+    if verdict == "block":
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
     summary = _summary_from_verdict(verdict)
 
-    if kw_risk >= _BLOCK_MIN and not guard_used:
+    if kw_risk >= RISK_THRESHOLD_BLOCK_MIN and not guard_used:
         signals.append(SIG_KEYWORD_FASTPATH)
 
     latency_ms = (time.perf_counter() - t_start) * 1000.0
 
     metadata = dict(extra_metadata or {})
-    metadata["guard_enabled"] = settings.guard_enabled
+    metadata["guard_enabled"] = GUARD_ENABLED
     metadata["guard_used"] = guard_used
+    metadata["guard_error"] = guard_error
     if guard_score is not None:
         metadata["guard_score"] = guard_score
     metadata["keyword_risk"] = kw_risk

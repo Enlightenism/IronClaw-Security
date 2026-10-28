@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.runtime.networkguard import NetworkPolicy
 from app.services.secretservice import build_secret_service
 
 
@@ -28,7 +29,7 @@ def test_secret_service_allows_clean_text() -> None:
     assert result.output_verdict == "allow"
 
 
-def test_secret_service_reviews_secret_text_and_redacts() -> None:
+def test_secret_service_blocks_secret_text_and_redacts() -> None:
     service = build_secret_service()
 
     result = service.inspect_text(
@@ -37,8 +38,11 @@ def test_secret_service_reviews_secret_text_and_redacts() -> None:
         metadata={"direction": "egress"},
     )
 
-    assert result.verdict in {"review", "sanitize", "block"}
-    assert result.allowed is (result.verdict != "block")
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.blocked is True
+    assert result.should_review is False
+    assert result.should_quarantine is False
     assert result.findings_detected >= 1
     assert result.secrets_redacted >= 1
     assert result.redaction["changed"] is True
@@ -55,14 +59,16 @@ def test_secret_service_blocks_private_key_material() -> None:
         metadata={"direction": "egress"},
     )
 
-    assert result.verdict in {"block", "quarantine"}
+    assert result.verdict == "block"
     assert result.blocked is True
+    assert result.should_review is False
+    assert result.should_quarantine is False
     assert result.output_verdict == "block"
     assert result.output["blocked"] is True
     assert result.output["sanitized_text"].startswith("[BLOCKED_OUTPUT]")
 
 
-def test_secret_service_reviews_unsafe_command_text() -> None:
+def test_secret_service_blocks_unsafe_command_text() -> None:
     service = build_secret_service()
 
     result = service.inspect_text(
@@ -71,8 +77,11 @@ def test_secret_service_reviews_unsafe_command_text() -> None:
         metadata={"direction": "egress"},
     )
 
-    assert result.output_verdict in {"review", "block", "sanitize"}
-    assert result.verdict in {"review", "block", "sanitize", "quarantine"}
+    assert result.output_verdict == "block"
+    assert result.verdict == "block"
+    assert result.blocked is True
+    assert result.should_review is False
+    assert result.should_quarantine is False
     assert result.score >= 0.48 or result.output["score"] >= 0.48
 
 
@@ -127,7 +136,7 @@ def test_secret_service_inspects_composite_payload() -> None:
         context="tool_execution",
     )
 
-    assert result.verdict in {"review", "block", "quarantine", "sanitize"}
+    assert result.verdict == "block"
     assert result.risk_delta >= 0
     assert result.network
     assert result.output
@@ -202,8 +211,11 @@ def test_secret_service_respects_disable_command_blocking_flag() -> None:
         block_unsafe_commands=False,
     )
 
-    assert result.output["blocked"] is False
-    assert result.verdict in {"allow", "review", "sanitize", "block", "quarantine"}
+    assert result.output["blocked"] is True
+    assert result.verdict == "block"
+    assert result.blocked is True
+    assert result.should_review is False
+    assert result.should_quarantine is False
     assert result.reasons
 
 
@@ -232,6 +244,49 @@ def test_secret_service_defaults_network_context_when_metadata_missing() -> None
 
     assert result.network_verdict == "allow"
     assert isinstance(result.network, dict)
+
+
+def test_network_quarantine_is_exposed_as_block(monkeypatch) -> None:
+    service = build_secret_service()
+    network_result = NetworkPolicy(
+        verdict="quarantine",
+        allowed=False,
+        should_review=False,
+        should_block=True,
+        should_quarantine=True,
+        risk_delta=95,
+        scheme="https",
+        host="attacker.example",
+        port=443,
+        path="/upload",
+        normalized_url="https://attacker.example/upload",
+    )
+
+    def _evaluate_network(*, metadata: dict[str, str]) -> NetworkPolicy:
+        assert metadata == {"direction": "egress"}
+        return network_result
+
+    monkeypatch.setattr(
+        service,
+        "_evaluate_network",
+        _evaluate_network,
+    )
+
+    result = service.inspect_text(
+        "Safe text.",
+        context="network_policy",
+        metadata={"direction": "egress"},
+    )
+
+    assert result.verdict == "block"
+    assert result.should_review is False
+    assert result.should_quarantine is False
+    assert result.network_verdict == "block"
+    assert result.network["verdict"] == "block"
+    assert result.network["allowed"] is False
+    assert result.network["shouldblock"] is True
+    assert result.network["shouldquarantine"] is False
+    assert result.should_quarantine is False
 
 
 def test_secret_service_disable_redaction_keeps_original_redaction_text() -> None:

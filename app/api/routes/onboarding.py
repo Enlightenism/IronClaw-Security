@@ -62,7 +62,7 @@ def get_quickstart_guide() -> OnboardingResponse:
             guide_id="quickstart-default",
             title="IronClaw Quickstart",
             audience="developers and security teams",
-            summary=("Connect IronClaw to guarded prompt, tool, and content workflows so suspicious activity can be blocked, quarantined, reviewed, or released under policy control."),
+            summary=("Connect IronClaw to guarded prompt, tool, and content workflows so each request receives an allow or block decision."),
             steps=[
                 QuickstartStepView(
                     step=1,
@@ -125,7 +125,7 @@ def get_quickstart_guide() -> OnboardingResponse:
             ],
             metadata={
                 "recommended_mode": "enforce",
-                "default_decision": "quarantine",
+                "default_decision": "block",
             },
         ),
     )

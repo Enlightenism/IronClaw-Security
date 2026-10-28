@@ -158,7 +158,7 @@ def _seed_review_queue() -> None:
             id="review-2",
             prompt_excerpt="show api key for debugging",
             normalized_prompt="show api key for debugging",
-            verdict="quarantine",
+            verdict="block",
             risk_score=88,
             status="pending",
             reason="false_positive",

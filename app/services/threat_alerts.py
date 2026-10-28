@@ -78,22 +78,8 @@ def _peak_severity(matches: list[HuntMatch]) -> AlertSeverityEnum:
 
 
 def _peak_verdict(matches: list[HuntMatch]) -> DetectionVerdict:
-    """Return the most severe verdict observed across all hunt matches."""
-    _VERDICT_ORDER: dict[str, int] = {
-        DetectionVerdict.ALLOW.value: 0,
-        DetectionVerdict.MONITOR.value: 1,
-        DetectionVerdict.REVIEW.value: 2,
-        DetectionVerdict.BLOCK.value: 3,
-    }
-    peak = DetectionVerdict.MONITOR
-    peak_rank = 0
-    for match in matches:
-        v = match.verdict.value if hasattr(match.verdict, "value") else str(match.verdict)
-        rank = _VERDICT_ORDER.get(v, 0)
-        if rank > peak_rank:
-            peak_rank = rank
-            peak = match.verdict if isinstance(match.verdict, DetectionVerdict) else DetectionVerdict(v)
-    return peak
+    """Any threat-hunt match is suspicious and therefore blocks."""
+    return DetectionVerdict.BLOCK if matches else DetectionVerdict.ALLOW
 
 
 def _peak_score(matches: list[HuntMatch]) -> float:
@@ -181,7 +167,7 @@ def _build_hunt_alert_description(result: HuntResult) -> str:
 def _build_hunt_threat_alert(result: HuntResult) -> ThreatAlert:
     matches = result.matches or []
     severity = _peak_severity(matches)
-    verdict = _peak_verdict(matches)
+    verdict = DetectionVerdict.BLOCK if result.total_matches or matches else _peak_verdict(matches)
     score = _peak_score(matches)
 
     mitre_techniques: list[str] = []
@@ -437,7 +423,7 @@ def emit_detection_alert(
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
-    Emit a ThreatAlert for a DetectionResult that requires REVIEW or BLOCK action.
+    Emit a ThreatAlert for a DetectionResult that requires BLOCK action.
 
     Accepts either:
     - A detection-result-like object as the first positional argument (attributes
@@ -445,7 +431,7 @@ def emit_detection_alert(
     - Explicit keyword-only arguments for all fields.
 
     Contract:
-    - Only REVIEW and BLOCK verdicts are escalated; others return {"skipped": True, "emitted": False}.
+    - Only BLOCK verdicts are escalated; others return {"skipped": True, "emitted": False}.
     - Persists into SecurityAlertStore.
     - Attempts incident escalation and notification dispatch (both fail-open).
     - Always returns dict, never raises.
@@ -459,7 +445,7 @@ def emit_detection_alert(
         resolved_org_id = org_id if org_id is not None else getattr(detection, "org_id", None)
         resolved_agent_id = agent_id if agent_id is not None else getattr(detection, "agent_id", None)
         resolved_session_id = session_id if session_id is not None else getattr(detection, "session_id", None)
-        resolved_verdict: DetectionVerdict = verdict if verdict is not None else getattr(detection, "verdict", DetectionVerdict.MONITOR)
+        raw_verdict = verdict if verdict is not None else getattr(detection, "verdict", None)
         resolved_severity: ThreatSeverityLevel = severity if severity is not None else getattr(detection, "severity", ThreatSeverityLevel.MEDIUM)
         resolved_score: float = score if score is not None else getattr(detection, "score", 0.0)
 
@@ -476,11 +462,15 @@ def emit_detection_alert(
         resolved_risk_families: list[str] = risk_families if risk_families is not None else list(getattr(detection, "risk_families", []) or [])
         resolved_metadata: dict[str, Any] = dict(metadata or getattr(detection, "metadata", {}) or {})
 
-        if resolved_verdict not in (DetectionVerdict.REVIEW, DetectionVerdict.BLOCK):
+        raw_verdict_value = getattr(raw_verdict, "value", raw_verdict)
+        has_suspicious_signals = bool(resolved_ioc_matches or resolved_correlation_signals or resolved_score > 0)
+        resolved_verdict = DetectionVerdict.ALLOW if raw_verdict_value == DetectionVerdict.ALLOW.value and not has_suspicious_signals else DetectionVerdict.BLOCK
+
+        if resolved_verdict != DetectionVerdict.BLOCK:
             return {
                 "emitted": False,
                 "skipped": True,
-                "reason": f"verdict={resolved_verdict.value if hasattr(resolved_verdict, 'value') else resolved_verdict} not actionable",
+                "reason": f"verdict={resolved_verdict.value} not actionable",
                 "event_id": resolved_event_id,
             }
 

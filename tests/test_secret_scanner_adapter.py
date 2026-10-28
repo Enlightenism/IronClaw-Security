@@ -9,9 +9,12 @@ from app.adapters.secret_scanner_adapter import (
     SecretScannerAdapterResponse,
     build_secret_scanner_adapter,
     build_secret_scanner_adapter_request,
+    evaluate_secret_scanner_request,
     scan_for_secrets,
     summarize_secret_scanner_adapter_response,
 )
+from app.config import RISK_THRESHOLD_BLOCK_MIN
+from app.orchestrator.policy_enforcer import initialize_policy_engine
 from app.services.integration_registry import (
     initialize_integration_registry,
 )
@@ -123,15 +126,19 @@ def test_scan_detects_private_key_block() -> None:
 
 
 # ---------------------------------------------------------------------------
-# scan_for_secrets — warn-level
+# scan_for_secrets — matched-token blocking
 # ---------------------------------------------------------------------------
 
 
-def test_scan_detects_jwt_as_warn_or_block() -> None:
+def test_scan_detects_jwt_and_blocks() -> None:
     fake_jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyMSJ9.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ"
     result = scan_for_secrets(prompt_text=f"auth={fake_jwt}")
-    assert result.verdict in ("warn", "block")
+    assert result.verdict == "block"
     assert result.total_matches >= 1
+    assert result.scan_status == "blocked"
+    assert result.block_matches == result.total_matches
+    assert result.warn_matches == 0
+    assert all(match.verdict == "block" for match in result.matches)
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +211,40 @@ def test_adapter_execute_blocked_on_secret() -> None:
     result = adapter.execute(req)
     assert result.status == "blocked"
     assert result.success is False
+
+
+def test_adapter_execute_blocks_jwt_match() -> None:
+    adapter = _make_adapter()
+    fake_jwt = "eyJ" + "A" * 12 + "." + "B" * 8 + "." + "C" * 8
+    req = AdapterExecutionRequest(
+        action_type="scan_prompt",
+        target="agent-test",
+        payload={"prompt_text": f"auth={fake_jwt}"},
+    )
+
+    result = adapter.execute(req)
+
+    assert result.status == "blocked"
+    assert result.success is False
+    assert result.output["scan_result"]["verdict"] == "block"
+    assert result.output["scan_result"]["warn_matches"] == 0
+
+
+def test_policy_adapter_blocks_jwt_match() -> None:
+    req = build_secret_scanner_adapter_request(
+        action_type="scan_prompt",
+        target="agent-test",
+        prompt_text="eyJ" + "A" * 12 + "." + "B" * 8 + "." + "C" * 8,
+    )
+
+    response = evaluate_secret_scanner_request(initialize_policy_engine(), req)
+
+    assert response.verdict == "block"
+    assert response.should_warn is False
+    assert response.should_quarantine is False
+    assert response.should_block is True
+    assert response.warn_matches == 0
+    assert response.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
 
 # ---------------------------------------------------------------------------
@@ -299,23 +340,23 @@ def test_summarize_secret_scanner_adapter_response_shape() -> None:
         adapter_name="ironclaw-secret-scanner",
         platform="secret-scanner",
         mode="enforce",
-        verdict="warn",
+        verdict="block",
         should_allow=False,
-        should_warn=True,
+        should_warn=False,
         should_quarantine=False,
-        should_block=False,
-        scan_status="warned",
-        risk_score=55,
-        risk_level="medium",
-        summary="Potential secret detected.",
+        should_block=True,
+        scan_status="blocked",
+        risk_score=90,
+        risk_level="critical",
+        summary="Secret detected and blocked.",
         total_matches=1,
-        block_matches=0,
-        warn_matches=1,
+        block_matches=1,
+        warn_matches=0,
     )
     summary = summarize_secret_scanner_adapter_response(resp)
-    assert summary["verdict"] == "warn"
-    assert summary["risk_score"] == 55
-    assert summary["risk_level"] == "medium"
+    assert summary["verdict"] == "block"
+    assert summary["risk_score"] == 90
+    assert summary["risk_level"] == "critical"
     assert "decision_id" in summary
     assert "trace_id" in summary
     assert "reviewed_at" in summary

@@ -6,6 +6,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.facade import guardandexecuteaction
 from app.models.action_execute import ExecuteRequest as FacadeExecuteRequest
 from app.orchestrator.secureruntimepipeline import SecureRuntimePipeline, getactionexecutepipeline
@@ -35,8 +36,8 @@ class ExecuteRequest(BaseModel):
 
 
 ExecutionStatus = Literal["completed", "queuedforreview", "denied"]
-ResponseAction = Literal["allow", "warn", "quarantine", "block", "review"]
-PolicyVerdict = Literal["allow", "warn", "quarantine", "block"]
+ResponseAction = Literal["allow", "block"]
+PolicyVerdict = Literal["allow", "block"]
 
 
 class ExecuteResponse(BaseModel):
@@ -51,7 +52,7 @@ class ExecuteResponse(BaseModel):
     )
     responseaction: ResponseAction = Field(
         ...,
-        description="Action recommended/applied by policy and boundary.",
+        description="Binary action outcome recommended/applied by policy and boundary.",
     )
     responsestatus: ExecutionStatus = Field(
         ...,
@@ -61,7 +62,7 @@ class ExecuteResponse(BaseModel):
     # Decision / policy metadata
     policyverdict: PolicyVerdict = Field(
         ...,
-        description="Final policy verdict: allow, warn, quarantine, or block.",
+        description="Final policy verdict: allow or block.",
     )
     riskscore: int = Field(
         ...,
@@ -149,46 +150,17 @@ def _map_http_status_to_execution_status(status_code: int) -> ExecutionStatus:
 
 
 def _normalize_policy_verdict(raw: str | None) -> PolicyVerdict:
-    """Ensure policyverdict stays within the allowed literal set.
-    Some older components may emit 'deny'; tests expect block/quarantine
-    membership checks instead.[file:4]
-    """
-    if not raw:
-        return "allow"
-
-    value = raw.lower()
-    if value in {"allow", "warn", "quarantine", "block"}:
-        return value  # type: ignore[return-value]
-
-    # Backwards-compat: unify any deny/forbid style to 'block'
-    return "block"
+    """Normalize legacy or invalid outcomes to the binary verdict contract."""
+    return "allow" if isinstance(raw, str) and raw.strip().lower() == "allow" else "block"
 
 
 def _normalize_response_action(raw: str | None, verdict: PolicyVerdict) -> ResponseAction:
-    """Normalize the raw response action from lower layers to the allowed literals.
-    Tests assert responseaction is in allow, warn, quarantine, block, review.[file:4]
-    """
-    if not raw:
-        # Derive from verdict when missing.
-        if verdict in ("allow", "warn"):
-            return verdict
-        if verdict in ("quarantine", "block"):
-            return verdict
-        return "review"
-
-    value = raw.lower()
-    if value in {"allow", "warn", "quarantine", "block", "review"}:
-        return value  # type: ignore[return-value]
-
-    if value in {"deny", "denied"}:
+    """Normalize the action outcome and fail closed on non-binary values."""
+    if verdict == "block":
         return "block"
-
-    # Fallback to verdict alignment.
-    if verdict in ("allow", "warn"):
-        return verdict
-    if verdict in ("quarantine", "block"):
-        return verdict
-    return "review"
+    if raw is None:
+        return "allow"
+    return "allow" if isinstance(raw, str) and raw.strip().lower() == "allow" else "block"
 
 
 def _normalize_execution_state(raw_state: str | None, status: ExecutionStatus) -> ExecutionStatus:
@@ -196,17 +168,18 @@ def _normalize_execution_state(raw_state: str | None, status: ExecutionStatus) -
     using either the raw state emitted by summarizeexecution or the
     mapped HTTPish status code.[file:1]
     """
-    if raw_state:
-        value = raw_state.lower()
-        if value in {"completed", "executed", "succeeded", "ok"}:
+    if isinstance(raw_state, str) and raw_state.strip():
+        value = raw_state.strip().lower()
+        if value in {"completed", "executed", "succeeded", "ok", "200", "201", "202"}:
             return "completed"
         if value in {"queuedforreview", "queued_for_review", "queued", "pending_review", "pending"}:
             return "queuedforreview"
         if value in {"denied", "blocked", "failed", "error"}:
             return "denied"
+    elif raw_state is None:
+        return status
 
-    # Fall back to the mapped status when the raw state is unknown/missing.
-    return status
+    return "denied"
 
 
 # --------------------------------------------------------------------------------------
@@ -251,20 +224,60 @@ def guardedexecute(
             return responsepayload.get(field, default)
         return getattr(responsepayload, field, default)
 
-    raw_status_value = _get("response_status", _get("responsestatus", HTTPStatus.OK))
-    if isinstance(raw_status_value, str):
-        mapped_status = _normalize_execution_state(raw_status_value, "completed")
-    else:
-        mapped_status = _map_http_status_to_execution_status(int(raw_status_value))
-
     raw_exec_state: str | None = _get("execution_state", _get("executionstate"))
+    raw_status_value = _get("response_status", _get("responsestatus"))
+    if isinstance(raw_status_value, str):
+        mapped_status = _normalize_execution_state(raw_status_value, "denied")
+    elif raw_status_value is None:
+        mapped_status = _normalize_execution_state(raw_exec_state, "denied")
+    elif isinstance(raw_status_value, int) and not isinstance(raw_status_value, bool):
+        mapped_status = _map_http_status_to_execution_status(raw_status_value)
+    else:
+        mapped_status = "denied"
+
     execution_state: ExecutionStatus = _normalize_execution_state(raw_exec_state, mapped_status)
 
     raw_policy_verdict: str | None = _get("policy_verdict", _get("policyverdict"))
     policy_verdict: PolicyVerdict = _normalize_policy_verdict(raw_policy_verdict)
+    invalid_policy_verdict = not isinstance(raw_policy_verdict, str) or raw_policy_verdict.strip().lower() not in {"allow", "block"}
 
     raw_response_action: str | None = _get("response_action", _get("responseaction"))
     response_action: ResponseAction = _normalize_response_action(raw_response_action, policy_verdict)
+    invalid_response_action = raw_response_action is not None and (not isinstance(raw_response_action, str) or raw_response_action.strip().lower() not in {"allow", "block"})
+    if response_action == "block":
+        policy_verdict = "block"
+
+    raw_halted_by_boundary = _get("halted_by_boundary", _get("haltedbyboundary", False))
+    if raw_halted_by_boundary is not False:
+        policy_verdict = "block"
+        response_action = "block"
+
+    raw_risk_score = _get("riskscore", payload.riskscore)
+    if isinstance(raw_risk_score, int) and not isinstance(raw_risk_score, bool) and 0 <= raw_risk_score <= 100:
+        risk_score = raw_risk_score
+        invalid_risk_score = False
+    else:
+        policy_verdict = "block"
+        response_action = "block"
+        risk_score = RISK_THRESHOLD_BLOCK_MIN
+        invalid_risk_score = True
+    risk_score_exceeded_allow = risk_score > RISK_THRESHOLD_ALLOW_MAX
+    if risk_score_exceeded_allow:
+        policy_verdict = "block"
+        response_action = "block"
+    if policy_verdict == "block":
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
+
+    halted_by_boundary = raw_halted_by_boundary is not False or policy_verdict == "block" or response_action == "block"
+    raw_should_execute = _get("should_execute", _get("shouldexecute", False))
+    should_execute = raw_should_execute is True and policy_verdict == "allow" and response_action == "allow" and mapped_status == "completed" and execution_state == "completed" and not halted_by_boundary
+    reason = _get("reason")
+    if invalid_risk_score:
+        reason = "Invalid execution risk score; action blocked."
+    elif invalid_policy_verdict or invalid_response_action:
+        reason = "Invalid or legacy execution verdict; action blocked."
+    elif policy_verdict == "block" and _normalize_policy_verdict(raw_policy_verdict) == "allow":
+        reason = "Execution boundary or risk policy blocked the action."
 
     # Build the response with safe fallbacks where older components might omit fields.
     return ExecuteResponse(
@@ -272,9 +285,9 @@ def guardedexecute(
         responseaction=response_action,
         responsestatus=mapped_status,
         policyverdict=policy_verdict,
-        riskscore=int(_get("riskscore", payload.riskscore)),
-        shouldexecute=bool(_get("shouldexecute", False)),
-        haltedbyboundary=bool(_get("haltedbyboundary", False)),
+        riskscore=risk_score,
+        shouldexecute=should_execute,
+        haltedbyboundary=halted_by_boundary,
         reviewitemid=_get("reviewitemid"),
         executionid=_get("executionid"),
         traceid=_get("traceid"),
@@ -282,6 +295,6 @@ def guardedexecute(
         decisionid=_get("decisionid"),
         executorname=_get("executorname"),
         executorresult=_get("executorresult"),
-        reason=_get("reason"),
+        reason=reason,
         reasons=list(_get("reasons", [])) or [],
     )

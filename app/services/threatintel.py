@@ -7,7 +7,7 @@ import ipaddress
 import json
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -73,7 +73,7 @@ class _ThreatMatch:
 
 @dataclass(slots=True)
 class _ThreatAssessment:
-    verdict: str
+    verdict: Literal["allow", "block"]
     score: float
     severity: str
     risk_families: list[str]
@@ -165,8 +165,6 @@ def _severity_weight(severity: str) -> float:
 
 _VERDICT_MAP: dict[str, DetectionVerdict] = {
     "block": DetectionVerdict.BLOCK,
-    "review": DetectionVerdict.REVIEW,
-    "monitor": DetectionVerdict.MONITOR,
     "allow": DetectionVerdict.ALLOW,
 }
 
@@ -212,7 +210,7 @@ def _assessment_to_detection_result(
         org_id=org_id,
         agent_id=agent_id,
         session_id=session_id,
-        verdict=_VERDICT_MAP.get(assessment.verdict, DetectionVerdict.ALLOW),
+        verdict=_VERDICT_MAP.get(assessment.verdict, DetectionVerdict.BLOCK),
         score=assessment.score,
         severity=_SEVERITY_ENUM_MAP.get(assessment.severity, ThreatSeverityLevel.LOW),
         ioc_matches=[_match_to_ioc_match(m) for m in assessment.matches],
@@ -382,14 +380,15 @@ class ThreatIntelService:
         keyword_score = sum(min(count * 0.12, 0.3) for count in keyword_hits.values())
         score = min(source_score + keyword_score, 1.0)
 
+        verdict = "block" if matches or keyword_hits or score > 0 else "allow"
         if score >= 0.85:
-            verdict, severity = "block", "critical"
+            severity = "critical"
         elif score >= 0.6:
-            verdict, severity = "review", "high"
+            severity = "high"
         elif score >= 0.3:
-            verdict, severity = "monitor", "medium"
+            severity = "medium"
         else:
-            verdict, severity = "allow", "low"
+            severity = "low"
 
         if not rationale:
             rationale.append("No known threat indicators or suspicious keyword clusters were detected.")

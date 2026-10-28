@@ -109,8 +109,8 @@ class IncidentStoreInMemory:
                 [
                     IncidentRecordInMemory(
                         incident_id=f"inc-{uuid4().hex[:12]}",
-                        title="Prompt injection attempt quarantined",
-                        summary="A prompt payload matched high-risk injection heuristics and was quarantined before execution.",
+                        title="Prompt injection attempt blocked",
+                        summary="A prompt payload matched high-risk injection heuristics and was blocked before execution.",
                         severity="high",
                         status="open",
                         source="scan",
@@ -119,7 +119,7 @@ class IncidentStoreInMemory:
                         request_id="req-seed-001",
                         trace_id="trace-seed-001",
                         asset_ref="prompt:user-input",
-                        verdict="quarantine",
+                        verdict="block",
                         tags=["prompt-injection", "quarantine", "scanner"],
                         metadata={"seeded": True},
                         category="security",
@@ -154,7 +154,7 @@ class IncidentStoreInMemory:
                         request_id="req-seed-003",
                         trace_id="trace-seed-003",
                         asset_ref="response:model-output",
-                        verdict="warn",
+                        verdict="block",
                         owner="sandbox-review",
                         tags=["sandbox", "review", "containment"],
                         metadata={"seeded": True},

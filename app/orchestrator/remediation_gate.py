@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.execution_plan import ExecutionPlan
 from app.orchestrator.replay_controller import ReplayReport
 from app.orchestrator.supervisor import SupervisorEscalation
@@ -14,15 +15,28 @@ GateStatus = str
 RemediationDecision = str
 
 
+def _is_valid_risk_score(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100
+
+
 @dataclass(frozen=True)
 class GateReviewRequest:
     request_id: str
     source: str
     target: str
-    verdict: str
+    verdict: Literal["allow", "block"]
     risk_score: int
     reason: str
     requested_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+    def __post_init__(self) -> None:
+        risk_score_is_valid = _is_valid_risk_score(self.risk_score)
+        risk_score = self.risk_score if risk_score_is_valid else RISK_THRESHOLD_BLOCK_MIN
+        verdict = "allow" if self.verdict == "allow" and risk_score_is_valid and risk_score <= RISK_THRESHOLD_ALLOW_MAX else "block"
+        if verdict == "block":
+            risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
+        object.__setattr__(self, "verdict", verdict)
+        object.__setattr__(self, "risk_score", risk_score)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -120,28 +134,12 @@ def build_requests_from_escalations(
 def _decision_for_request(
     request: GateReviewRequest,
 ) -> tuple[GateStatus, RemediationDecision, ReviewAction, str]:
-    if request.verdict == "block":
+    if request.verdict != "allow":
         return (
             "closed",
             "reject",
             "deny",
             "Blocked verdict requires denial and remediation before any further execution.",
-        )
-
-    if request.verdict == "quarantine":
-        return (
-            "contained",
-            "isolate",
-            "sandbox-review",
-            "Quarantined verdict requires isolated handling and explicit sandbox review.",
-        )
-
-    if request.verdict == "warn" or request.risk_score >= 70:
-        return (
-            "pending-review",
-            "review",
-            "manual-review",
-            "Elevated risk requires explicit human or higher-policy approval.",
         )
 
     return (
@@ -209,20 +207,20 @@ if __name__ == "__main__":
             reason="Health-check action.",
         ),
         GateReviewRequest(
-            request_id="req-warn",
+            request_id="req-block-review",
             source="demo",
             target="app/orchestrator/router.py",
-            verdict="warn",
+            verdict="block",
             risk_score=75,
-            reason="Elevated routing change.",
+            reason="Blocked routing change.",
         ),
         GateReviewRequest(
-            request_id="req-quarantine",
+            request_id="req-block-archive",
             source="demo",
             target="suspicious-bundle.zip",
-            verdict="quarantine",
+            verdict="block",
             risk_score=70,
-            reason="Archive requires sandbox review.",
+            reason="Archive was blocked.",
         ),
         GateReviewRequest(
             request_id="req-block",

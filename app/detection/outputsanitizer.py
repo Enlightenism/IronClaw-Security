@@ -4,7 +4,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import re
-from typing import Any
+from typing import Any, Literal
 
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
     (
@@ -87,7 +87,7 @@ COMMAND_PATTERNS: list[tuple[str, re.Pattern[str], str, float]] = [
             r"(upload|post|send).{0,80}(token|secret|credential|password)",
             re.IGNORECASE,
         ),
-        "review",
+        "block",
         0.24,
     ),
 ]
@@ -147,6 +147,9 @@ class SanitizerSignal:
     category: str
 
 
+SanitizationVerdict = Literal["allow", "block"]
+
+
 @dataclass(slots=True)
 class SanitizationAction:
     kind: str
@@ -160,7 +163,7 @@ class SanitizationAction:
 class OutputSanitizationResult:
     original_text: str
     sanitized_text: str
-    verdict: str
+    verdict: SanitizationVerdict
     severity: str
     score: float
     confidence: float
@@ -255,11 +258,7 @@ class OutputSanitizer:
         deduped_signals = self._dedupe_signals(signals)
         score = self._resolve_score(deduped_signals)
         severity = self._resolve_severity(score)
-        verdict = self._resolve_verdict(
-            deduped_signals,
-            score,
-            block_unsafe_commands=block_unsafe_commands,
-        )
+        verdict = self._resolve_verdict(deduped_signals)
         blocked = verdict == "block"
 
         if blocked:
@@ -438,26 +437,8 @@ class OutputSanitizer:
     def _resolve_verdict(
         self,
         signals: list[SanitizerSignal],
-        score: float,
-        *,
-        block_unsafe_commands: bool,
-    ) -> str:
-        if not signals:
-            return "allow"
-
-        names = {signal.name for signal in signals}
-        secret_hits = sum(1 for signal in signals if signal.category == "secret")
-        command_hits = sum(1 for signal in signals if signal.category == "command")
-
-        if "private_key_block" in names:
-            return "block"
-        if block_unsafe_commands and command_hits > 0 and score >= 0.48:
-            return "block"
-        if secret_hits >= 2 or score >= 0.48:
-            return "sanitize"
-        if score >= 0.18:
-            return "review"
-        return "allow"
+    ) -> SanitizationVerdict:
+        return "block" if signals else "allow"
 
     def _resolve_confidence(
         self,

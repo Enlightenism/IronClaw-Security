@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.dependencies.rate_limit import limit_guard_routes
 from app.models.action_guard import (
     ActionDecisionResponse,
@@ -37,24 +38,16 @@ _REASON_SOURCE_MAP = {
 }
 
 
-_VERDICT_RANK: dict[str, int] = {
-    "allow": 1,
-    "warn": 2,
-    "quarantine": 3,
-    "block": 4,
-}
-
-
 _DETECTION_VERDICT_MAP: dict[str, str] = {
     "allow": "allow",
-    "monitor": "warn",
-    "review": "quarantine",
+    "monitor": "block",
+    "review": "block",
     "block": "block",
 }
 
 
 def _max_verdict(a: str, b: str) -> str:
-    return a if _VERDICT_RANK.get(a, 0) >= _VERDICT_RANK.get(b, 0) else b
+    return "allow" if a == "allow" and b == "allow" else "block"
 
 
 def _normalize_reason_source(source: object) -> str:
@@ -160,7 +153,7 @@ def _run_threat_screen(
             caller_context=caller_context,
         )
 
-        mapped = _DETECTION_VERDICT_MAP.get(result.verdict.value, "allow")
+        mapped = _DETECTION_VERDICT_MAP.get(result.verdict.value, "block")
         escalated = _max_verdict(current_verdict, mapped)
 
         extra_reasons: list[dict[str, object]] = []
@@ -270,8 +263,10 @@ def guard_action(
     if threat_reasons:
         result["reasons"] = list(result["reasons"]) + threat_reasons
     result["verdict"] = escalated_verdict
-    result["should_halt"] = escalated_verdict in ("block", "quarantine")
-    result["should_warn"] = escalated_verdict in ("warn", "quarantine")
+    if escalated_verdict == "block":
+        result["risk_score"] = max(result["risk_score"], RISK_THRESHOLD_BLOCK_MIN)
+    result["should_halt"] = escalated_verdict == "block"
+    result["should_warn"] = False
 
     response = ActionGuardResponse(**result)
 
@@ -300,7 +295,7 @@ def guard_action(
             extra_key_seed=f"action:{payload.action_type}:{payload.client_id}:{escalated_verdict}",
         )
     ]
-    if escalated_verdict in ("block", "quarantine") and any("injection" in str(r.get("label", "")).lower() for r in result.get("reasons", []) if isinstance(r, dict)):
+    if escalated_verdict == "block" and any("injection" in str(r.get("label", "")).lower() for r in result.get("reasons", []) if isinstance(r, dict)):
         events.append(
             _build_prompt_injection_event(
                 payload,
@@ -342,8 +337,8 @@ def guard_action_policy(
     if threat_reasons:
         result["reasons"] = list(result["reasons"]) + threat_reasons
     result["verdict"] = escalated_verdict
-    result["should_halt"] = escalated_verdict in ("block", "quarantine")
-    result["should_warn"] = escalated_verdict in ("warn", "quarantine")
+    result["should_halt"] = escalated_verdict == "block"
+    result["should_warn"] = False
 
     response = ActionPolicyResponse(**result)
 
@@ -371,7 +366,7 @@ def guard_action_policy(
             extra_key_seed=f"policy:{payload.action_type}:{payload.client_id}:{escalated_verdict}",
         )
     ]
-    if escalated_verdict in ("block", "quarantine") and any("injection" in str(r.get("label", "")).lower() for r in result.get("reasons", []) if isinstance(r, dict)):
+    if escalated_verdict == "block" and any("injection" in str(r.get("label", "")).lower() for r in result.get("reasons", []) if isinstance(r, dict)):
         events.append(
             _build_prompt_injection_event(
                 payload,
@@ -415,8 +410,10 @@ def guard_action_decision(
     if threat_reasons:
         result["reasons"] = list(result["reasons"]) + threat_reasons
     result["verdict"] = escalated_verdict
-    result["should_halt"] = escalated_verdict in ("block", "quarantine")
-    result["should_warn"] = escalated_verdict in ("warn", "quarantine")
+    if escalated_verdict == "block":
+        result["risk_score"] = max(result["risk_score"], RISK_THRESHOLD_BLOCK_MIN)
+    result["should_halt"] = escalated_verdict == "block"
+    result["should_warn"] = False
 
     response = ActionDecisionResponse(**result)
 
@@ -455,7 +452,7 @@ def guard_action_decision(
             extra_key_seed=f"decision:{payload.action_type}:{payload.client_id}:{escalated_verdict}",
         )
     ]
-    if escalated_verdict in ("block", "quarantine") and any("injection" in str(r.get("label", "")).lower() for r in result.get("reasons", []) if isinstance(r, dict)):
+    if escalated_verdict == "block" and any("injection" in str(r.get("label", "")).lower() for r in result.get("reasons", []) if isinstance(r, dict)):
         events.append(
             _build_prompt_injection_event(
                 payload,

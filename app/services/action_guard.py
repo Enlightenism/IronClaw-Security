@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal, TypedDict
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.security.promptinjection import scanpromptinjectiondict
 from app.services.scanner import perform_scan
+
+logger = logging.getLogger(__name__)
 
 ActionType = Literal[
     "file_write",
@@ -13,7 +17,15 @@ ActionType = Literal[
     "git_operation",
     "tool_call",
 ]
-VerdictType = Literal["allow", "warn", "quarantine", "block"]
+VerdictType = Literal["allow", "block"]
+
+
+def normalize_action_type(action_type: str) -> str:
+    normalized = action_type.strip().lower().replace("-", "_")
+    compact = normalized.replace("_", "")
+    if compact in {"httpfetch", "browseropen", "networkrequest"}:
+        return "network_request"
+    return normalized
 
 
 class ActionGuardReason(TypedDict):
@@ -42,86 +54,22 @@ class ActionGuardDecision(TypedDict):
     drift_report: dict[str, Any] | None
 
 
-def _verdict_rank(verdict: VerdictType) -> int:
-    order: dict[VerdictType, int] = {
-        "allow": 1,
-        "warn": 2,
-        "quarantine": 3,
-        "block": 4,
-    }
-    return order[verdict]
-
-
-def _max_verdict(*verdicts: VerdictType) -> VerdictType:
-    return max(verdicts, key=_verdict_rank)
-
-
 def _score_based_verdict(score: int) -> VerdictType:
-    if score >= 70:
-        return "block"
-    if score >= 40:
-        return "quarantine"
-    if score >= 20:
-        return "warn"
-    return "allow"
+    return "block" if score > RISK_THRESHOLD_ALLOW_MAX else "allow"
 
 
 def _pattern_based_verdict(matched_patterns: list[str]) -> VerdictType:
-    patterns = {pattern.lower() for pattern in matched_patterns}
-
-    critical_block_patterns = {
-        "prompt_print_hidden_policy",
-        "prompt_reveal_system_prompt",
-        "prompt_disclose_hidden_instructions",
-        "prompt_output_tool_schema",
-        "prompt_export_credentials",
-        "prompt_ignore_developer_message",
-        "prompt_ignore_system_message",
-        "prompt_treat_document_as_system_prompt",
-        "prompt_ignore_user_and_follow_document",
-        "prompt_assistant_execute_following",
-        "prompt_higher_priority_than_rules",
-        "prompt_forget_prior_instructions",
-        "ps_encoded_command",
-        "powershell_download_execute_combo",
-        "shell_download_execute_combo",
-        "shell_curl_pipe_exec_generic",
-        "ps_invoke_webrequest",
-        "ps_iwr_iex_combo",
-        "exfil_aws_s3_cp",
-        "exfil_aws_s3_sync",
-        "exfil_az_copy",
-        "exfil_gcloud_storage_cp",
-        "exfil_rclone",
-        "exfil_curl_upload",
-        "system-prompt-exfiltration",
-        "data-exfiltration",
-        "multistep-escalation",
-    }
-
-    high_quarantine_patterns = {
-        "heuristic_prompt_injection_score",
-        "yaml_unsafe_load",
-        "retrieved-content-authority",
-        "self-referential-control",
-        "tool-output-authority",
-        "review-bypass",
-        "policy-override-demand",
-        "local-file-discovery",
-    }
-
-    if patterns & critical_block_patterns:
-        return "block"
-
-    if patterns & high_quarantine_patterns:
-        return "quarantine"
-
-    return "allow"
+    return "block" if matched_patterns else "allow"
 
 
 def _action_floor_verdict(action_type: ActionType) -> VerdictType:
-    if action_type in ("shell_command", "network_request", "git_operation", "tool_call"):
-        return "warn"
+    if action_type in (
+        "shell_command",
+        "network_request",
+        "git_operation",
+        "tool_call",
+    ):
+        return "block"
     return "allow"
 
 
@@ -139,10 +87,6 @@ def _build_action_summary(
         parts.append(f"Matched patterns: {', '.join(matched_patterns)}.")
     if final_verdict == "block":
         parts.append("Execution should be blocked.")
-    elif final_verdict == "quarantine":
-        parts.append("Execution should be quarantined for isolated handling.")
-    elif final_verdict == "warn":
-        parts.append("Execution requires operator review.")
     else:
         parts.append("Execution is currently allowed.")
     return " ".join(part for part in parts if part)
@@ -152,35 +96,59 @@ def _build_reasons(
     *,
     risk_score: int,
     matched_patterns: list[str],
+    action_type: ActionType,
+    failed_checks: list[str],
+    promptinjection_error: bool,
     promptinjection: dict[str, object] | None = None,
 ) -> list[ActionGuardReason]:
     reasons: list[ActionGuardReason] = []
 
-    if risk_score >= 70:
+    if risk_score >= RISK_THRESHOLD_BLOCK_MIN:
         reasons.append(
             {
                 "source": "scan",
-                "label": "High risk score",
-                "details": f"Risk score {risk_score} exceeds the high-risk threshold.",
+                "label": "Block-level risk score",
+                "details": (f"Risk score {risk_score} meets the configured block threshold of {RISK_THRESHOLD_BLOCK_MIN}."),
                 "score": min(risk_score / 100, 1.0),
             },
         )
-    elif risk_score >= 40:
+    elif risk_score > RISK_THRESHOLD_ALLOW_MAX:
         reasons.append(
             {
                 "source": "scan",
-                "label": "Medium risk score",
-                "details": f"Risk score {risk_score} exceeds the medium-risk threshold.",
+                "label": "Risk score exceeds allow threshold",
+                "details": (f"Risk score {risk_score} exceeds the configured allow maximum of {RISK_THRESHOLD_ALLOW_MAX}."),
                 "score": min(risk_score / 100, 1.0),
             },
         )
-    elif risk_score >= 20:
+
+    if _action_floor_verdict(action_type) == "block":
         reasons.append(
             {
                 "source": "scan",
-                "label": "Elevated risk score",
-                "details": f"Risk score {risk_score} exceeds the elevated-risk threshold.",
+                "label": "Sensitive action type",
+                "details": (f"Action type {action_type} is blocked by the action security policy."),
                 "score": min(risk_score / 100, 1.0),
+            },
+        )
+
+    if failed_checks:
+        reasons.append(
+            {
+                "source": "scan",
+                "label": "Scan failed",
+                "details": (f"Scan checks failed: {', '.join(failed_checks)}. The action was blocked."),
+                "score": None,
+            },
+        )
+
+    if promptinjection_error:
+        reasons.append(
+            {
+                "source": "promptinjection",
+                "label": "Prompt injection scan unavailable",
+                "details": "Prompt injection scanning failed; the action was blocked.",
+                "score": None,
             },
         )
 
@@ -306,7 +274,22 @@ def analyze_action(
     metadata: dict[str, Any] | None = None,
 ) -> ActionGuardDecision:
     combined_text = f"{action_type}\nTARGET:\n{target}\nCONTENT:\n{content}".strip()
-    result = perform_scan("text", combined_text)
+    scan_error = False
+    try:
+        result = perform_scan("text", combined_text)
+        if not isinstance(result, dict):
+            raise TypeError("Scanner returned an invalid result.")
+    except Exception:  # noqa: BLE001
+        logger.exception("action_guard: scan unavailable; blocking action")
+        result = {
+            "verdict": "block",
+            "risk_score": 0,
+            "matched_patterns": [],
+            "failed_checks": ["scan_unavailable"],
+            "summary": "Scan failed; request blocked.",
+            "scan_id": None,
+        }
+        scan_error = True
 
     merged_metadata: dict[str, Any] = {
         "source": "action_guard",
@@ -316,43 +299,104 @@ def analyze_action(
     if metadata:
         merged_metadata.update(metadata)
 
-    promptinjection = scanpromptinjectiondict(
-        actiontype=action_type,
-        target=target,
-        content=content,
-        metadata=merged_metadata,
-    )
+    promptinjection_error = False
+    try:
+        promptinjection = scanpromptinjectiondict(
+            actiontype=action_type,
+            target=target,
+            content=content,
+            metadata=merged_metadata,
+        )
+        if not isinstance(promptinjection, dict):
+            raise TypeError("Prompt injection scanner returned an invalid result.")
+        prompt_risk_delta = int(promptinjection.get("riskdelta", 0))
+        prompt_patterns = promptinjection.get("matchedpatterns", [])
+        if not isinstance(prompt_patterns, list) or any(not isinstance(pattern, str) for pattern in prompt_patterns):
+            raise TypeError("Prompt injection scanner returned invalid patterns.")
+        prompt_categories = promptinjection.get("categories", [])
+        if not isinstance(prompt_categories, list) or any(not isinstance(category, str) for category in prompt_categories):
+            raise TypeError("Prompt injection scanner returned invalid categories.")
+        if not isinstance(promptinjection.get("reasons", []), list):
+            raise TypeError("Prompt injection scanner returned invalid reasons.")
+    except Exception:  # noqa: BLE001
+        logger.exception("action_guard: prompt injection scan failed; blocking action")
+        promptinjection = {}
+        prompt_risk_delta = 0
+        prompt_patterns = []
+        prompt_categories = []
+        promptinjection_error = True
 
-    scan_verdict = result["verdict"]
-    base_risk_score = int(result["risk_score"])
-    prompt_risk_delta = int(promptinjection.get("riskdelta", 0))
-    risk_score = base_risk_score + prompt_risk_delta
+    raw_verdict = result.get("verdict")
+    invalid_scan_verdict = raw_verdict not in ("allow", "block")
+    if invalid_scan_verdict:
+        logger.error("action_guard: invalid scan verdict; blocking action")
+        scan_verdict = "block"
+        scan_error = True
+    else:
+        scan_verdict = raw_verdict
 
-    matched_patterns = list(result["matched_patterns"])
-    for pattern in promptinjection.get("matchedpatterns", []):
-        if isinstance(pattern, str) and pattern not in matched_patterns:
+    raw_failed_checks = result.get("failed_checks", [])
+    if not isinstance(raw_failed_checks, list) or any(not isinstance(check, str) for check in raw_failed_checks):
+        logger.error("action_guard: invalid scan failure details; blocking action")
+        failed_checks = ["invalid_failed_checks"]
+        scan_error = True
+    else:
+        failed_checks = list(raw_failed_checks)
+        scan_error = scan_error or bool(failed_checks)
+    if invalid_scan_verdict and "invalid_scan_verdict" not in failed_checks:
+        failed_checks.append("invalid_scan_verdict")
+
+    raw_risk_score = result.get("risk_score")
+    try:
+        if isinstance(raw_risk_score, bool):
+            raise TypeError("Scanner returned a boolean risk score.")
+        base_risk_score = int(raw_risk_score)
+    except (TypeError, ValueError, OverflowError):
+        logger.exception("action_guard: invalid scan risk score; blocking action")
+        base_risk_score = 0
+        failed_checks.append("invalid_risk_score")
+        scan_error = True
+
+    raw_matched_patterns = result.get("matched_patterns", [])
+    if not isinstance(raw_matched_patterns, list) or any(not isinstance(pattern, str) for pattern in raw_matched_patterns):
+        logger.error("action_guard: invalid scan patterns; blocking action")
+        matched_patterns = []
+        failed_checks.append("invalid_matched_patterns")
+        scan_error = True
+    else:
+        matched_patterns = list(raw_matched_patterns)
+
+    for pattern in prompt_patterns:
+        if pattern not in matched_patterns:
             matched_patterns.append(pattern)
 
-    categories: list[str] = list(promptinjection.get("categories", []))
+    categories = list(prompt_categories)
+    risk_score = min(max(base_risk_score + prompt_risk_delta, 0), 100)
 
     score_verdict = _score_based_verdict(risk_score)
     pattern_verdict = _pattern_based_verdict(matched_patterns)
-
-    floor_verdict: VerdictType = "allow"
-    if matched_patterns:
-        floor_verdict = _action_floor_verdict(action_type)
-
-    final_verdict = _max_verdict(
-        scan_verdict,  # type: ignore[arg-type]
-        score_verdict,
-        pattern_verdict,
-        floor_verdict,
+    action_floor_verdict = _action_floor_verdict(action_type)
+    final_verdict: VerdictType = (
+        "block"
+        if (
+            scan_error
+            or scan_verdict != "allow"
+            or bool(matched_patterns)
+            or bool(categories)
+            or prompt_risk_delta > 0
+            or bool(promptinjection.get("flagged"))
+            or bool(promptinjection.get("shouldreview"))
+            or bool(promptinjection.get("shouldquarantine"))
+            or bool(promptinjection.get("reasons"))
+            or promptinjection_error
+            or score_verdict == "block"
+            or pattern_verdict == "block"
+            or action_floor_verdict == "block"
+        )
+        else "allow"
     )
-
-    if promptinjection.get("shouldquarantine") is True:
-        final_verdict = _max_verdict(final_verdict, "quarantine")
-    elif promptinjection.get("shouldreview") is True:
-        final_verdict = _max_verdict(final_verdict, "warn")
+    if final_verdict == "block":
+        risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
 
     drift_report: dict[str, Any] | None = None
     if agent_id:
@@ -366,13 +410,14 @@ def analyze_action(
             matched_patterns=matched_patterns,
         )
         if drift_report and drift_report.get("should_suspend"):
-            final_verdict = _max_verdict(final_verdict, "block")
+            final_verdict = "block"
+            risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
 
-    should_halt = final_verdict in ("block", "quarantine")
-    should_warn = final_verdict in ("warn", "quarantine")
+    should_halt = final_verdict == "block"
+    should_warn = False
 
     summary = _build_action_summary(
-        base_summary=result["summary"],
+        base_summary=("Scan failed; request blocked." if failed_checks or scan_error else str(result.get("summary") or "Scan complete.")),
         action_type=action_type,
         final_verdict=final_verdict,
         matched_patterns=matched_patterns,
@@ -382,10 +427,14 @@ def analyze_action(
     reasons = _build_reasons(
         risk_score=risk_score,
         matched_patterns=matched_patterns,
+        action_type=action_type,
+        failed_checks=failed_checks,
+        promptinjection_error=promptinjection_error,
         promptinjection=promptinjection,
     )
 
-    scan_id = result.get("scan_id")
+    raw_scan_id = result.get("scan_id")
+    scan_id = raw_scan_id if isinstance(raw_scan_id, str) else None
 
     _fire_verdict_event(
         tenant_id=tenant_id,

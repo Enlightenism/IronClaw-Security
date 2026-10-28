@@ -17,6 +17,7 @@ from app.schemas.telemetry import (
     TelemetryQueryParams,
     TelemetryResponse,
     TelemetrySeverity,
+    TelemetryStoredVerdict,
     TelemetryVerdict,
 )
 
@@ -193,16 +194,19 @@ def test_telemetry_event_type_invalid():
 def test_telemetry_verdict_values():
     assert set(TelemetryVerdict) == {
         TelemetryVerdict.ALLOW,
-        TelemetryVerdict.WARN,
-        TelemetryVerdict.QUARANTINE,
         TelemetryVerdict.BLOCK,
-        TelemetryVerdict.UNKNOWN,
     }
 
 
-@pytest.mark.parametrize("value", ["allow", "warn", "quarantine", "block", "unknown"])
+@pytest.mark.parametrize("value", ["allow", "block"])
 def test_telemetry_verdict_from_string(value):
     assert TelemetryVerdict(value).value == value
+
+
+@pytest.mark.parametrize("value", ["warn", "quarantine", "unknown"])
+def test_telemetry_verdict_rejects_nonbinary_values(value):
+    with pytest.raises(ValueError):
+        TelemetryVerdict(value)
 
 
 def test_telemetry_verdict_invalid():
@@ -326,6 +330,16 @@ def test_telemetry_event_create_full_construction():
     assert ev.dimensions["model"] == "claude-3"
 
 
+@pytest.mark.parametrize("verdict", ["warn", "quarantine", "unknown"])
+def test_telemetry_event_create_rejects_nonbinary_verdict(verdict):
+    with pytest.raises(ValidationError):
+        TelemetryEventCreate(
+            event_type=TelemetryEventType.PROMPT_SCANNED,
+            source="ironclaw-api",
+            verdict=verdict,
+        )
+
+
 @pytest.mark.parametrize("event_type", list(TelemetryEventType))
 def test_telemetry_event_create_all_event_types_accepted(event_type):
     ev = TelemetryEventCreate(event_type=event_type, source="test")
@@ -382,7 +396,7 @@ def test_telemetry_batch_preserves_event_integrity():
     ev1 = TelemetryEventCreate(
         event_type=TelemetryEventType.ACTION_BLOCKED,
         source="executor",
-        verdict=TelemetryVerdict.BLOCK,
+        verdict=TelemetryStoredVerdict.BLOCK,
     )
     ev2 = TelemetryEventCreate(
         event_type=TelemetryEventType.POLICY_VIOLATION,
@@ -466,7 +480,7 @@ def test_telemetry_query_params_full_filter():
         offset=10,
     )
     assert q.event_type == TelemetryEventType.PROMPT_INJECTION_DETECTED
-    assert q.verdict == TelemetryVerdict.BLOCK
+    assert q.verdict == TelemetryStoredVerdict.BLOCK
     assert q.severity == TelemetrySeverity.CRITICAL
     assert q.since == since
     assert q.until == until
@@ -474,7 +488,7 @@ def test_telemetry_query_params_full_filter():
     assert q.offset == 10
 
 
-@pytest.mark.parametrize("verdict", list(TelemetryVerdict))
+@pytest.mark.parametrize("verdict", list(TelemetryStoredVerdict))
 def test_telemetry_query_params_all_verdicts(verdict):
     q = TelemetryQueryParams(verdict=verdict)
     assert q.verdict == verdict
@@ -527,6 +541,15 @@ def test_telemetry_event_missing_event_type_rejected():
         TelemetryEvent(timestamp="2026-06-16T10:00:00Z")
 
 
+@pytest.mark.parametrize(
+    "verdict",
+    [TelemetryStoredVerdict.WARN, TelemetryStoredVerdict.QUARANTINE, TelemetryStoredVerdict.UNKNOWN],
+)
+def test_telemetry_event_read_preserves_legacy_verdicts(verdict):
+    ev = TelemetryEvent(**{**_BASE_EVENT, "verdict": verdict})
+    assert ev.verdict == verdict
+
+
 def test_telemetry_event_full_round_trip():
     ev = TelemetryEvent(
         id="evt-001",
@@ -536,7 +559,7 @@ def test_telemetry_event_full_round_trip():
         org_id="org-abc",
         agent_id="agent-001",
         session_id="sess-xyz",
-        verdict=TelemetryVerdict.BLOCK,
+        verdict=TelemetryStoredVerdict.BLOCK,
         severity=TelemetrySeverity.CRITICAL,
         tags=["injection"],
         payload={"score": 0.99},
@@ -546,7 +569,7 @@ def test_telemetry_event_full_round_trip():
     dumped = ev.model_dump()
     restored = TelemetryEvent(**dumped)
     assert restored.id == "evt-001"
-    assert restored.verdict == TelemetryVerdict.BLOCK
+    assert restored.verdict == TelemetryStoredVerdict.BLOCK
     assert restored.severity == TelemetrySeverity.CRITICAL
     assert restored.tags == ["injection"]
     assert restored.payload["score"] == 0.99

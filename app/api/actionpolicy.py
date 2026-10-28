@@ -6,13 +6,14 @@ from typing import Any, Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.security.promptinjection import scanpromptinjectiondict
 
 router = APIRouter(prefix="/policy", tags=["action-policy"])
 
 
-PolicyVerdict = Literal["allow", "warn", "quarantine", "block"]
-PolicyAction = Literal["allow", "review", "quarantine", "deny"]
+PolicyVerdict = Literal["allow", "block"]
+PolicyAction = Literal["allow", "block"]
 
 
 class ActionPolicyRequest(BaseModel):
@@ -56,7 +57,7 @@ class ActionPolicyResponse(BaseModel):
     reasons: list[PolicyReasonView] = Field(default_factory=list)
     promptinjection: dict[str, Any] = Field(default_factory=dict)
     # Local guard enrichment passthrough — populated by upstream enrichment callers
-    guard_verdict: str | None = Field(None, description="Verdict returned by local guard analysis layer.")
+    guard_verdict: PolicyVerdict | None = Field(None, description="Verdict returned by local guard analysis layer.")
     guard_reasoning: str | None = Field(None, description="Reasoning text from local guard analysis.")
     guard_confidence: float | None = Field(None, description="Confidence score from local guard analysis.")
     guard_model: str | None = Field(None, description="Local guard model identifier used for analysis.")
@@ -107,31 +108,25 @@ def evaluateactionpolicy(
     adjustedriskscore = max(0, min(100, int(riskscore) + int(promptscan.get("riskdelta", 0))))
     categories = set(promptscan.get("categories", []))
 
-    shouldquarantine = bool(promptscan.get("shouldquarantine"))
-    shouldblock = adjustedriskscore >= 85 and not shouldquarantine
-    shouldreview = bool(promptscan.get("shouldreview")) or adjustedriskscore >= 50
+    promptquarantinesignal = bool(promptscan.get("shouldquarantine"))
+    raw_guard_verdict = str(guard_verdict).strip().lower() if guard_verdict is not None else None
+    normalized_guard_verdict: PolicyVerdict | None = None
+    if raw_guard_verdict is not None:
+        normalized_guard_verdict = "allow" if raw_guard_verdict == "allow" else "block"
 
-    # Escalate verdict if local guard signals a stronger enforcement action
-    if guard_verdict in ("quarantine", "block") and not shouldquarantine:
-        shouldquarantine = guard_verdict == "quarantine"
-        shouldblock = guard_verdict == "block" and not shouldquarantine
-
-    if shouldquarantine:
-        verdict: PolicyVerdict = "quarantine"
-        action: PolicyAction = "quarantine"
-        summary = "Policy quarantined the action because prompt injection indicators crossed containment thresholds."
-    elif shouldblock:
-        verdict = "block"
-        action = "deny"
-        summary = "Policy blocked the action because adjusted runtime risk exceeded the execution threshold."
-    elif shouldreview:
-        verdict = "warn"
-        action = "review"
-        summary = "Policy routed the action for review because prompt injection or indirect instruction indicators were detected."
+    shouldreview = bool(promptscan.get("shouldreview")) or adjustedriskscore >= 50 or raw_guard_verdict in {"warn", "review"}
+    shouldblock = bool(promptscan.get("flagged")) or promptquarantinesignal or shouldreview or normalized_guard_verdict == "block"
+    if shouldblock:
+        adjustedriskscore = max(adjustedriskscore, RISK_THRESHOLD_BLOCK_MIN)
+        verdict: PolicyVerdict = "block"
+        action: PolicyAction = "block"
+        summary = "Policy blocked the action and routed it for review because suspicious runtime indicators were detected." if shouldreview else "Policy blocked the action because suspicious runtime indicators were detected."
     else:
         verdict = "allow"
         action = "allow"
-        summary = "Policy allowed the action because no blocking or review threshold was crossed."
+        summary = "Policy allowed the action because no suspicious indicators were detected."
+
+    promptscan["shouldquarantine"] = False
 
     reasons: list[dict[str, Any]] = [
         _build_policy_reason(
@@ -182,13 +177,13 @@ def evaluateactionpolicy(
         "promptinjectionflagged": bool(promptscan.get("flagged")),
         "indirectpromptinjectionflagged": "indirect_prompt_injection" in categories,
         "shouldreview": shouldreview,
-        "shouldquarantine": shouldquarantine,
+        "shouldquarantine": False,
         "shouldblock": shouldblock,
         "filepath": effective_filepath,
         "summary": summary,
         "reasons": reasons,
         "promptinjection": promptscan,
-        "guard_verdict": guard_verdict,
+        "guard_verdict": normalized_guard_verdict,
         "guard_reasoning": guard_reasoning,
         "guard_confidence": guard_confidence,
         "guard_model": guard_model,

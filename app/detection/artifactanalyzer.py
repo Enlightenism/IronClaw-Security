@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import hashlib
-from typing import Any
+from typing import Any, Literal
 
 from app.services.detonationservice import DetonationService, build_detonation_service
 from app.services.malwareservice import MalwareService, build_malware_service
@@ -17,18 +17,17 @@ SEVERITY_RANK = {
 }
 
 
-VERDICT_RANK = {
-    "allow": 1,
-    "monitor": 2,
-    "review": 3,
-    "block": 4,
-}
+ArtifactVerdict = Literal["allow", "block"]
+
+
+def _normalize_verdict(value: Any) -> ArtifactVerdict:
+    return "allow" if str(value).strip().lower() == "allow" else "block"
 
 
 @dataclass(slots=True)
 class ArtifactAnalysisComponent:
     name: str
-    verdict: str
+    verdict: ArtifactVerdict
     severity: str
     score: float
     confidence: float
@@ -40,7 +39,7 @@ class ArtifactAnalysisResult:
     artifact_id: str
     file_name: str | None
     sha256: str
-    verdict: str
+    verdict: ArtifactVerdict
     severity: str
     score: float
     confidence: float
@@ -196,7 +195,7 @@ class ArtifactAnalyzer:
         return [
             ArtifactAnalysisComponent(
                 name="threatintel",
-                verdict=str(getattr(threat_assessment, "verdict", "allow")),
+                verdict=_normalize_verdict(getattr(threat_assessment, "verdict", "allow")),
                 severity=str(getattr(threat_assessment, "severity", "low")),
                 score=round(float(getattr(threat_assessment, "score", 0.0)), 4),
                 confidence=round(min(max(float(getattr(threat_assessment, "score", 0.0)) + 0.2, 0.0), 1.0), 4),
@@ -204,7 +203,7 @@ class ArtifactAnalyzer:
             ),
             ArtifactAnalysisComponent(
                 name="malware",
-                verdict=str(getattr(malware_assessment, "verdict", "allow")),
+                verdict=_normalize_verdict(getattr(malware_assessment, "verdict", "allow")),
                 severity=str(getattr(malware_assessment, "severity", "low")),
                 score=round(float(getattr(malware_assessment, "score", 0.0)), 4),
                 confidence=round(float(getattr(malware_assessment, "confidence", 0.0)), 4),
@@ -212,7 +211,7 @@ class ArtifactAnalyzer:
             ),
             ArtifactAnalysisComponent(
                 name="detonation",
-                verdict=str(getattr(detonation_assessment, "verdict", "allow")),
+                verdict=_normalize_verdict(getattr(detonation_assessment, "verdict", "allow")),
                 severity=str(getattr(detonation_assessment, "severity", "low")),
                 score=round(float(getattr(detonation_assessment, "score", 0.0)), 4),
                 confidence=round(float(getattr(detonation_assessment, "confidence", 0.0)), 4),
@@ -236,15 +235,13 @@ class ArtifactAnalyzer:
 
         return round(min(weighted, 1.0), 4)
 
-    def _resolve_verdict(self, components: list[ArtifactAnalysisComponent], score: float) -> str:
-        strongest = max((VERDICT_RANK.get(component.verdict, 1) for component in components), default=1)
-
-        if strongest >= VERDICT_RANK["block"]:
+    def _resolve_verdict(
+        self,
+        components: list[ArtifactAnalysisComponent],
+        score: float,
+    ) -> ArtifactVerdict:
+        if score >= 0.32 or any(component.verdict != "allow" for component in components):
             return "block"
-        if score >= 0.70 or strongest >= VERDICT_RANK["review"]:
-            return "review"
-        if score >= 0.32 or strongest >= VERDICT_RANK["monitor"]:
-            return "monitor"
         return "allow"
 
     def _resolve_severity(self, components: list[ArtifactAnalysisComponent], score: float) -> str:

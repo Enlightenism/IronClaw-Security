@@ -77,7 +77,7 @@ def test_tool_call_guard_allows_safe_read_only_tool() -> None:
     assert len(policy_engine.calls) == 1
 
 
-def test_tool_call_guard_reviews_shell_execution() -> None:
+def test_tool_call_guard_blocks_shell_execution() -> None:
     policy_engine = _PolicyEngineStub(
         _Decision(
             verdict="review",
@@ -97,9 +97,10 @@ def test_tool_call_guard_reviews_shell_execution() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict == "review"
-    assert result.allowed is True
+    assert result.verdict == "block"
+    assert result.allowed is False
     assert result.should_review is True
+    assert result.should_block is True
 
 
 def test_tool_call_guard_blocks_dangerous_tool_call() -> None:
@@ -127,7 +128,7 @@ def test_tool_call_guard_blocks_dangerous_tool_call() -> None:
     assert result.should_block is True
 
 
-def test_tool_call_guard_quarantines_exfiltration_attempt() -> None:
+def test_tool_call_guard_blocks_exfiltration_attempt() -> None:
     policy_engine = _PolicyEngineStub(
         _Decision(
             verdict="quarantine",
@@ -149,9 +150,9 @@ def test_tool_call_guard_quarantines_exfiltration_attempt() -> None:
         metadata={"contains_secrets": True},
     )
 
-    assert result.verdict == "quarantine"
+    assert result.verdict == "block"
     assert result.allowed is False
-    assert result.should_quarantine is True
+    assert result.should_quarantine is False
     assert result.should_block is True
 
 
@@ -219,7 +220,9 @@ def test_tool_call_guard_handles_missing_tool_name() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 
@@ -243,7 +246,9 @@ def test_tool_call_guard_handles_blank_tool_name() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 
@@ -267,7 +272,9 @@ def test_tool_call_guard_handles_missing_arguments() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block", "allow"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 
@@ -291,7 +298,9 @@ def test_tool_call_guard_handles_missing_target() -> None:
         environment_scope="sandbox",
     )
 
-    assert result.verdict in {"review", "block", "allow"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 
@@ -315,7 +324,9 @@ def test_tool_call_guard_handles_missing_environment_scope() -> None:
         environment_scope=None,
     )
 
-    assert result.verdict in {"review", "block", "allow"}
+    assert result.verdict == "block"
+    assert result.allowed is False
+    assert result.should_block is True
     assert result.reasons
 
 

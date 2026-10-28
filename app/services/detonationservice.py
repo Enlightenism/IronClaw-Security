@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import hashlib
+import math
 import random
 import re
-from typing import Any
+from typing import Any, Literal
 
 NETWORK_PATTERNS = {
     "known_c2_port": (re.compile(r"\b(?:4444|1337|8081|9001)\b"), 0.18),
@@ -81,7 +82,7 @@ class DetonationArtifact:
 
 @dataclass(slots=True)
 class DetonationAssessment:
-    verdict: str
+    verdict: Literal["allow", "block"]
     severity: str
     score: float
     confidence: float
@@ -164,6 +165,8 @@ class DetonationService:
         score = min(round(score, 4), 1.0)
 
         verdict, severity = self._resolve_verdict(score)
+        if signals:
+            verdict = "block"
         confidence = self._derive_confidence(signals, normalized, payload_len=len(raw_bytes))
         artifacts = self._derive_artifacts(signals, file_name=file_name)
         behavior_tags = sorted({signal.name for signal in signals})
@@ -214,13 +217,17 @@ class DetonationService:
                 bonus += value
         return bonus
 
-    def _resolve_verdict(self, score: float) -> tuple[str, str]:
+    def _resolve_verdict(self, score: float) -> tuple[Literal["allow", "block"], str]:
+        if not math.isfinite(score) or score < 0:
+            return "block", "high"
         if score >= 0.82:
             return "block", "critical"
         if score >= 0.56:
-            return "review", "high"
+            return "block", "high"
         if score >= 0.28:
-            return "monitor", "medium"
+            return "block", "medium"
+        if score > 0:
+            return "block", "low"
         return "allow", "low"
 
     def _derive_confidence(self, signals: list[DetonationSignal], text: str, payload_len: int) -> float:

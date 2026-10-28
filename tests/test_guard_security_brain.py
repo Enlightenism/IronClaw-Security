@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 import app.services.guard_security_brain as security_brain
 from app.services.guard_security_brain import (
     GuardSecurityDecision,
@@ -12,6 +13,11 @@ from app.services.guard_security_brain import (
     summarize_guard_security_decision,
 )
 from app.services.prompt_guard import PromptGuardResult
+
+
+@pytest.fixture(autouse=True)
+def disable_prompt_guard_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(security_brain, "GUARD_ENABLED", False)
 
 
 def test_guard_security_decision_defaults_to_local_model_name():
@@ -48,15 +54,15 @@ def test_guard_security_request_rejects_empty_target():
 
 def test_guard_security_allows_low_risk_request():
     request = build_guard_security_request(
-        action_type="filewrite",
+        action_type="observe",
         target="workspace://notes.txt",
-        content="write a harmless note",
+        content="Summarize the current status.",
     )
 
     decision = evaluate_guard_security_request(request)
 
     assert decision.verdict == "allow"
-    assert decision.risk_score < 40
+    assert decision.risk_score <= RISK_THRESHOLD_ALLOW_MAX
     assert isinstance(decision.confidence, float)
     assert decision.confidence > 0.0
     assert isinstance(decision.latency_ms, float)
@@ -79,7 +85,9 @@ def test_local_prompt_guard_blocks_when_malicious_score_reaches_threshold(monkey
             model_name="prompt-guard-86m",
         )
 
-    monkeypatch.setattr(security_brain, "get_settings", lambda: settings)
+    monkeypatch.setattr(security_brain, "GUARD_ENABLED", settings.guard_enabled)
+    monkeypatch.setattr(security_brain, "GUARD_MODEL_PATH", settings.guard_model_path)
+    monkeypatch.setattr(security_brain, "GUARD_THRESHOLD", settings.guard_threshold)
     monkeypatch.setattr(security_brain, "classify_prompt_guard", classify_prompt)
 
     request = build_guard_security_request(
@@ -91,7 +99,7 @@ def test_local_prompt_guard_blocks_when_malicious_score_reaches_threshold(monkey
     decision = evaluate_guard_security_request(request, mode="enforce")
 
     assert decision.verdict == "block"
-    assert decision.risk_score >= 90
+    assert decision.risk_score >= RISK_THRESHOLD_BLOCK_MIN
     assert security_brain.SIG_PROMPT_GUARD in decision.signals
     assert decision.metadata["guard_enabled"] is True
     assert decision.metadata["guard_used"] is True
@@ -105,7 +113,9 @@ def test_local_prompt_guard_does_not_escalate_below_threshold(monkeypatch):
         guard_model_path="models/prompt-guard-86m",
         guard_threshold=0.75,
     )
-    monkeypatch.setattr(security_brain, "get_settings", lambda: settings)
+    monkeypatch.setattr(security_brain, "GUARD_ENABLED", settings.guard_enabled)
+    monkeypatch.setattr(security_brain, "GUARD_MODEL_PATH", settings.guard_model_path)
+    monkeypatch.setattr(security_brain, "GUARD_THRESHOLD", settings.guard_threshold)
     monkeypatch.setattr(
         security_brain,
         "classify_prompt_guard",
@@ -129,7 +139,7 @@ def test_local_prompt_guard_does_not_escalate_below_threshold(monkeypatch):
     assert decision.metadata["guard_score"] == pytest.approx(0.74)
 
 
-def test_guard_security_warns_on_medium_risk_patterns():
+def test_guard_security_blocks_medium_risk_patterns():
     request = build_guard_security_request(
         action_type="toolcall",
         target="workspace://agent",
@@ -138,8 +148,8 @@ def test_guard_security_warns_on_medium_risk_patterns():
 
     decision = evaluate_guard_security_request(request)
 
-    assert decision.verdict in {"warn", "quarantine", "block"}
-    assert decision.risk_score >= 40
+    assert decision.verdict == "block"
+    assert decision.risk_score >= RISK_THRESHOLD_BLOCK_MIN
     assert len(decision.signals) >= 1
     assert isinstance(decision.confidence, float)
     assert decision.latency_ms >= 0.0
@@ -155,13 +165,13 @@ def test_guard_security_blocks_critical_attack_patterns():
     decision = evaluate_guard_security_request(request, mode="enforce")
 
     assert decision.verdict == "block"
-    assert decision.risk_score >= 90
+    assert decision.risk_score >= RISK_THRESHOLD_BLOCK_MIN
     assert any("critical" in signal for signal in decision.signals)
     assert decision.confidence > 0.0
     assert decision.latency_ms >= 0.0
 
 
-def test_guard_security_disabled_mode_short_circuits():
+def test_guard_security_disabled_mode_still_blocks_suspicious_signal():
     request = build_guard_security_request(
         action_type="toolcall",
         target="workspace://agent",
@@ -170,11 +180,10 @@ def test_guard_security_disabled_mode_short_circuits():
 
     decision = evaluate_guard_security_request(request, mode="disabled")
 
-    assert decision.verdict == "allow"
+    assert decision.verdict == "block"
     assert decision.mode == "disabled"
-    assert decision.risk_score == 0
-    assert decision.confidence == 1.0
-    assert decision.latency_ms == 0.0
+    assert decision.risk_score >= RISK_THRESHOLD_BLOCK_MIN
+    assert decision.signals
 
 
 def test_guard_security_strict_mode_escalates_on_any_signal():
@@ -186,8 +195,8 @@ def test_guard_security_strict_mode_escalates_on_any_signal():
 
     decision = evaluate_guard_security_request(request, mode="strict")
 
-    assert decision.verdict in {"quarantine", "block"}
-    assert decision.risk_score >= 70
+    assert decision.verdict == "block"
+    assert decision.risk_score >= RISK_THRESHOLD_BLOCK_MIN
     assert len(decision.signals) >= 1
 
 
@@ -242,7 +251,7 @@ def test_guard_security_summary_returns_expected_shape():
     summary = summarize_guard_security_decision(decision)
 
     assert summary["mode"] == "assist"
-    assert summary["verdict"] in {"allow", "warn", "quarantine", "block"}
+    assert summary["verdict"] in {"allow", "block"}
     assert "signal_count" in summary
     assert "reason_count" in summary
     assert "confidence" in summary

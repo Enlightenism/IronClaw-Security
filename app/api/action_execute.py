@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.dependencies.action_execute import get_action_execute_pipeline
 from app.dependencies.rate_limit import limit_guard_routes
 from app.facade import guardandexecuteaction
 from app.models.action_execute import ExecuteRequest, ExecuteResponse
 from app.orchestrator.secure_runtime_pipeline import SecureRuntimePipeline
-from app.services.action_guard import ActionGuardDecision, analyze_action
+from app.services.action_guard import (
+    ActionGuardDecision,
+    analyze_action,
+    normalize_action_type,
+)
 from app.services.behavioral_baseline import get_behavioral_baseline_service
 from app.services.telemetry import append_telemetry_event
 
@@ -90,7 +95,7 @@ def _run_detection(payload: ExecuteRequest) -> ActionGuardDecision | None:
         return None
     try:
         result: ActionGuardDecision = analyze_action(
-            action_type=payload.action_type,
+            action_type=normalize_action_type(payload.action_type),
             target=payload.target,
             content=payload.content or "",
             client_id=payload.client_id,
@@ -114,9 +119,18 @@ def guarded_execute(
     append_telemetry_event("execute_requested", {**meta, "action_type": payload.action_type})
 
     detection = _run_detection(payload)
+    execution_risk_score = payload.risk_score
     if detection is not None:
         verdict = str(detection.get("verdict", "allow")).lower()
-        risk_score = int(detection.get("risk_score", 0) or 0)
+        raw_risk_score = detection.get("risk_score")
+        if verdict not in {"allow", "block"} or isinstance(raw_risk_score, bool) or not isinstance(raw_risk_score, int) or not 0 <= raw_risk_score <= 100:
+            execution_risk_score = max(execution_risk_score, RISK_THRESHOLD_BLOCK_MIN)
+        else:
+            execution_risk_score = max(execution_risk_score, raw_risk_score)
+            if verdict == "block":
+                execution_risk_score = max(execution_risk_score, RISK_THRESHOLD_BLOCK_MIN)
+
+        risk_score = execution_risk_score
         matched_patterns = [str(r.get("label", "")) for r in detection.get("reasons", []) if isinstance(r, dict) and r.get("label")]
 
         _record_baseline_observation(payload, risk_score=risk_score, matched_patterns=matched_patterns)
@@ -131,8 +145,11 @@ def guarded_execute(
                 "reason_count": len(detection.get("reasons", [])),
             },
         )
+    else:
+        execution_risk_score = max(execution_risk_score, RISK_THRESHOLD_BLOCK_MIN)
 
-    response: ExecuteResponse = guardandexecuteaction(payload, pipeline)
+    execution_payload = payload.model_copy(update={"risk_score": execution_risk_score})
+    response: ExecuteResponse = guardandexecuteaction(execution_payload, pipeline)
 
     append_telemetry_event(
         "execute_completed",

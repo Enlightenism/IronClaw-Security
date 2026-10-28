@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.services.guard_security_brain import GuardMode
 from app.ui.guard.brain_status import build_guard_brain_status_view
 from app.ui.guard.control_panel import CONTROL_FLAGS
@@ -182,15 +183,12 @@ def _compute_posture_widget(mode: GuardMode) -> OverviewPostureWidget:
     s = brain_view.status
 
     total = max(s.total_evaluations, 1)
-    high_risk = s.blocked_count + s.quarantined_count
-    warns = s.warned_count
+    high_risk = s.blocked_count
 
     high_risk_ratio = high_risk / total
-    warn_ratio = warns / total
 
     base = 100.0
     base -= high_risk_ratio * 55.0
-    base -= warn_ratio * 25.0
 
     if mode == "disabled":
         base -= 35.0
@@ -201,16 +199,16 @@ def _compute_posture_widget(mode: GuardMode) -> OverviewPostureWidget:
 
     score = max(0, min(100, int(round(base))))
 
-    description = f"Protecting live AI prompts in {mode} mode with {total} recent decisions; {high_risk} high-risk actions and {warns} warnings observed."
+    description = f"Protecting live AI prompts in {mode} mode with {total} recent decisions; {high_risk} blocked actions and {s.allowed_count} allowed actions observed."
 
     indicators = {
         "total_decisions": total,
         "blocked": s.blocked_count,
-        "quarantined": s.quarantined_count,
-        "warned": warns,
+        "quarantined": 0,
+        "warned": 0,
         "allowed": s.allowed_count,
         "high_risk_ratio": round(high_risk_ratio, 3),
-        "warn_ratio": round(warn_ratio, 3),
+        "warn_ratio": 0.0,
     }
 
     return OverviewPostureWidget(
@@ -227,13 +225,14 @@ def _compute_traffic_widget() -> OverviewTrafficWidget:
     total = len(events)
 
     high_risk = 0
+    # Keep the legacy response key; current decisions counted here are block-only.
     blocked_or_quarantined = 0
     last_request_at: str | None = None
 
     for e in events:
-        if e.risk_score >= 70:
+        if e.risk_score >= RISK_THRESHOLD_BLOCK_MIN or e.verdict == "block":
             high_risk += 1
-        if e.verdict in ("block", "quarantine"):
+        if e.verdict == "block":
             blocked_or_quarantined += 1
         last_request_at = e.occurred_at
 

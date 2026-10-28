@@ -150,7 +150,7 @@ def _build_event_schema() -> list[TelemetryEventFieldView]:
             type="string (enum)",
             nullable=True,
             presentwhen="guard_action, guard_execute, guard_scan events only",
-            description=("The policy verdict applied to the action: allow | warn | quarantine | block. Null on non-guard events. This field is the primary filter dimension for audit consumers and security dashboards."),
+            description=("The final policy verdict for new guard events: allow | block. Historical records may retain legacy values. Null on non-guard events. This field is the primary filter dimension for audit consumers and security dashboards."),
         ),
         TelemetryEventFieldView(
             fieldid="policyversion",
@@ -191,12 +191,9 @@ def _build_event_schema() -> list[TelemetryEventFieldView]:
             label="Reason",
             type="string",
             nullable=True,
-            presentwhen="Verdict is warn, quarantine, or block; review_decided events; quarantine_released events",
+            presentwhen="Block verdicts; review_decided events; quarantine_released events",
             description=(
-                "Human-readable explanation for a non-allow verdict, a review decision, or a quarantine release. "
-                "For guard events this is the policy engine rationale. "
-                "For review_decided events this is the analyst-supplied justification. "
-                "Null on allow verdicts and events without an attached rationale."
+                "Human-readable explanation for a block verdict, a review decision, or a quarantine release. For guard events this is the policy engine rationale. For review_decided events this is the analyst-supplied justification. Null on allow verdicts and events without an attached rationale."
             ),
         ),
         TelemetryEventFieldView(
@@ -223,7 +220,7 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
             trigger="POST /guard/action or POST /guard/action-decision completes policy evaluation",
             emissionmode="automatic",
             eventtype="guard_action",
-            description=("Emitted automatically for every request that reaches the guard action evaluation path. Includes all verdict outcomes: allow, warn, quarantine, and block. No caller opt-in is required. Cannot be suppressed."),
+            description=("Emitted automatically for every request that reaches the guard action evaluation path. New decisions use only allow or block. No caller opt-in is required. Cannot be suppressed."),
         ),
         TelemetryEmissionRuleView(
             ruleid="guard-execute-auto",
@@ -244,10 +241,10 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
         TelemetryEmissionRuleView(
             ruleid="review-queued-auto",
             label="Action entered review queue",
-            trigger="Guard evaluation produces a quarantine or review verdict and queues the action",
+            trigger="A blocked action is placed in the operational review queue",
             emissionmode="automatic",
             eventtype="review_queued",
-            description=("Emitted automatically when an action is placed in the review queue as a result of meeting the reviewthreshold or quarantinethreshold. Includes the actiontype, target, risk score, and the pending verdict awaiting analyst decision."),
+            description=("Emitted automatically when a blocked action is placed in the review queue. Includes the actiontype, target, risk score, and review status; the review workflow does not change the final block verdict."),
         ),
         TelemetryEmissionRuleView(
             ruleid="review-decided-auto",
@@ -260,10 +257,10 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
         TelemetryEmissionRuleView(
             ruleid="quarantine-created-auto",
             label="Action quarantined",
-            trigger="Guard evaluation produces a quarantine verdict",
+            trigger="A blocked action is placed into operational quarantine",
             emissionmode="automatic",
             eventtype="quarantine_created",
-            description=("Emitted automatically when an action reaches the quarantinethreshold. Distinct from review_queued because quarantined actions are isolated and require operator release, not standard review queue approval."),
+            description=("Emitted when a blocked action is isolated for operational investigation. The quarantine_created event identifier is retained for compatibility; isolation does not create a quarantine verdict."),
         ),
         TelemetryEmissionRuleView(
             ruleid="quarantine-released-auto",
@@ -271,7 +268,7 @@ def _build_emission_rules() -> list[TelemetryEmissionRuleView]:
             trigger="Operator explicitly releases a quarantined action via admin surface",
             emissionmode="automatic",
             eventtype="quarantine_released",
-            description=("Emitted automatically when an operator releases a quarantined action. Includes the actor identity, the release reason, and the original quarantine event ID for correlation."),
+            description=("Emitted when an operator changes an isolation workflow state. Includes the actor identity, release reason, and original event ID; any subsequent action still requires a current allow verdict."),
         ),
         TelemetryEmissionRuleView(
             ruleid="policy-updated-auto",
@@ -334,7 +331,7 @@ def _build_query_endpoints() -> list[TelemetryQueryEndpointView]:
                     type="string (enum)",
                     required=False,
                     example="block",
-                    description="Filter events by verdict outcome: allow | warn | quarantine | block. Returns only guard events matching this verdict.",
+                    description="Filter new guard events by final verdict: allow | block. Historical records may contain legacy verdict values.",
                 ),
                 TelemetryQueryFilterView(
                     filterid="actiontype",
@@ -611,7 +608,7 @@ def _build_event_examples() -> list[TelemetryEventExampleView]:
         TelemetryEventExampleView(
             exampleid="guard-action-block",
             label="Guard action — Block verdict",
-            scenario="A toolcall action with a prompt injection pattern in the target reaches blockthreshold 85. IronClaw emits a guard_action event with verdict block.",
+            scenario="A toolcall action matches a prompt injection pattern. IronClaw blocks it regardless of score threshold and emits a guard_action event with verdict block.",
             eventsnapshot={
                 "eventid": "a1b2c3d4-0000-4000-8000-000000000001",
                 "eventtype": "guard_action",
@@ -625,14 +622,14 @@ def _build_event_examples() -> list[TelemetryEventExampleView]:
                 "sessionid": "sess_abc123",
                 "reviewoutcome": None,
                 "actor": None,
-                "reason": "Risk score 92 meets or exceeds blockthreshold 85. Prompt injection pattern detected.",
+                "reason": "Prompt injection pattern detected; the action is blocked and its risk score meets the configured block minimum.",
                 "metadata": {"model": "claude-3-5-sonnet", "agent": "research-agent-v2"},
             },
         ),
         TelemetryEventExampleView(
             exampleid="guard-action-allow",
             label="Guard action — Allow verdict",
-            scenario="A toolcall action targeting a public weather API scores 8. IronClaw emits a guard_action event with verdict allow.",
+            scenario="A toolcall action targeting a public weather API has no suspicious matches or scan errors, and Prompt Guard returns BENIGN when enabled. IronClaw emits a guard_action event with verdict allow.",
             eventsnapshot={
                 "eventid": "a1b2c3d4-0000-4000-8000-000000000002",
                 "eventtype": "guard_action",
@@ -653,7 +650,7 @@ def _build_event_examples() -> list[TelemetryEventExampleView]:
         TelemetryEventExampleView(
             exampleid="review-decided",
             label="Review decided — Analyst approved",
-            scenario="A shellexec action scored 68 and entered the review queue. An analyst approved it. IronClaw emits a review_decided event.",
+            scenario="A clean read-only action enters an operational review workflow. Checks complete without matches or errors, Prompt Guard returns BENIGN when enabled, and the resulting verdict is allow.",
             eventsnapshot={
                 "eventid": "a1b2c3d4-0000-4000-8000-000000000003",
                 "eventtype": "review_decided",
@@ -661,20 +658,20 @@ def _build_event_examples() -> list[TelemetryEventExampleView]:
                 "environment": "production",
                 "actiontype": "shellexec",
                 "target": "ls -la /var/log/app",
-                "riskscore": 68,
-                "verdict": "quarantine",
+                "riskscore": 8,
+                "verdict": "allow",
                 "policyversion": "2026-05-20T09:00:00Z",
                 "sessionid": "sess_ghi789",
                 "reviewoutcome": "approved",
                 "actor": "analyst@ironclaw.io",
-                "reason": "Target confirmed as benign read-only log inspection. Approved for release.",
+                "reason": "Review approval is recorded separately; the fresh guard evaluation completed cleanly and returned allow.",
                 "metadata": {},
             },
         ),
         TelemetryEventExampleView(
             exampleid="policy-updated",
             label="Policy updated — Operator raised blockthreshold",
-            scenario="An operator updated the blockthreshold from 85 to 90 via POST /policy/update. IronClaw emits a policy_updated event.",
+            scenario="An operator updated a configured risk threshold via POST /policy/update. IronClaw emits a policy_updated event.",
             eventsnapshot={
                 "eventid": "a1b2c3d4-0000-4000-8000-000000000004",
                 "eventtype": "policy_updated",
@@ -688,7 +685,7 @@ def _build_event_examples() -> list[TelemetryEventExampleView]:
                 "sessionid": None,
                 "reviewoutcome": None,
                 "actor": "admin@ironclaw.io",
-                "reason": "Adjusted blockthreshold from 85 to 90 to reduce false positives on high-confidence tool calls.",
+                "reason": "Updated a configured risk threshold; suspicious signals continue to produce block regardless of threshold.",
                 "metadata": {"before": {"blockthreshold": 85}, "after": {"blockthreshold": 90}},
             },
         ),
@@ -702,7 +699,8 @@ def get_docs_telemetry_guide() -> TelemetryGuidePageResponse:
         headline="IronClaw Telemetry and Audit Trail",
         intro=(
             "Every action evaluated by IronClaw produces a structured telemetry event. "
-            "Events are emitted automatically by the guard, policy, review, and quarantine layers, "
+            "Events are emitted automatically by the guard, policy, review, and operational isolation workflows. "
+            "Quarantine event identifiers remain available for compatibility and do not represent final verdicts. "
             "or on-demand when operators perform audit exports. "
             "This guide documents the full telemetry event field schema, which event types are emitted "
             "automatically versus on-demand, every query endpoint and its supported filter parameters, "

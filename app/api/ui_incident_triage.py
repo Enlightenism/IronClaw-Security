@@ -82,7 +82,7 @@ def _build_incident_items() -> list[IncidentTriageItemView]:
             review_item_id="review-411",
             recommended_action="Inspect upstream content source and confirm quarantine decision.",
             metadata={
-                "policy_verdict": "quarantine",
+                "policy_verdict": "block",
                 "action_type": "prompt_guard",
             },
         ),

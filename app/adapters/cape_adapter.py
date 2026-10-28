@@ -9,6 +9,7 @@ from app.adapters.base import (
     AdapterExecutionResult,
     BaseIntegrationAdapter,
 )
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.orchestrator.policy_enforcer import (
     PolicyDecision,
     PolicyEngine,
@@ -20,7 +21,7 @@ from app.services.integration_registry import (
     get_integration,
 )
 
-AdapterVerdict = Literal["allow", "warn", "quarantine", "block"]
+AdapterVerdict = Literal["allow", "block"]
 AdapterExecutionMode = Literal["monitor", "enforce"]
 CapeAnalysisStatus = Literal["pending", "running", "completed", "failed", "timeout"]
 
@@ -177,10 +178,12 @@ def adapt_policy_decision_to_cape(
     request: CapeAdapterRequest | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> CapeAdapterResponse:
-    verdict: AdapterVerdict = decision.verdict
+    verdict: AdapterVerdict = "allow" if decision.verdict == "allow" and decision.allow_execution is True and not decision.requires_review and not decision.matched_rules and 0 <= decision.risk_score <= RISK_THRESHOLD_ALLOW_MAX else "block"
     matched_rules = [match.rule_id for match in decision.matched_rules]
     reasons = [match.to_dict() for match in decision.matched_rules]
-    should_hold = verdict in {"warn", "quarantine", "block"}
+    should_hold = verdict == "block"
+    risk_score = max(decision.risk_score, RISK_THRESHOLD_BLOCK_MIN) if should_hold else decision.risk_score
+    risk_level = "high" if should_hold and decision.risk_level in {"low", "medium"} else decision.risk_level
 
     return CapeAdapterResponse(
         adapter_name="ironclaw-cape",
@@ -188,12 +191,12 @@ def adapt_policy_decision_to_cape(
         mode=mode,
         verdict=verdict,
         should_allow=verdict == "allow",
-        should_warn=verdict == "warn",
-        should_quarantine=verdict == "quarantine",
+        should_warn=False,
+        should_quarantine=False,
         should_block=verdict == "block",
         should_hold=should_hold,
-        risk_score=decision.risk_score,
-        risk_level=decision.risk_level,
+        risk_score=risk_score,
+        risk_level=risk_level,
         summary=decision.summary,
         matched_rules=matched_rules,
         reasons=reasons,

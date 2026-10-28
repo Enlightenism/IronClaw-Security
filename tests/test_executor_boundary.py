@@ -58,8 +58,8 @@ def _build_runtime_result(*, risk_score: int) -> BoundaryRuntimeResult:
         reasons = ["High-risk request blocked by executor boundary."]
         review_item_id = None
     elif risk_score >= 70:
-        verdict = "quarantine"
-        reasons = ["Request held for review by executor boundary."]
+        verdict = "block"
+        reasons = ["Request blocked and queued for review by executor boundary."]
         review_item_id = "review-001"
     else:
         verdict = "allow"
@@ -110,8 +110,8 @@ def execute_with_boundary(
     runtime_result = _build_runtime_result(risk_score=risk_score)
     decision = runtime_result.decision
 
-    if decision.verdict in {"block", "quarantine"}:
-        policy_verdict = "deny"
+    if decision.verdict == "block":
+        policy_verdict = "block"
         receipt = ExecutionReceipt(
             execution_id="exec-001",
             state="denied",

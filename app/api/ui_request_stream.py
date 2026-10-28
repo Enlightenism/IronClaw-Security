@@ -70,8 +70,8 @@ def _build_request_items() -> list[RequestStreamItemView]:
             status="review_required",
             risk_level="high",
             action_type="web_fetch",
-            verdict="quarantine",
-            summary="Suspicious fetched content routed into manual review.",
+            verdict="block",
+            summary="Suspicious fetched content was blocked and routed into manual review.",
             metadata={"trace_id": "trace-7002"},
         ),
         RequestStreamItemView(

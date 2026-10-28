@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Literal
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.runtime.sandbox_router import SandboxLane, route_to_sandbox
 
 HIGH_RISK_TOOL_NAMES = {
@@ -68,7 +69,7 @@ MEDIUM_RISK_KEYWORDS = {
 class ToolCallGuardDecision:
     allowed: bool
     response_status: str
-    policy_verdict: str
+    policy_verdict: Literal["allow", "block"]
     sandbox_lane: str
     risk_score: int
     should_execute: bool
@@ -92,10 +93,15 @@ def _normalize_text(value: Any) -> str:
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
+    if isinstance(value, bool):
         return default
+    try:
+        result = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if isinstance(value, float) and not value.is_integer():
+        return default
+    return result
 
 
 def _payload_value(payload: Mapping[str, Any], *keys: str) -> Any:
@@ -172,7 +178,11 @@ def _sanitize_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
 def evaluate_tool_call(payload: Mapping[str, Any]) -> ToolCallGuardDecision:
     tool_name = _normalize_text(_payload_value(payload, "tool_name", "action_type"))
     target = str(_payload_value(payload, "target", "url", "command") or "")
-    base_risk = _safe_int(_payload_value(payload, "risk_score", "score"), 0)
+    risk_score_provided = "risk_score" in payload or "score" in payload
+    base_risk = _safe_int(
+        _payload_value(payload, "risk_score", "score"),
+        RISK_THRESHOLD_BLOCK_MIN if risk_score_provided else 0,
+    )
 
     signal_text = _combined_text(payload)
     tool_score, tool_reasons = _tool_score(tool_name)
@@ -193,14 +203,10 @@ def evaluate_tool_call(payload: Mapping[str, Any]) -> ToolCallGuardDecision:
     }
     route_decision = route_to_sandbox(route_payload)
 
-    if route_decision.lane == SandboxLane.HARD_BLOCK:
-        response_status = "denied"
-        policy_verdict = "deny"
-        allowed = False
-        halted_by_boundary = True
-    elif route_decision.requires_review:
-        response_status = "queued_for_review"
-        policy_verdict = "warn"
+    should_block = route_decision.lane == SandboxLane.HARD_BLOCK or route_decision.policy_verdict != "allow" or route_decision.requires_review or not route_decision.should_execute
+    if should_block:
+        response_status = "queued_for_review" if route_decision.requires_review else "denied"
+        policy_verdict = "block"
         allowed = False
         halted_by_boundary = True
     else:
@@ -217,7 +223,7 @@ def evaluate_tool_call(payload: Mapping[str, Any]) -> ToolCallGuardDecision:
         response_status=response_status,
         policy_verdict=policy_verdict,
         sandbox_lane=route_decision.lane.value,
-        risk_score=total_risk,
+        risk_score=route_decision.risk_score,
         should_execute=route_decision.should_execute and allowed,
         halted_by_boundary=halted_by_boundary,
         requires_review=route_decision.requires_review,

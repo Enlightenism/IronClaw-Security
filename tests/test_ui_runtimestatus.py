@@ -4,6 +4,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
+from app.config import (
+    RISK_THRESHOLD_ALLOW_MAX,
+    RISK_THRESHOLD_BLOCK_MIN,
+    RISK_THRESHOLD_QUARANTINE_MIN,
+)
 from app.ui.runtime.status import (
     ActiveExecutorView,
     BoundaryThresholdView,
@@ -15,7 +20,7 @@ from app.ui.runtime.status import (
 from app.ui.runtime.status import (
     router as ui_runtime_router,
 )
-from app.ui.runtimestatus import get_runtime_status_page
+from app.ui.runtimestatus import build_runtime_status_page, get_runtime_status_page
 
 # ---------------------------------------------------------------------------
 # Shared test app — GET /ui/runtime/status (no auth; direct router mount)
@@ -115,10 +120,13 @@ class TestUIRuntimeStatus:
         data = client.get("/ui/runtime/status").json()
         thresholds = data["thresholds"]
         model = BoundaryThresholdView(**thresholds)
-        assert model.allowmaxriskscore == 49
-        assert model.reviewminriskscore == 50
-        assert model.reviewmaxriskscore == 89
-        assert model.blockminriskscore == 90
+        assert model.allowmaxriskscore == RISK_THRESHOLD_ALLOW_MAX
+        assert model.reviewminriskscore == RISK_THRESHOLD_QUARANTINE_MIN
+        assert model.reviewmaxriskscore == max(
+            RISK_THRESHOLD_ALLOW_MAX,
+            RISK_THRESHOLD_BLOCK_MIN - 1,
+        )
+        assert model.blockminriskscore == RISK_THRESHOLD_BLOCK_MIN
 
     def test_thresholds_band_continuity(self, client: TestClient) -> None:
         data = client.get("/ui/runtime/status").json()
@@ -179,7 +187,7 @@ class TestUIRuntimeStatus:
         policy = data["policy"]
         model = RuntimePolicyView(**policy)
         assert model.policymode == "dryrun"
-        assert model.defaultaction == "review"
+        assert model.defaultaction == "block"
 
     def test_policy_mode_value(self, client: TestClient) -> None:
         data = client.get("/ui/runtime/status").json()
@@ -187,7 +195,7 @@ class TestUIRuntimeStatus:
 
     def test_policy_default_action(self, client: TestClient) -> None:
         data = client.get("/ui/runtime/status").json()
-        assert data["policy"]["defaultaction"] == "review"
+        assert data["policy"]["defaultaction"] == "block"
 
     # notes
 
@@ -289,10 +297,20 @@ class TestRuntimeStatusPage:
         val = metrics.get("latesteventat")
         assert val is None or isinstance(val, str)
 
+    def test_risk_thresholds_use_configured_binary_decisions(self) -> None:
+        page = build_runtime_status_page()
+        risk_section = next(section for section in page.sections if section.sectionid == "risk-thresholds")
+        thresholds = risk_section.items
+
+        assert [item["decision"] for item in thresholds] == ["Allow", "Block"]
+        assert thresholds[0]["range"] == f"0-{RISK_THRESHOLD_ALLOW_MAX}"
+        assert thresholds[1]["range"] == f"{RISK_THRESHOLD_ALLOW_MAX + 1}+"
+        assert str(RISK_THRESHOLD_BLOCK_MIN) in thresholds[1]["detail"]
+
     def test_policy_shape(self) -> None:
         policy = get_runtime_status_page()["policy"]
         assert policy["policymode"] == "dryrun"
-        assert policy["defaultaction"] == "review"
+        assert policy["defaultaction"] == "block"
 
     def test_defaultfilepath(self) -> None:
         payload = get_runtime_status_page()

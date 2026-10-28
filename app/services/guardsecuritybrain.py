@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from app.services.prompt_guard_client import PromptGuardClient
+
+GuardSecurityVerdict = Literal["allow", "block"]
 
 
 def _dedup_list(items: list[Any]) -> list[Any]:
@@ -17,7 +19,7 @@ def _block_response(
     *,
     matched_rules: list[str],
     reasons: list[dict[str, Any]] | None = None,
-    verdict: str = "block",
+    verdict: Literal["block"] = "block",
 ) -> dict[str, Any]:
     return {
         "allowed": False,
@@ -67,9 +69,12 @@ class _GuardSecurityBrain:
             context=context,
         )
 
-        allowed: bool = decision.allowed
-        verdict: str = decision.verdict
+        allowed = bool(decision.allowed) and decision.verdict == "allow"
+        verdict: GuardSecurityVerdict = "allow" if allowed else "block"
         policy_dict = decision.as_dict()
+        policy_dict["verdict"] = verdict
+        if "allowed" in policy_dict:
+            policy_dict["allowed"] = allowed
 
         policy_dict["matchedrules"] = _dedup_list(policy_dict.get("matchedrules", []))
         policy_dict["reasons"] = _dedup_list(policy_dict.get("reasons", []))
@@ -100,6 +105,11 @@ class _GuardSecurityBrain:
 
         classification_result = classification.to_dict()
         if classification.is_malicious:
+            allowed = False
+            verdict = "block"
+            policy_dict["verdict"] = verdict
+            if "allowed" in policy_dict:
+                policy_dict["allowed"] = allowed
             policy_dict["matchedrules"] = _dedup_list(
                 policy_dict["matchedrules"] + ["prompt_guard:malicious"],
             )
@@ -114,8 +124,8 @@ class _GuardSecurityBrain:
             )
 
         return {
-            "allowed": not classification.is_malicious,
-            "verdict": "block" if classification.is_malicious else verdict,
+            "allowed": allowed,
+            "verdict": verdict,
             "runtime": "guard",
             "policy": policy_dict,
             "result": classification_result,

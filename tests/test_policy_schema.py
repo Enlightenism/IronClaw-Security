@@ -53,7 +53,7 @@ def _minimal_status(**overrides) -> dict:
 
 def _minimal_result(**overrides) -> dict:
     base: dict = {
-        "verdict": PolicyEnforcementMode.block,
+        "verdict": "block",
         "risk_score": 0,
     }
     base.update(overrides)
@@ -290,11 +290,11 @@ class TestPolicyEvaluationResultAutoPopulation:
         assert result.evaluated_at == fixed
 
     def test_default_severity_is_info(self):
-        result = PolicyEvaluationResult(**_minimal_result(verdict=PolicyEnforcementMode.warn))
+        result = PolicyEvaluationResult(**_minimal_result(verdict="allow"))
         assert result.severity == PolicySeverity.info
 
     def test_default_risk_score_is_zero(self):
-        result = PolicyEvaluationResult(**_minimal_result(verdict=PolicyEnforcementMode.quarantine))
+        result = PolicyEvaluationResult(**_minimal_result(verdict="block"))
         assert result.risk_score == 0
 
     def test_risk_score_boundary_zero(self):
@@ -314,7 +314,7 @@ class TestPolicyEvaluationResultAutoPopulation:
             PolicyEvaluationResult(**_minimal_result(risk_score=101))
 
     def test_default_collections_empty(self):
-        result = PolicyEvaluationResult(**_minimal_result(verdict=PolicyEnforcementMode.audit))
+        result = PolicyEvaluationResult(**_minimal_result(verdict="block"))
         assert result.matched_rules == []
         assert result.categories == []
         assert result.reasoning is None
@@ -323,7 +323,7 @@ class TestPolicyEvaluationResultAutoPopulation:
     def test_full_result_population(self):
         now = datetime.now(UTC)
         result = PolicyEvaluationResult(
-            verdict=PolicyEnforcementMode.block,
+            verdict="block",
             risk_score=95,
             matched_rules=["rule-001", "rule-002"],
             severity=PolicySeverity.critical,
@@ -332,11 +332,16 @@ class TestPolicyEvaluationResultAutoPopulation:
             evaluated_at=now,
             policy_version="3.0.0",
         )
-        assert result.verdict == PolicyEnforcementMode.block
+        assert result.verdict == "block"
         assert "rule-001" in result.matched_rules
         assert result.severity == PolicySeverity.critical
         assert result.risk_score == 95
         assert result.policy_version == "3.0.0"
+
+    @pytest.mark.parametrize("verdict", ["warn", "quarantine", "audit"])
+    def test_nonbinary_verdicts_are_rejected(self, verdict):
+        with pytest.raises(ValidationError):
+            PolicyEvaluationResult(**_minimal_result(verdict=verdict))
 
 
 # ---------------------------------------------------------------------------
@@ -398,9 +403,9 @@ class TestEnumRoundTrip:
         assert data["scope"] == "tool_call"
 
     def test_evaluation_result_enum_serialization(self):
-        result = PolicyEvaluationResult(**_minimal_result(verdict=PolicyEnforcementMode.audit, severity=PolicySeverity.low))
+        result = PolicyEvaluationResult(**_minimal_result(verdict="block", severity=PolicySeverity.low))
         data = result.model_dump()
-        assert data["verdict"] == "audit"
+        assert data["verdict"] == "block"
         assert data["severity"] == "low"
 
     def test_policy_status_enum_serialization(self):

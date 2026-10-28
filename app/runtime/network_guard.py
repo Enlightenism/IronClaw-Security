@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.runtime.sandbox_router import SandboxLane, route_to_sandbox
 
 LOCAL_HOSTS = {
@@ -77,11 +78,20 @@ def _normalize_text(value: Any) -> str:
     return str(value).strip().lower()
 
 
-def _safe_int(value: Any, default: int = 0) -> int:
+def _normalize_risk_score(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return RISK_THRESHOLD_BLOCK_MIN
     try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
+        risk_score = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return RISK_THRESHOLD_BLOCK_MIN
+    if isinstance(value, float) and not value.is_integer():
+        return RISK_THRESHOLD_BLOCK_MIN
+    if risk_score < 0:
+        return RISK_THRESHOLD_BLOCK_MIN
+    return min(risk_score, 100)
 
 
 def _get_value(payload: Mapping[str, Any], *keys: str) -> Any:
@@ -208,7 +218,7 @@ def evaluate_network_request(payload: Mapping[str, Any]) -> NetworkGuardDecision
     hostname = (parsed.hostname or "").lower()
     scheme = _normalize_text(parsed.scheme)
     is_private_target = _is_private_target(hostname)
-    base_risk = _safe_int(_get_value(payload, "risk_score", "score"), 0)
+    base_risk = _normalize_risk_score(_get_value(payload, "risk_score", "score"))
 
     signal_text = _collect_signal_text(payload, url)
     scheme_score, scheme_reasons = _scheme_score(scheme)
@@ -230,21 +240,12 @@ def evaluate_network_request(payload: Mapping[str, Any]) -> NetworkGuardDecision
     }
     route_decision = route_to_sandbox(route_payload)
 
-    if route_decision.lane == SandboxLane.HARD_BLOCK:
-        response_status = "denied"
-        policy_verdict = "deny"
-        allowed = False
-        halted_by_boundary = True
-    elif route_decision.requires_review:
-        response_status = "queued_for_review"
-        policy_verdict = "warn"
-        allowed = False
-        halted_by_boundary = True
-    else:
-        response_status = "completed"
-        policy_verdict = "allow"
-        allowed = True
-        halted_by_boundary = False
+    blocked = route_decision.lane == SandboxLane.HARD_BLOCK or route_decision.policy_verdict != "allow" or not route_decision.should_execute
+    allowed = not blocked
+    halted_by_boundary = blocked
+    response_status = ("queued_for_review" if route_decision.requires_review else "denied") if blocked else "completed"
+    policy_verdict = "block" if blocked else "allow"
+    final_risk = max(total_risk, RISK_THRESHOLD_BLOCK_MIN) if blocked else total_risk
 
     if not reasons:
         reasons.append("network request accepted under current low-risk policy")
@@ -254,7 +255,7 @@ def evaluate_network_request(payload: Mapping[str, Any]) -> NetworkGuardDecision
         response_status=response_status,
         policy_verdict=policy_verdict,
         sandbox_lane=route_decision.lane.value,
-        risk_score=total_risk,
+        risk_score=final_risk,
         should_execute=route_decision.should_execute and allowed,
         halted_by_boundary=halted_by_boundary,
         requires_review=route_decision.requires_review,

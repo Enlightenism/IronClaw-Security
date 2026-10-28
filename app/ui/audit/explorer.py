@@ -115,14 +115,14 @@ def _sample_audit_events() -> list[dict[str, object]]:
             "executionid": "exec-203",
             "reviewitemid": "review-203",
             "incidentid": "incident-002",
-            "verdict": "review",
+            "verdict": "block",
             "actiontype": "httpfetch",
             "target": "https://example.com/docs",
-            "summary": "Medium-risk fetch request was routed into manual review.",
+            "summary": "Suspicious fetch request was blocked and routed into manual review.",
             "details": {
                 "responsestatus": "queuedforreview",
                 "source": "review-queue",
-                "reason": "Pattern cluster required analyst review before execution.",
+                "reason": "Suspicious pattern cluster was blocked before execution and queued for review.",
             },
             "tags": ["review", "fetch", "queued"],
         },
@@ -138,7 +138,7 @@ def _sample_audit_events() -> list[dict[str, object]]:
             "executionid": "exec-205",
             "reviewitemid": "review-205",
             "incidentid": "incident-003",
-            "verdict": "review",
+            "verdict": "block",
             "actiontype": "toolcall",
             "target": "filesystem",
             "summary": "Sensitive filesystem action was isolated while review remained pending.",
@@ -161,16 +161,16 @@ def _sample_audit_events() -> list[dict[str, object]]:
             "executionid": "exec-206",
             "reviewitemid": "review-206",
             "incidentid": "incident-004",
-            "verdict": "quarantine",
+            "verdict": "block",
             "actiontype": "toolcall",
             "target": "shell",
-            "summary": "Repeated risky pattern crossed threshold and escalated to quarantine.",
+            "summary": "Repeated risky pattern crossed threshold and was blocked.",
             "details": {
                 "responsestatus": "denied",
                 "source": "policy-threshold",
                 "reason": "Repeated risky shell pattern exceeded configured threshold.",
             },
-            "tags": ["quarantine", "repeat-pattern", "policy"],
+            "tags": ["containment", "repeat-pattern", "policy"],
         },
         {
             "auditeventid": "audit-005",
@@ -235,6 +235,11 @@ def _build_verdict_counts(records: list[dict[str, object]]) -> list[AuditVerdict
     return [AuditVerdictCount(verdict=verdict, count=count) for verdict, count in sorted(counts.items())]
 
 
+def _is_pending_review(record: dict[str, object]) -> bool:
+    details = record.get("details")
+    return isinstance(details, dict) and details.get("responsestatus") == "queuedforreview"
+
+
 def _build_timeline(records: list[dict[str, object]]) -> list[AuditTimelinePoint]:
     buckets = sorted({str(record.get("timestamp") or "")[:13] + ":00:00+00:00" for record in records})
 
@@ -242,7 +247,7 @@ def _build_timeline(records: list[dict[str, object]]) -> list[AuditTimelinePoint
     for bucket in buckets:
         bucket_records = [record for record in records if str(record.get("timestamp") or "").startswith(bucket[:13])]
         blocked = sum(1 for record in bucket_records if str(record.get("verdict") or "") == "block")
-        review = sum(1 for record in bucket_records if str(record.get("verdict") or "") == "review")
+        review = sum(1 for record in bucket_records if _is_pending_review(record))
 
         points.append(
             AuditTimelinePoint(
@@ -285,7 +290,7 @@ def get_audit_explorer() -> AuditExplorerResponse:
 
     totalevents = len(audit_records)
     blockevents = sum(1 for record in audit_records if str(record.get("verdict") or "") == "block")
-    reviewevents = sum(1 for record in audit_records if str(record.get("verdict") or "") == "review")
+    reviewevents = sum(1 for record in audit_records if _is_pending_review(record))
     criticalevents = sum(1 for record in audit_records if str(record.get("severity") or "") == "critical")
 
     kpis = [

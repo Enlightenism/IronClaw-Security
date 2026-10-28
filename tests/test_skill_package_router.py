@@ -4,6 +4,7 @@ from typing import Literal, cast
 
 import pytest
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from ironclaw_skill.billing import (
     BillingContext,
     BillingPolicy,
@@ -192,20 +193,22 @@ class TestIronClawSkillRouterRouting:
         assert response.payload.verdict == "block"
         assert response.payload.should_halt is True
 
-    def test_action_decision_high_risk_returns_review(self):
+    def test_action_decision_high_risk_returns_block(self):
         router = IronClawSkillRouter()
         response = router.route(_action_decision_request(action_type="shell_command", target="rm -rf /"))
-        assert response.payload.verdict == "review"
-        assert response.payload.should_warn is True
+        assert response.payload.verdict == "block"
+        assert response.payload.should_halt is True
+        assert response.payload.should_warn is False
         assert response.payload.metadata.risk_score is not None
-        assert response.payload.metadata.risk_score >= 70
+        assert response.payload.metadata.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
-    def test_action_decision_low_risk_returns_allow(self):
+    def test_action_decision_low_risk_blocks_without_policy(self):
         router = IronClawSkillRouter()
         response = router.route(_action_decision_request(action_type="tool_invocation", target="read_file"))
-        assert response.payload.verdict == "allow"
+        assert response.payload.verdict == "block"
+        assert response.payload.should_halt is True
         assert response.payload.metadata.risk_score is not None
-        assert response.payload.metadata.risk_score < 50
+        assert response.payload.metadata.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
     def test_action_policy_high_risk_elevates_score(self):
         router = IronClawSkillRouter()
@@ -217,13 +220,15 @@ class TestIronClawSkillRouterRouting:
         router = IronClawSkillRouter()
         response = router.route(_action_policy_request(action_type="network_request", target="https://api.example.com"))
         assert response.payload.metadata.risk_score is not None
-        assert response.payload.metadata.risk_score < 70
+        assert response.payload.verdict == "block"
+        assert response.payload.metadata.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
-    def test_scan_default_handler_returns_review(self):
+    def test_scan_default_handler_blocks_without_runtime(self):
         router = IronClawSkillRouter()
         response = router.route(_scan_request())
-        assert response.payload.verdict == "review"
-        assert response.payload.should_warn is True
+        assert response.payload.verdict == "block"
+        assert response.payload.should_halt is True
+        assert response.payload.should_warn is False
 
     def test_bundle_scan_routes_correctly(self):
         router = IronClawSkillRouter()
@@ -286,7 +291,7 @@ class TestIronClawSkillRouterRegistration:
             first_called.append(True)
             return build_skill_success_response(
                 operation="scan",
-                verdict="review",
+                verdict="block",
                 summary="first",
                 request_id=req.context.request_id,
             )
@@ -428,11 +433,11 @@ class TestSkillResponseEnvelopeShape:
         )
         assert env.payload.allowed is False
 
-    def test_allowed_synced_to_false_for_review_verdict(self):
+    def test_allowed_synced_to_false_for_scan_block_verdict(self):
         env = build_skill_success_response(
             operation="scan",
-            verdict="review",
-            summary="needs review",
+            verdict="block",
+            summary="blocked",
         )
         assert env.payload.allowed is False
 
@@ -443,7 +448,8 @@ class TestSkillResponseEnvelopeShape:
             error_code="execute_crash",
         )
         assert env.payload.should_halt is True
-        assert env.payload.verdict == "error"
+        assert env.payload.should_warn is False
+        assert env.payload.verdict == "block"
 
     def test_reasons_list_populated_correctly(self):
         reasons = [
@@ -463,12 +469,12 @@ class TestSkillResponseEnvelopeShape:
     def test_risk_score_stored_in_metadata(self):
         env = build_skill_success_response(
             operation="scan",
-            verdict="review",
+            verdict="block",
             summary="moderate risk",
             risk_score=65,
             decision_source="scan",
         )
-        assert env.payload.metadata.risk_score == 65
+        assert env.payload.metadata.risk_score == RISK_THRESHOLD_BLOCK_MIN
         assert env.payload.metadata.decision_source == "scan"
 
     def test_matched_patterns_deduplicated_and_lowercased(self):
@@ -1291,7 +1297,7 @@ class TestRouterMiddlewareBillingPipeline:
         def handler(req):
             return build_skill_success_response(
                 operation="scan",
-                verdict="review",
+                verdict="block",
                 summary="traced",
                 request_id=req.context.request_id,
             )

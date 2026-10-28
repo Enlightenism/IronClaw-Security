@@ -27,7 +27,7 @@ def test_run_secure_runtime_allows_safe_request() -> None:
     summary = summarize_secure_runtime_result(result)
 
     assert result.request.actor_id == "runtime-actor-001"
-    assert result.decision.verdict in {"allow", "warn"}
+    assert result.decision.verdict == "allow"
     assert result.trace.trace_id.startswith("trace-")
     assert result.trace.request_id.startswith("req-")
     assert "policy_enforced" in result.trace.stages
@@ -55,13 +55,13 @@ def test_run_secure_runtime_blocks_high_risk_request() -> None:
 
     summary = summarize_secure_runtime_result(result)
 
-    assert result.decision.verdict in {"quarantine", "block"}
+    assert result.decision.verdict == "block"
     assert result.coordination.response.action == "block"
-    assert result.coordination.response.status in {"blocked", "quarantined", "denied"}
+    assert result.coordination.response.status in {"denied", "queued_for_review"}
     assert summary["tool_call_protected"] is True
     assert summary["risk_score"] >= 95
     assert summary["response_action"] == "block"
-    assert summary["response_status"] in {"blocked", "quarantined", "denied"}
+    assert summary["response_status"] in {"denied", "queued_for_review"}
 
 
 def test_summarize_secure_runtime_result_contains_expected_keys() -> None:

@@ -290,6 +290,9 @@ def test_get_docs_webhooks_scan_verdict_payload_has_verdict_field(
     )
     assert scan_event is not None
     assert "verdict" in scan_event["payloadshape"]["data"]
+    assert "block" in scan_event["trigger"].lower()
+    assert "warn" not in scan_event["trigger"].lower()
+    assert "quarantine verdict" not in scan_event["trigger"].lower()
 
 
 def test_get_docs_webhooks_quarantine_payload_has_quarantineid(
@@ -303,6 +306,7 @@ def test_get_docs_webhooks_quarantine_payload_has_quarantineid(
     )
     assert quar_event is not None
     assert "quarantineid" in quar_event["payloadshape"]["data"]
+    assert "final verdict remains block" in quar_event["description"].lower()
 
 
 def test_get_docs_webhooks_policy_violation_payload_has_matchedruleid(

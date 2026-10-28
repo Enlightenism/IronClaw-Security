@@ -73,7 +73,7 @@ def executeguardedaction(
         "request_id": summary["request_id"],
         "decision_id": summary["decision_id"],
         "policy_verdict": summary["policy_verdict"],
-        "risk_score": risk_score,
+        "risk_score": summary["risk_score"],
         "should_execute": summary["should_execute"],
         "halted_by_boundary": summary["halted_by_boundary"],
         "review_item_id": summary["review_item_id"],

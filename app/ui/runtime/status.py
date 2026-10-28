@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+
+from app.config import (
+    RISK_THRESHOLD_ALLOW_MAX,
+    RISK_THRESHOLD_BLOCK_MIN,
+    RISK_THRESHOLD_QUARANTINE_MIN,
+)
 
 router = APIRouter(
     prefix="/ui/runtime",
@@ -46,7 +53,7 @@ class RuntimeMetricsView(BaseModel):
 
 class RuntimePolicyView(BaseModel):
     policymode: str
-    defaultaction: str
+    defaultaction: Literal["allow", "block"]
 
 
 class RuntimeStatusResponse(BaseModel):
@@ -77,10 +84,10 @@ def get_runtime_status() -> RuntimeStatusResponse:
         generatedat=datetime.now(UTC).isoformat(),
         runtime=runtime,
         thresholds=BoundaryThresholdView(
-            allowmaxriskscore=49,
-            reviewminriskscore=50,
-            reviewmaxriskscore=89,
-            blockminriskscore=90,
+            allowmaxriskscore=RISK_THRESHOLD_ALLOW_MAX,
+            reviewminriskscore=RISK_THRESHOLD_QUARANTINE_MIN,
+            reviewmaxriskscore=max(RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN - 1),
+            blockminriskscore=RISK_THRESHOLD_BLOCK_MIN,
         ),
         runtimeavailable=runtime.pipelineavailable,
         boundaryactive=runtime.boundaryavailable,
@@ -103,7 +110,7 @@ def get_runtime_status() -> RuntimeStatusResponse:
         ),
         policy=RuntimePolicyView(
             policymode="dryrun",
-            defaultaction="review",
+            defaultaction="block",
         ),
         defaultfilepath="app/api/actionexecute.py",
         notes=[

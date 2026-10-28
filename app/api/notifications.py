@@ -115,7 +115,7 @@ class DispatchResponse(BaseModel):
 
 class PolicyBlockRequest(BaseModel):
     decision_id: str = Field(..., min_length=1)
-    verdict: str = Field(..., pattern=r"^(block|quarantine)$")
+    verdict: str = Field(..., pattern=r"^(allow|block)$")
     summary: str = Field(..., min_length=1)
     agent_id: str | None = None
     session_id: str | None = None
@@ -384,7 +384,7 @@ def dispatch(
 
 @router.post(
     "/dispatch/policy-block",
-    summary="Dispatch notification for a policy block or quarantine decision",
+    summary="Dispatch notification for an allow or block policy decision",
     status_code=status.HTTP_200_OK,
     response_model=DispatchResponse,
     tags=["notifications"],

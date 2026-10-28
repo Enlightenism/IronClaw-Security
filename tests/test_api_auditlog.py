@@ -163,11 +163,11 @@ class TestCreateAuditEvent:
         valid = {"info", "warning", "high", "critical"}
         assert r.json()["severity"] in valid
 
-    def test_high_riskscore_yields_denied_or_quarantined(self, client: TestClient) -> None:
+    def test_high_riskscore_yields_review_event_when_queued(self, client: TestClient) -> None:
         payload = {**_VALID_PAYLOAD, "riskscore": 95}
         r = client.post(_AUDIT_EVENT_ROUTE, json=payload)
         assert r.status_code == 200
-        assert r.json()["eventtype"] in {"execution_denied", "execution_quarantined"}
+        assert r.json()["eventtype"] == "execution_review"
 
     def test_zero_riskscore_accepted(self, client: TestClient) -> None:
         payload = {**_VALID_PAYLOAD, "riskscore": 0}

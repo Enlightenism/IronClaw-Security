@@ -56,7 +56,7 @@ result = client.scan(
 
 ```python
 result.scan_id  # str — UUID
-result.verdict  # str — "allow" | "warn" | "quarantine" | "block"
+result.verdict  # str — "allow" | "block"
 result.reason  # str — human-readable explanation
 result.rule_id  # str | None — matched rule identifier
 result.confidence  # float — 0.0 to 1.0
@@ -143,7 +143,7 @@ items = client.get_review_queue()
 
 ## `client.approve_review(review_id)`
 
-Approve a quarantined item.
+Approve an item held in the operational review queue.
 
 ```python
 client.approve_review("review-uuid")
@@ -153,7 +153,7 @@ client.approve_review("review-uuid")
 
 ## `client.reject_review(review_id)`
 
-Reject a quarantined item.
+Reject an item held in the operational review queue.
 
 ```python
 client.reject_review("review-uuid")

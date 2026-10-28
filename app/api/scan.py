@@ -5,6 +5,7 @@ import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.core.auth import AuthContext, require_auth_context
 from app.core.errors import AppError
 from app.schemas.scan import (
@@ -30,8 +31,7 @@ _RATE_LIMIT_WINDOW_SECONDS = 60
 _RATE_LIMIT_MAX_REQUESTS = 30
 _rate_limit_buckets: dict[str, deque[float]] = defaultdict(deque)
 
-_VALID_VERDICTS = {"allow", "warn", "quarantine", "block"}
-_VALID_REVIEW_STATUSES = {"none", "pending", "approved", "rejected"}
+_VALID_VERDICTS = {"allow", "block"}
 
 
 def _apply_scan_security_headers(response: Response) -> None:
@@ -135,12 +135,13 @@ def _build_explanation(result: dict) -> str:
 
 def _coerce_result_scalars(result: dict) -> dict:
     verdict = result.get("verdict")
-    if not isinstance(verdict, str) or verdict not in _VALID_VERDICTS:
-        result["verdict"] = "allow"
+    invalid_verdict = not isinstance(verdict, str) or verdict not in _VALID_VERDICTS
+    if invalid_verdict:
+        result["verdict"] = "block"
+        result["quarantine_reason"] = result.get("quarantine_reason") or "Invalid scan verdict; blocked by scan API."
+        result["untrusted"] = True
 
-    review_status = result.get("review_status")
-    if not isinstance(review_status, str) or review_status not in _VALID_REVIEW_STATUSES:
-        result["review_status"] = "none"
+    result["review_status"] = "none"
 
     quarantine_reason = result.get("quarantine_reason")
     if quarantine_reason is not None and not isinstance(quarantine_reason, str):
@@ -149,8 +150,18 @@ def _coerce_result_scalars(result: dict) -> dict:
     failed_checks = result.get("failed_checks")
     if isinstance(failed_checks, list):
         result["failed_checks"] = [item if isinstance(item, str) else str(item) for item in failed_checks]
-    elif failed_checks is not None:
+    else:
         result["failed_checks"] = []
+
+    if invalid_verdict and "invalid_scan_verdict" not in result["failed_checks"]:
+        result["failed_checks"].append("invalid_scan_verdict")
+
+    if result["verdict"] == "block":
+        result["untrusted"] = True
+        result["risk_score"] = max(
+            int(result.get("risk_score", 0)),
+            RISK_THRESHOLD_BLOCK_MIN,
+        )
 
     return result
 

@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal, TypedDict
 
+from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.services.guard_security_brain import GuardSecurityDecision
 
-VerdictType = Literal["allow", "warn", "quarantine", "block"]
+VerdictType = Literal["allow", "block"]
 
 
 class EnforcedVerdict(TypedDict):
@@ -47,12 +48,8 @@ def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _verdict_rank(verdict: str) -> int:
-    return {"allow": 1, "warn": 2, "quarantine": 3, "block": 4}.get(verdict, 0)
-
-
 def _max_verdict(a: str, b: str) -> VerdictType:
-    return a if _verdict_rank(a) >= _verdict_rank(b) else b  # type: ignore[return-value]
+    return "allow" if a == "allow" and b == "allow" else "block"
 
 
 def _extract_guard_telemetry(
@@ -106,10 +103,22 @@ def enforce_verdict(
     guard_telemetry = _extract_guard_telemetry(guard_decision)
 
     # If the local guard produced a harder verdict, escalate; never downgrade.
-    final_verdict: VerdictType = verdict
+    final_verdict: VerdictType = "allow" if verdict == "allow" else "block"
+    if should_halt or should_warn:
+        final_verdict = "block"
+    if should_warn:
+        reasons = list(reasons or []) + [
+            {
+                "source": "policy",
+                "label": "Warning-only outcome blocked",
+                "details": "Warning-only decisions are disabled; the action was blocked.",
+                "score": min(max(risk_score, 0) / 100.0, 1.0),
+            },
+        ]
     if guard_decision is not None:
-        final_verdict = _max_verdict(verdict, guard_decision.verdict)
-        if final_verdict != verdict:
+        previous_verdict = final_verdict
+        final_verdict = _max_verdict(final_verdict, guard_decision.verdict)
+        if final_verdict != previous_verdict:
             guard_reason: dict[str, object] = {
                 "source": "ai",
                 "label": "Guard security brain escalation",
@@ -118,15 +127,19 @@ def enforce_verdict(
             }
             reasons = list(reasons or []) + [guard_reason]
 
+    final_risk_score = risk_score
+    if final_verdict == "block":
+        final_risk_score = max(final_risk_score, RISK_THRESHOLD_BLOCK_MIN)
+
     return EnforcedVerdict(
         action_type=action_type,
         target=target,
         content=content,
         verdict=final_verdict,
         summary=summary,
-        risk_score=risk_score,
-        should_halt=final_verdict in ("block", "quarantine"),
-        should_warn=final_verdict in ("warn", "quarantine"),
+        risk_score=final_risk_score,
+        should_halt=final_verdict == "block",
+        should_warn=False,
         scan_id=scan_id,
         matched_patterns=list(matched_patterns or []),
         categories=list(categories or []),

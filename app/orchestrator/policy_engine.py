@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from fnmatch import fnmatch
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
-from app.orchestrator.execution_plan import ExecutionPlan
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
+from app.orchestrator.execution_plan import (
+    ExecutionPlan,
+    normalize_plan_verdict,
+    normalized_plan_risk_score,
+)
 
-PolicyEffect = str
+PolicyEffect = Literal["allow", "block"]
 PolicyMode = str
-PolicyDecision = str
+PolicyDecision = Literal["allow", "block"]
 
 
 @dataclass(frozen=True)
@@ -42,9 +47,9 @@ class PolicyContext:
             file_path=file_path,
             action_type=action_type,
             target=target,
-            risk_score=plan.risk_score,
+            risk_score=normalized_plan_risk_score(plan),
             lane=plan.lane,
-            verdict=plan.verdict,
+            verdict=normalize_plan_verdict(plan),
             matched_patterns=list(plan.matched_patterns),
             metadata=metadata or {},
         )
@@ -55,7 +60,7 @@ class PolicyRule:
     rule_id: str
     name: str
     description: str
-    effect: PolicyEffect
+    effect: str
     enabled: bool = True
     priority: int = 100
     action_types: tuple[str, ...] = ()
@@ -88,7 +93,7 @@ class PolicyEvaluation:
     decision: PolicyDecision
     mode: PolicyMode
     allowed: bool
-    final_effect: PolicyEffect
+    final_effect: PolicyDecision
     context: PolicyContext
     matched_rules: list[PolicyMatch]
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
@@ -122,6 +127,10 @@ def _patterns_present(
         return True
     observed = {pattern.lower() for pattern in matched_patterns}
     return any(pattern.lower() in observed for pattern in required)
+
+
+def _is_valid_risk_score(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100
 
 
 def _rule_matches(rule: PolicyRule, context: PolicyContext) -> tuple[bool, str]:
@@ -166,21 +175,21 @@ def build_default_policy_rules() -> list[PolicyRule]:
         ),
         PolicyRule(
             rule_id="pol-review-warn",
-            name="Escalate warned actions",
-            description="Escalates warning plans into supervisor review.",
-            effect="review",
+            name="Block previously reviewed actions",
+            description="Blocks actions that were previously routed for review.",
+            effect="block",
             priority=40,
-            verdicts=("warn",),
-            min_risk_score=40,
+            verdicts=("block",),
+            min_risk_score=RISK_THRESHOLD_BLOCK_MIN,
         ),
         PolicyRule(
             rule_id="pol-quarantine-sensitive",
-            name="Quarantine sensitive code paths",
-            description="Quarantines risky execution in auth, secrets, policy, and config areas.",
-            effect="quarantine",
+            name="Block sensitive code paths",
+            description="Blocks risky execution in auth, secrets, policy, and config areas.",
+            effect="block",
             priority=80,
             file_patterns=("*/auth/*", "*/secrets/*", "*/policy_*", "*/config/*", "*.env"),
-            min_risk_score=60,
+            min_risk_score=RISK_THRESHOLD_BLOCK_MIN,
         ),
         PolicyRule(
             rule_id="pol-block-malware-patterns",
@@ -188,8 +197,7 @@ def build_default_policy_rules() -> list[PolicyRule]:
             description="Blocks execution when high-risk patterns indicate malware-like behavior.",
             effect="block",
             priority=100,
-            verdicts=("block", "quarantine"),
-            min_risk_score=80,
+            verdicts=("block",),
             requires_pattern_match=(
                 "command_execution",
                 "credential_access",
@@ -200,36 +208,27 @@ def build_default_policy_rules() -> list[PolicyRule]:
         ),
         PolicyRule(
             rule_id="pol-review-write-runtime",
-            name="Review runtime write actions",
-            description="Routes write-like runtime actions for review when risk is non-trivial.",
-            effect="review",
+            name="Block risky runtime write actions",
+            description="Blocks write-like runtime actions when risk is non-trivial.",
+            effect="block",
             priority=50,
             action_types=("write", "modify", "tool_call", "execute"),
-            min_risk_score=35,
+            min_risk_score=RISK_THRESHOLD_ALLOW_MAX + 1,
         ),
     ]
 
 
-def resolve_policy_effect(matches: list[PolicyMatch]) -> PolicyEffect:
+def resolve_policy_effect(matches: list[PolicyMatch]) -> PolicyDecision:
     if not matches:
         return "allow"
 
-    strongest = max(matches, key=lambda item: item.priority)
-    return strongest.effect
+    return "block" if any(match.effect != "allow" for match in matches) else "allow"
 
 
-def effect_to_decision(effect: PolicyEffect, mode: PolicyMode) -> tuple[PolicyDecision, bool]:
-    if mode == "monitor":
-        return "monitor", True
-    if effect == "allow":
-        return "allow", True
-    if effect == "review":
-        return "review", True
-    if effect == "quarantine":
-        return "quarantine", False
-    if effect == "block":
-        return "block", False
-    return "allow", True
+def effect_to_decision(effect: str, mode: PolicyMode) -> tuple[PolicyDecision, bool]:
+    del mode
+    decision: PolicyDecision = "allow" if effect == "allow" else "block"
+    return decision, decision == "allow"
 
 
 def evaluate_policy(
@@ -238,6 +237,17 @@ def evaluate_policy(
     *,
     mode: PolicyMode = "enforce",
 ) -> PolicyEvaluation:
+    risk_score_is_valid = _is_valid_risk_score(context.risk_score)
+    matched_patterns_are_valid = isinstance(context.matched_patterns, list)
+    risk_score = context.risk_score if risk_score_is_valid else RISK_THRESHOLD_BLOCK_MIN
+    matched_patterns = list(context.matched_patterns) if matched_patterns_are_valid else []
+    has_suspicious_signal = context.verdict != "allow" or not risk_score_is_valid or not matched_patterns_are_valid or bool(matched_patterns) or risk_score > RISK_THRESHOLD_ALLOW_MAX
+    evaluation_context = replace(
+        context,
+        verdict="block" if has_suspicious_signal else "allow",
+        risk_score=(max(risk_score, RISK_THRESHOLD_BLOCK_MIN) if has_suspicious_signal else risk_score),
+        matched_patterns=matched_patterns,
+    )
     active_rules = sorted(
         rules or build_default_policy_rules(),
         key=lambda rule: rule.priority,
@@ -246,20 +256,28 @@ def evaluate_policy(
 
     matches: list[PolicyMatch] = []
     for rule in active_rules:
-        matched, reason = _rule_matches(rule, context)
+        matched, reason = _rule_matches(rule, evaluation_context)
         if matched:
             matches.append(
                 PolicyMatch(
                     rule_id=rule.rule_id,
                     rule_name=rule.name,
-                    effect=rule.effect,
+                    effect="allow" if rule.effect == "allow" else "block",
                     priority=rule.priority,
                     reason=reason,
                 ),
             )
 
-    final_effect = resolve_policy_effect(matches)
+    final_effect: PolicyDecision = "block" if has_suspicious_signal else resolve_policy_effect(matches)
     decision, allowed = effect_to_decision(final_effect, mode)
+    if final_effect == "block":
+        evaluation_context = replace(
+            evaluation_context,
+            risk_score=max(
+                evaluation_context.risk_score,
+                RISK_THRESHOLD_BLOCK_MIN,
+            ),
+        )
 
     return PolicyEvaluation(
         evaluation_id=f"pe-{uuid4().hex[:12]}",
@@ -267,7 +285,7 @@ def evaluate_policy(
         mode=mode,
         allowed=allowed,
         final_effect=final_effect,
-        context=context,
+        context=evaluation_context,
         matched_rules=matches,
     )
 
@@ -293,96 +311,26 @@ def apply_policy_to_plan(
     )
     evaluation = evaluate_policy(context, rules, mode=mode)
 
-    if mode == "monitor":
-        return plan, evaluation
-
-    if evaluation.final_effect == "review":
-        updated_plan = ExecutionPlan(
-            agent_id=plan.agent_id,
-            file_path=plan.file_path,
-            verdict="warn",
-            allowed=plan.allowed,
-            should_halt=plan.should_halt,
-            should_warn=True,
-            lane=plan.lane,
-            isolation_profile=plan.isolation_profile,
-            approval_mode=plan.approval_mode,
-            escalation_reason=plan.escalation_reason,
-            summary=f"{plan.summary} | Policy requires supervisor review.",
-            target=plan.target,
-            action_type=plan.action_type,
-            risk_score=max(plan.risk_score, 50),
-            matched_patterns=plan.matched_patterns,
-            recommended_actions=plan.recommended_actions,
-            decision_source=plan.decision_source,
-            registry_threat_profile=plan.registry_threat_profile,
-            registry_tags=plan.registry_tags,
-            requires_sandbox=plan.requires_sandbox,
-            requires_audit_log=plan.requires_audit_log,
-            requires_human_in_loop=True,
-            scan_id=plan.scan_id,
-            client_id=plan.client_id,
-            session_id=plan.session_id,
-        )
-        return updated_plan, evaluation
-
-    if evaluation.final_effect == "quarantine":
-        updated_plan = ExecutionPlan(
-            agent_id=plan.agent_id,
-            file_path=plan.file_path,
-            verdict="quarantine",
-            allowed=False,
-            should_halt=True,
-            should_warn=True,
-            lane="quarantine_isolation",
-            isolation_profile="full_quarantine",
-            approval_mode="security_review",
-            escalation_reason=plan.escalation_reason,
-            summary=f"{plan.summary} | Policy forced quarantine.",
-            target=plan.target,
-            action_type=plan.action_type,
-            risk_score=max(plan.risk_score, 75),
-            matched_patterns=plan.matched_patterns,
-            recommended_actions=plan.recommended_actions,
-            decision_source=plan.decision_source,
-            registry_threat_profile=plan.registry_threat_profile,
-            registry_tags=plan.registry_tags,
-            requires_sandbox=True,
-            requires_audit_log=plan.requires_audit_log,
-            requires_human_in_loop=True,
-            scan_id=plan.scan_id,
-            client_id=plan.client_id,
-            session_id=plan.session_id,
-        )
-        return updated_plan, evaluation
-
     if evaluation.final_effect == "block":
-        updated_plan = ExecutionPlan(
-            agent_id=plan.agent_id,
-            file_path=plan.file_path,
+        updated_plan = replace(
+            plan,
             verdict="block",
             allowed=False,
             should_halt=True,
-            should_warn=True,
+            should_warn=False,
             lane="hard_block",
             isolation_profile="full_quarantine",
             approval_mode="security_review",
-            escalation_reason=plan.escalation_reason,
+            escalation_reason="block_required",
             summary=f"{plan.summary} | Policy blocked execution.",
-            target=plan.target,
-            action_type=plan.action_type,
-            risk_score=max(plan.risk_score, 90),
-            matched_patterns=plan.matched_patterns,
-            recommended_actions=plan.recommended_actions,
-            decision_source=plan.decision_source,
-            registry_threat_profile=plan.registry_threat_profile,
-            registry_tags=plan.registry_tags,
+            risk_score=max(plan.risk_score, RISK_THRESHOLD_BLOCK_MIN),
+            recommended_actions=[
+                "Block execution immediately.",
+                "Record the denial in audit logs.",
+                "Escalate to security review.",
+            ],
             requires_sandbox=True,
-            requires_audit_log=plan.requires_audit_log,
             requires_human_in_loop=True,
-            scan_id=plan.scan_id,
-            client_id=plan.client_id,
-            session_id=plan.session_id,
         )
         return updated_plan, evaluation
 
@@ -395,18 +343,18 @@ if __name__ == "__main__":
     sample_plan = ExecutionPlan(
         agent_id="agent-scanner",
         file_path="app/auth/secrets_manager.py",
-        verdict="warn",
-        allowed=True,
-        should_halt=False,
-        should_warn=True,
-        lane="review_required",
-        isolation_profile="restricted_sandbox",
-        approval_mode="operator_confirm",
-        escalation_reason="scan_warning",
-        summary="Potentially unsafe tool call detected.",
+        verdict="block",
+        allowed=False,
+        should_halt=True,
+        should_warn=False,
+        lane="hard_block",
+        isolation_profile="full_quarantine",
+        approval_mode="security_review",
+        escalation_reason="block_required",
+        summary="Unsafe tool call blocked.",
         target="app/auth/secrets_manager.py",
         action_type="tool_call",
-        risk_score=68,
+        risk_score=RISK_THRESHOLD_BLOCK_MIN,
         matched_patterns=["credential_access"],
         recommended_actions=["inspect", "review"],
         decision_source="guard_api",

@@ -5,12 +5,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-CorrelationVerdict = Literal["allow", "warn", "quarantine", "block"]
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
+
+CorrelationVerdict = Literal["allow", "block"]
 
 _VERDICT_ESCALATION_WEIGHT: dict[str, int] = {
     "block": 30,
-    "quarantine": 20,
-    "warn": 10,
     "allow": 0,
 }
 
@@ -31,13 +31,7 @@ def _normalize(value: str | None) -> str | None:
 
 
 def _verdict_from_score(score: int) -> CorrelationVerdict:
-    if score >= 85:
-        return "block"
-    if score >= 60:
-        return "quarantine"
-    if score >= 30:
-        return "warn"
-    return "allow"
+    return "block" if score > RISK_THRESHOLD_ALLOW_MAX else "allow"
 
 
 def _risk_weight(risk_score: int) -> int:
@@ -131,13 +125,14 @@ def build_correlation_event(
         raise ValueError("target is required")
 
     bounded_risk_score = max(0, min(int(risk_score), 100))
+    normalized_verdict: CorrelationVerdict = "allow" if verdict == "allow" else "block"
 
     return CorrelationEvent(
         event_id=normalized_event_id,
         timestamp=timestamp or _utc_now(),
         action_type=normalized_action_type,
         target=normalized_target,
-        verdict=verdict,
+        verdict=normalized_verdict,
         risk_score=bounded_risk_score,
         client_id=_normalize(client_id),
         session_id=_normalize(session_id),
@@ -164,7 +159,7 @@ def correlate_attack_events(
             events=[],
         )
 
-    high_risk_events = sum(1 for event in events if event.risk_score >= 70)
+    high_risk_events = sum(1 for event in events if event.risk_score >= RISK_THRESHOLD_BLOCK_MIN)
 
     target_counts: Counter[str] = Counter(event.target for event in events)
     action_counts: Counter[str] = Counter(event.action_type for event in events)
@@ -172,6 +167,10 @@ def correlate_attack_events(
 
     reasons: list[str] = []
     escalation_score = 0
+
+    suspicious_events = [event for event in events if event.verdict != "allow" or event.risk_score > RISK_THRESHOLD_ALLOW_MAX]
+    if suspicious_events:
+        reasons.append("Detected blocked or above-allow-threshold event(s).")
 
     for event in events:
         escalation_score += _VERDICT_ESCALATION_WEIGHT.get(event.verdict, 0)
@@ -199,7 +198,9 @@ def correlate_attack_events(
         escalation_score += 10
 
     escalation_score = min(escalation_score, 100)
-    verdict = _verdict_from_score(escalation_score)
+    verdict = "block" if suspicious_events or reasons or _verdict_from_score(escalation_score) == "block" else "allow"
+    if verdict == "block":
+        escalation_score = max(escalation_score, RISK_THRESHOLD_BLOCK_MIN)
 
     if not reasons:
         reasons.append("No correlated escalation patterns were detected.")

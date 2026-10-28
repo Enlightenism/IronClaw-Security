@@ -27,7 +27,7 @@ def test_decide_action_allows_safe_request() -> None:
     assert result["haltedbyboundary"] is False
 
 
-def test_decide_action_routes_indirect_injection_to_review() -> None:
+def test_decide_action_blocks_indirect_injection_and_queues_review() -> None:
     result = decideaction(
         actiontype="httpfetch",
         target="https://example.com/untrusted",
@@ -42,14 +42,15 @@ def test_decide_action_routes_indirect_injection_to_review() -> None:
         },
     )
 
-    assert result["outcome"] == "review"
+    assert result["outcome"] == "block"
     assert result["state"] == "queuedforreview"
-    assert result["shouldexecute"] is True
+    assert result["shouldexecute"] is False
+    assert result["haltedbyboundary"] is True
     assert result["requiresreview"] is True
     assert result["promptinjection"]["flagged"] is True
 
 
-def test_decide_action_quarantines_exfiltration_path() -> None:
+def test_decide_action_blocks_exfiltration_path() -> None:
     result = decideaction(
         actiontype="toolcall",
         target="shell",
@@ -60,8 +61,8 @@ def test_decide_action_quarantines_exfiltration_path() -> None:
         filepath="app/api/actionexecute.py",
     )
 
-    assert result["outcome"] == "quarantine"
-    assert result["state"] == "quarantined"
+    assert result["outcome"] == "block"
+    assert result["state"] in {"queuedforreview", "denied"}
     assert result["shouldexecute"] is False
     assert result["haltedbyboundary"] is True
 
@@ -81,6 +82,6 @@ def test_action_decision_route_returns_typed_response() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["outcome"] in {"allow", "review", "quarantine", "deny"}
+    assert body["outcome"] in {"allow", "block"}
     assert body["state"] in {"approved", "queuedforreview", "quarantined", "denied"}
     assert isinstance(body["reasons"], list)

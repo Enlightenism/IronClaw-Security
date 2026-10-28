@@ -10,7 +10,7 @@ from app.api.actionpolicy import evaluateactionpolicy
 router = APIRouter(prefix="/guard", tags=["action-guard"])
 
 
-GuardVerdict = Literal["allow", "review", "quarantine", "deny"]
+GuardVerdict = Literal["allow", "block"]
 
 
 class ActionGuardRequest(BaseModel):
@@ -49,7 +49,7 @@ class ActionGuardResponse(BaseModel):
     reasons: list[GuardReasonView] = Field(default_factory=list)
     promptinjection: dict[str, Any] = Field(default_factory=dict)
     # Local guard enrichment fields — propagated upstream to decide_action and review records
-    guard_verdict: str | None = Field(None, description="Verdict returned by local guard analysis layer.")
+    guard_verdict: GuardVerdict | None = Field(None, description="Verdict returned by local guard analysis layer.")
     guard_reasoning: str | None = Field(None, description="Reasoning text from local guard analysis.")
     guard_confidence: float | None = Field(None, description="Confidence score from local guard analysis.")
     guard_model: str | None = Field(None, description="Local guard model identifier used for analysis.")
@@ -79,34 +79,18 @@ def guardaction(
     )
 
     policy_action = policy["action"]
-    if policy_action == "allow":
-        verdict: GuardVerdict = "allow"
-        allowed = True
-        haltedbyboundary = False
-        requiresreview = False
-        quarantined = False
+    allowed = policy_action == "allow"
+    verdict: GuardVerdict = "allow" if allowed else "block"
+    haltedbyboundary = not allowed
+    requiresreview = bool(policy.get("shouldreview")) and not allowed
+    quarantined = False
+
+    if allowed:
         reason = "Guard allowed the action."
-    elif policy_action == "review":
-        verdict = "review"
-        allowed = True
-        haltedbyboundary = False
-        requiresreview = True
-        quarantined = False
-        reason = "Guard routed the action for review."
-    elif policy_action == "quarantine":
-        verdict = "quarantine"
-        allowed = False
-        haltedbyboundary = True
-        requiresreview = False
-        quarantined = True
-        reason = "Guard quarantined the action."
+    elif requiresreview:
+        reason = "Guard blocked the action and routed it for review."
     else:
-        verdict = "deny"
-        allowed = False
-        haltedbyboundary = True
-        requiresreview = False
-        quarantined = False
-        reason = "Guard denied the action."
+        reason = "Guard blocked the action."
 
     return {
         "actiontype": actiontype,

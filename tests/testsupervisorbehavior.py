@@ -137,8 +137,8 @@ def test_review_behavior_enqueues_exactly_once():
         metadata={"request_id": "req-review-1"},
     )
 
-    assert result.verdict == "review"
-    assert result.allowed is True
+    assert result.verdict == "block"
+    assert result.allowed is False
     assert result.should_review is True
     assert len(review_queue.items) == 1
     assert review_queue.items[0]["session_id"] == "sess-review-1"
@@ -167,7 +167,7 @@ def test_review_behavior_uses_submit_when_enqueue_missing():
         network_url="https://example.com/api",
     )
 
-    assert result.verdict == "review"
+    assert result.verdict == "block"
     assert len(review_queue.items) == 1
     assert review_queue.items[0]["session_id"] == "sess-review-2"
     assert len(pipeline.calls) == 1
@@ -181,7 +181,6 @@ def test_allow_behavior_never_enqueues_review():
                 verdict="allow",
                 allowed=True,
                 risk_delta=4,
-                matched_rules=["pipeline:allow"],
             ),
         ],
     )
@@ -227,7 +226,7 @@ def test_block_behavior_never_enqueues_review():
     assert len(audit_sink.events) >= 1
 
 
-def test_quarantine_behavior_never_enqueues_review():
+def test_quarantine_signal_blocks_without_enqueuing_review():
     supervisor, pipeline, review_queue, audit_sink = _build(
         decisions=[
             _Decision(
@@ -247,9 +246,9 @@ def test_quarantine_behavior_never_enqueues_review():
         artifact_paths=["../secret.txt"],
     )
 
-    assert result.verdict == "quarantine"
+    assert result.verdict == "block"
     assert result.allowed is False
-    assert result.should_quarantine is True
+    assert result.should_quarantine is False
     assert len(review_queue.items) == 0
     assert len(pipeline.calls) == 1
     assert len(audit_sink.events) >= 1
@@ -264,7 +263,7 @@ def test_missing_session_short_circuits_pipeline():
         command="echo hi",
     )
 
-    assert result.verdict == "quarantine"
+    assert result.verdict == "block"
     assert result.allowed is False
     assert "supervisor:missing_session_id" in result.matched_rules
     assert len(pipeline.calls) == 0
@@ -281,7 +280,7 @@ def test_missing_tool_short_circuits_pipeline():
         command="echo hi",
     )
 
-    assert result.verdict == "quarantine"
+    assert result.verdict == "block"
     assert result.allowed is False
     assert "supervisor:missing_tool_name" in result.matched_rules
     assert len(pipeline.calls) == 0
@@ -291,7 +290,7 @@ def test_missing_tool_short_circuits_pipeline():
 
 def test_input_normalization_behavior_is_stable():
     supervisor, pipeline, _, _ = _build(
-        decisions=[_Decision(verdict="allow", allowed=True, matched_rules=["pipeline:allow"])],
+        decisions=[_Decision(verdict="allow", allowed=True)],
     )
 
     result = supervisor.evaluate(
@@ -341,7 +340,7 @@ def test_reason_dedup_behavior_is_stable():
 def test_audit_record_method_is_supported():
     audit_sink = _AuditRecord()
     supervisor, _, _, _ = _build(
-        decisions=[_Decision(verdict="allow", allowed=True, matched_rules=["pipeline:allow"])],
+        decisions=[_Decision(verdict="allow", allowed=True)],
         audit_sink=audit_sink,
     )
 
@@ -358,7 +357,7 @@ def test_audit_record_method_is_supported():
 def test_audit_emit_method_is_supported():
     audit_sink = _AuditEmit()
     supervisor, _, _, _ = _build(
-        decisions=[_Decision(verdict="allow", allowed=True, matched_rules=["pipeline:allow"])],
+        decisions=[_Decision(verdict="allow", allowed=True)],
         audit_sink=audit_sink,
     )
 
@@ -375,7 +374,7 @@ def test_audit_emit_method_is_supported():
 def test_audit_write_method_is_supported():
     audit_sink = _AuditWrite()
     supervisor, _, _, _ = _build(
-        decisions=[_Decision(verdict="allow", allowed=True, matched_rules=["pipeline:allow"])],
+        decisions=[_Decision(verdict="allow", allowed=True)],
         audit_sink=audit_sink,
     )
 
@@ -408,8 +407,8 @@ def test_missing_review_queue_methods_does_not_break_review_flow():
         command="echo maybe",
     )
 
-    assert result.verdict == "review"
-    assert result.allowed is True
+    assert result.verdict == "block"
+    assert result.allowed is False
     assert result.should_review is True
     assert len(pipeline.calls) == 1
     assert isinstance(review_queue, _ReviewQueueBroken)
@@ -418,7 +417,7 @@ def test_missing_review_queue_methods_does_not_break_review_flow():
 
 def test_missing_audit_methods_does_not_break_allow_flow():
     supervisor, pipeline, review_queue, audit_sink = _build(
-        decisions=[_Decision(verdict="allow", allowed=True, matched_rules=["pipeline:allow"])],
+        decisions=[_Decision(verdict="allow", allowed=True)],
         audit_sink=_AuditBroken(),
     )
 
@@ -438,7 +437,7 @@ def test_missing_audit_methods_does_not_break_allow_flow():
 def test_multiple_calls_follow_pipeline_sequence():
     supervisor, pipeline, review_queue, audit_sink = _build(
         decisions=[
-            _Decision(verdict="allow", allowed=True, matched_rules=["pipeline:allow"]),
+            _Decision(verdict="allow", allowed=True),
             _Decision(
                 verdict="review",
                 allowed=True,
@@ -471,7 +470,7 @@ def test_multiple_calls_follow_pipeline_sequence():
     )
 
     assert first.verdict == "allow"
-    assert second.verdict == "review"
+    assert second.verdict == "block"
     assert third.verdict == "block"
     assert len(review_queue.items) == 1
     assert review_queue.items[0]["session_id"] == "sess-seq-2"
@@ -489,7 +488,7 @@ def test_multiple_calls_follow_pipeline_sequence():
 )
 def test_behavior_preserves_tool_specific_context(tool_name: str, payload: dict[str, Any]):
     supervisor, pipeline, _, _ = _build(
-        decisions=[_Decision(verdict="allow", allowed=True, matched_rules=["pipeline:allow"])],
+        decisions=[_Decision(verdict="allow", allowed=True)],
     )
 
     kwargs = {"session_id": f"sess-{tool_name}", "tool_name": tool_name}

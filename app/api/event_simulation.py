@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["event-simulation"])
 
-AllowedVerdict = Literal["allow", "warn", "quarantine", "block"]
+AllowedVerdict = Literal["allow", "block"]
 AllowedEventType = Literal[
     "prompt_injection",
     "tool_execution",
@@ -79,7 +79,7 @@ def _build_verdict(
     actions: list[str] = []
 
     if request.event_type == "prompt_injection":
-        verdict: AllowedVerdict = "block" if request.severity in {"high", "critical"} else "warn"
+        verdict: AllowedVerdict = "block"
         reasons.append("Simulated prompt-injection pattern requires defensive handling.")
         actions.extend(
             [
@@ -89,7 +89,7 @@ def _build_verdict(
             ]
         )
     elif request.event_type == "tool_execution":
-        verdict = "quarantine" if request.severity in {"high", "critical"} else "warn"
+        verdict = "block"
         reasons.append("Simulated tool execution needs policy and sandbox validation.")
         actions.extend(
             [
@@ -109,7 +109,7 @@ def _build_verdict(
             ]
         )
     elif request.event_type == "unsafe_action":
-        verdict = "block" if request.severity in {"high", "critical"} else "quarantine"
+        verdict = "block"
         reasons.append("Simulated unsafe action crosses runtime safety boundaries.")
         actions.extend(
             [
@@ -119,7 +119,7 @@ def _build_verdict(
             ]
         )
     elif request.event_type == "policy_violation":
-        verdict = "quarantine"
+        verdict = "block"
         reasons.append("Simulated request violates declared security policy.")
         actions.extend(
             [
@@ -139,7 +139,7 @@ def _build_verdict(
             ]
         )
     else:
-        verdict = "warn"
+        verdict = "block"
         reasons.append("Simulated telemetry gap reduces observability and trust.")
         actions.extend(
             [

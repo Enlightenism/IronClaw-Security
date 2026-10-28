@@ -63,7 +63,7 @@ def test_stream_guard_requires_upstream_url() -> None:
     assert response.json()["detail"] == "Missing 'upstream_url' in request body."
 
 
-def test_stream_guard_dryrun_streams_content_without_blocking(monkeypatch) -> None:
+def test_stream_guard_dryrun_truncates_on_block_verdict(monkeypatch) -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if str(request.url).endswith("/policy/guard-bundle"):
             return httpx.Response(
@@ -105,8 +105,9 @@ def test_stream_guard_dryrun_streams_content_without_blocking(monkeypatch) -> No
     assert response.status_code == 200
     text = response.text
     assert "ironclaw_guard_info" in text
-    assert "hello world" in text
-    assert "Stream truncated due to high-risk content" not in text
+    assert "hello world" not in text
+    assert "Stream truncated due to high-risk content" in text
+    assert "detected in dryrun" in text
 
 
 def test_stream_guard_enforce_truncates_on_block_verdict(monkeypatch) -> None:
@@ -152,14 +153,15 @@ def test_stream_guard_enforce_truncates_on_block_verdict(monkeypatch) -> None:
     assert "ironclaw_guard_info" in text
     assert "Stream truncated due to high-risk content" in text
     assert "prompt injection detected" in text
+    assert "unsafe payload continues" not in text
 
 
-def test_stream_guard_assist_does_not_truncate(monkeypatch) -> None:
+def test_stream_guard_assist_truncates_on_block(monkeypatch) -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if str(request.url).endswith("/policy/guard-bundle"):
             return httpx.Response(
                 200,
-                json={"bundle_verdict": "quarantine", "reason": "suspicious output"},
+                json={"bundle_verdict": "block", "reason": "suspicious output"},
             )
 
         return httpx.Response(
@@ -195,5 +197,6 @@ def test_stream_guard_assist_does_not_truncate(monkeypatch) -> None:
     assert response.status_code == 200
     text = response.text
     assert "ironclaw_guard_info" in text
-    assert "chunk-1 chunk-2" in text
-    assert "Stream truncated due to high-risk content" not in text
+    assert "chunk-1 chunk-2" not in text
+    assert "Stream truncated due to high-risk content" in text
+    assert "suspicious output" in text

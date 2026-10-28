@@ -188,6 +188,8 @@ def test_claude_code_route_contract_handshake_manifest_and_secret_scan_gate():
     manifest_payload = manifest.json()
     assert manifest_payload["platform"] == "claude-code"
     assert manifest_payload["adapter_name"] == "ironclaw-claude-code"
+    assert manifest_payload["policy_bindings"]["verdicts"]["warn"] == []
+    assert manifest_payload["policy_bindings"]["verdicts"]["quarantine"] == []
     assert "tool_call" in manifest_payload["supported_action_types"]
     assert any(cap["name"] == "audit-trail" for cap in manifest_payload["capabilities"])
 
@@ -207,6 +209,9 @@ def test_claude_code_route_contract_handshake_manifest_and_secret_scan_gate():
     assert evaluate.status_code == 200, evaluate.text
     evaluate_payload = evaluate.json()
     assert evaluate_payload["verdict"] == "block"
+    assert evaluate_payload["should_allow"] is False
+    assert evaluate_payload["should_warn"] is False
+    assert evaluate_payload["should_quarantine"] is False
     assert evaluate_payload["should_block"] is True
     assert evaluate_payload["secret_scan"]["scanned"] is True
     assert evaluate_payload["audit_trail"]["secret_scan_triggered"] is True

@@ -305,23 +305,28 @@ class TestScoreToVerdict:
     def test_block_at_1_0(self):
         assert score_to_verdict(1.0) == DetectionVerdict.BLOCK
 
-    def test_review_at_0_50(self):
-        assert score_to_verdict(0.50) == DetectionVerdict.REVIEW
+    def test_block_at_0_50(self):
+        assert score_to_verdict(0.50) == DetectionVerdict.BLOCK
 
-    def test_review_at_0_74(self):
-        assert score_to_verdict(0.74) == DetectionVerdict.REVIEW
+    def test_block_at_0_74(self):
+        assert score_to_verdict(0.74) == DetectionVerdict.BLOCK
 
-    def test_monitor_at_0_25(self):
-        assert score_to_verdict(0.25) == DetectionVerdict.MONITOR
+    def test_block_at_0_25(self):
+        assert score_to_verdict(0.25) == DetectionVerdict.BLOCK
 
-    def test_monitor_at_0_49(self):
-        assert score_to_verdict(0.49) == DetectionVerdict.MONITOR
+    def test_block_at_0_49(self):
+        assert score_to_verdict(0.49) == DetectionVerdict.BLOCK
 
     def test_allow_at_0_0(self):
         assert score_to_verdict(0.0) == DetectionVerdict.ALLOW
 
-    def test_allow_at_0_24(self):
-        assert score_to_verdict(0.24) == DetectionVerdict.ALLOW
+    def test_any_positive_score_blocks(self):
+        assert score_to_verdict(0.0001) == DetectionVerdict.BLOCK
+
+    def test_nonfinite_scores_block(self):
+        assert score_to_verdict(float("nan")) == DetectionVerdict.BLOCK
+        assert score_to_verdict(float("inf")) == DetectionVerdict.BLOCK
+        assert score_to_verdict(float("-inf")) == DetectionVerdict.BLOCK
 
 
 # ---------------------------------------------------------------------------
@@ -475,7 +480,7 @@ class TestBuildScoreRationale:
 
     def test_high_confidence_line_included(self):
         m = _make_match(confidence=0.90)
-        rationale = build_score_rationale([m], 0.50, DetectionVerdict.REVIEW)
+        rationale = build_score_rationale([m], 0.50, DetectionVerdict.BLOCK)
         assert any("high-confidence" in r.lower() for r in rationale)
 
     def test_critical_severity_line_included(self):
@@ -570,7 +575,10 @@ class TestThreatScoringEngine:
         assert self.engine.verdict_for_score(0.80) == DetectionVerdict.BLOCK
 
     def test_verdict_for_score_allow(self):
-        assert self.engine.verdict_for_score(0.10) == DetectionVerdict.ALLOW
+        assert self.engine.verdict_for_score(0.0) == DetectionVerdict.ALLOW
+
+    def test_verdict_for_any_positive_score_blocks(self):
+        assert self.engine.verdict_for_score(0.10) == DetectionVerdict.BLOCK
 
     def test_severity_for_score_critical(self):
         assert self.engine.severity_for_score(0.90) == ThreatSeverityLevel.CRITICAL
@@ -616,14 +624,14 @@ class TestScoreResult:
     def test_all_slots_accessible(self):
         r = ScoreResult(
             score=0.50,
-            verdict=DetectionVerdict.REVIEW,
+            verdict=DetectionVerdict.BLOCK,
             severity=ThreatSeverityLevel.MEDIUM,
             risk_families=["ransomware"],
             mitre_techniques=["T1059"],
             rationale=["line1"],
         )
         assert r.score == 0.50
-        assert r.verdict == DetectionVerdict.REVIEW
+        assert r.verdict == DetectionVerdict.BLOCK
         assert r.severity == ThreatSeverityLevel.MEDIUM
         assert r.risk_families == ["ransomware"]
         assert r.mitre_techniques == ["T1059"]
@@ -666,11 +674,11 @@ class TestGetScoringEngine:
 class TestEndToEndScenarios:
     """Integration-style tests using the full scoring pipeline end-to-end."""
 
-    def test_all_info_iocs_yield_allow(self):
+    def test_any_ioc_match_blocks_regardless_of_severity(self):
         matches = [_make_match(severity=ThreatSeverityLevel.INFO, confidence=0.20) for _ in range(3)]
         engine = ThreatScoringEngine()
         result = engine.compute(matches)
-        assert result.verdict in (DetectionVerdict.ALLOW, DetectionVerdict.MONITOR)
+        assert result.verdict == DetectionVerdict.BLOCK
 
     def test_mix_critical_and_info_scores_correctly(self):
         critical = _make_match(severity=ThreatSeverityLevel.CRITICAL, confidence=1.0, ioc_type=IOCTypeEnum.CVE)

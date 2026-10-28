@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import httpx
+import pytest
 
 from app.api.claude_guard_router import router as claude_guard_router
 from app.core.auth import require_api_key
@@ -135,16 +136,18 @@ def test_guard_router_enforce_truncates_on_block(monkeypatch) -> None:
     assert "ironclaw_guard_info" in text
     assert "Stream truncated due to high-risk content" in text
     assert "prompt injection detected" in text
+    assert "unsafe router output" not in text
 
 
-def test_guard_router_assist_does_not_truncate(monkeypatch) -> None:
+@pytest.mark.parametrize("guard_mode", ["assist", "dryrun"])
+def test_guard_router_always_truncates_on_block(monkeypatch, guard_mode: str) -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
 
         if url.endswith("/policy/guard-bundle"):
             return httpx.Response(
                 200,
-                json={"bundle_verdict": "quarantine", "reason": "needs review"},
+                json={"bundle_verdict": "block", "reason": "needs review"},
             )
 
         return httpx.Response(
@@ -173,12 +176,13 @@ def test_guard_router_assist_does_not_truncate(monkeypatch) -> None:
                 "user_prompt": "Review this",
             },
             "guard_base_url": "https://guard.example",
-            "guard_mode": "assist",
+            "guard_mode": guard_mode,
         },
     )
 
     assert response.status_code == 200
     text = response.text
     assert "ironclaw_guard_info" in text
-    assert "assist mode continues" in text
-    assert "Stream truncated due to high-risk content" not in text
+    assert "assist mode continues" not in text
+    assert "Stream truncated due to high-risk content" in text
+    assert "needs review" in text

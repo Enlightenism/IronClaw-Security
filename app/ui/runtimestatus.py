@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
 from app.models.uipages import PageSection, UIPageDefinition
 
 _RUNTIME_OVERVIEW_ITEMS: list[dict[str, Any]] = [
@@ -13,19 +14,14 @@ _RUNTIME_OVERVIEW_ITEMS: list[dict[str, Any]] = [
 
 _RISK_THRESHOLD_ITEMS: list[dict[str, Any]] = [
     {
-        "range": "0-49",
+        "range": f"0-{RISK_THRESHOLD_ALLOW_MAX}",
         "decision": "Allow",
         "detail": "Requests may continue through guarded dry-run execution.",
     },
     {
-        "range": "50-89",
-        "decision": "Review",
-        "detail": "Requests are diverted into review workflow before execution.",
-    },
-    {
-        "range": "90+",
+        "range": f"{RISK_THRESHOLD_ALLOW_MAX + 1}+",
         "decision": "Block",
-        "detail": "Requests are halted before executor invocation.",
+        "detail": (f"Requests above the configured allow maximum are blocked; block risk scores are normalized to at least {RISK_THRESHOLD_BLOCK_MIN}."),
     },
 ]
 
@@ -165,7 +161,7 @@ def get_runtime_status_page() -> dict[str, Any]:
         },
         "policy": {
             "policymode": "dryrun",
-            "defaultaction": "review",
+            "defaultaction": "block",
         },
         "defaultfilepath": str(_lookup(executor_items, "Default File Path", "")),
         "metadata": page.metadata,

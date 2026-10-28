@@ -6,9 +6,9 @@ import pytest
 
 def _base_payload(risk_score: int) -> dict:
     return {
-        "action_type": "httpfetch",
-        "target": "https://example.com",
-        "content": f"Boundary test for risk score {risk_score}",
+        "action_type": "file_edit",
+        "target": "notes/output.txt",
+        "content": f"Update a harmless local note for risk score {risk_score}.",
         "risk_score": risk_score,
         "client_id": f"boundary-client-{risk_score}",
         "session_id": f"boundary-session-{risk_score}",

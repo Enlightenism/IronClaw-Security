@@ -19,7 +19,7 @@ def test_command_supervisor_allows_safe_python_command() -> None:
     )
 
     assert decision.allowed is True
-    assert decision.verdict in {"allow", "review"}
+    assert decision.verdict == "allow"
     assert decision.executable == "python"
 
 
@@ -35,7 +35,7 @@ def test_command_supervisor_blocks_known_reverse_shell() -> None:
 
     assert decision.allowed is False
     assert decision.should_block is True
-    assert decision.verdict in {"block", "quarantine"}
+    assert decision.verdict == "block"
 
 
 def test_network_guard_blocks_metadata_service() -> None:
@@ -86,7 +86,7 @@ def test_file_return_guard_allows_markdown_artifact(tmp_path) -> None:
     decision = guard.evaluate(path=str(artifact))
 
     assert decision.extension == ".md"
-    assert decision.verdict in {"allow", "review", "block", "quarantine"}
+    assert decision.verdict in {"allow", "block"}
 
 
 def test_sandbox_router_denies_blocked_command() -> None:
@@ -102,7 +102,7 @@ def test_sandbox_router_denies_blocked_command() -> None:
 
     assert result.executed is False
     assert result.executionstate == "denied"
-    assert result.verdict in {"block", "quarantine"}
+    assert result.verdict == "block"
 
 
 def test_sandbox_router_executes_allowed_request() -> None:
@@ -127,7 +127,7 @@ def test_sandbox_router_executes_allowed_request() -> None:
     assert captured["command"] == ["python", "-c", "print('ok')"]
 
 
-def test_sandbox_runtime_adapter_evaluate_only_reports_review_or_block() -> None:
+def test_sandbox_runtime_adapter_evaluate_only_reports_binary_verdict() -> None:
     adapter = build_sandboxruntimeadapter()
 
     decision = adapter.evaluate_only(
@@ -137,11 +137,11 @@ def test_sandbox_runtime_adapter_evaluate_only_reports_review_or_block() -> None
         environment_scope="sandbox",
     )
 
-    assert decision["verdict"] in {"review", "block", "quarantine"}
+    assert decision["verdict"] == "block"
     assert decision["allowed"] in {True, False}
 
 
-def test_toolcall_guard_reviews_high_risk_tool() -> None:
+def test_toolcall_guard_blocks_high_risk_tool() -> None:
     guard = build_toolcallguard()
 
     decision = guard.evaluate(
@@ -154,7 +154,7 @@ def test_toolcall_guard_reviews_high_risk_tool() -> None:
         ),
     )
 
-    assert decision.verdict in {"review", "block", "quarantine"}
+    assert decision.verdict == "block"
     assert decision.risk_delta >= 20
 
 

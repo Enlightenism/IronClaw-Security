@@ -11,7 +11,7 @@ ActionType = Literal[
     "file_write",
     "browser_open",
 ]
-VerdictType = Literal["allow", "warn", "quarantine", "block"]
+VerdictType = Literal["allow", "block"]
 PolicyMode = Literal["allow", "review", "block"]
 ReasonSource = Literal["policy", "scan", "ai"]
 FinalDecisionSource = Literal["policy", "scan", "policy_and_scan"]
@@ -42,7 +42,7 @@ class GuardActionResponse(BaseModel):
     matched_patterns: list[str]
     scan_id: str | None
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     client_id: str | None = None
     session_id: str | None = None
     reasons: list[ReasonItem] = Field(default_factory=list)
@@ -63,7 +63,7 @@ class ActionPolicyResponse(BaseModel):
     verdict: VerdictType
     summary: str
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     client_id: str | None = None
     session_id: str | None = None
     reasons: list[ReasonItem] = Field(default_factory=list)
@@ -88,7 +88,7 @@ class ActionDecisionResponse(BaseModel):
     matched_patterns: list[str]
     scan_id: str | None
     should_halt: bool
-    should_warn: bool
+    should_warn: Literal[False]
     decision_source: FinalDecisionSource
     client_id: str | None = None
     session_id: str | None = None
