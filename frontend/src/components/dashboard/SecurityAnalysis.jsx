@@ -47,9 +47,7 @@ const verdictStyle = (verdict) => {
 const verdictColor = (verdict) => {
   const normalized = normalizeVerdict(verdict);
   return (
-    VERDICT_COLORS[normalized] ??
-    LEGACY_VERDICT_COLORS[normalized] ??
-    "#737373"
+    VERDICT_COLORS[normalized] ?? LEGACY_VERDICT_COLORS[normalized] ?? "#737373"
   );
 };
 

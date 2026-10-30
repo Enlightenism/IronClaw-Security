@@ -537,7 +537,10 @@ const WalletCard = ({
   const [catalogueLoading, setCatalogueLoading] = useState(true);
   const [catalogueError, setCatalogueError] = useState(false);
 
-  const packageIds = useMemo(() => new Set(tiers.map((tier) => tier.id)), [tiers]);
+  const packageIds = useMemo(
+    () => new Set(tiers.map((tier) => tier.id)),
+    [tiers],
+  );
   const defaultPackageId = tiers[0]?.id ?? null;
 
   useEffect(() => {
@@ -639,49 +642,49 @@ const WalletCard = ({
         {!catalogueLoading &&
           !catalogueError &&
           tiers.map((t) => (
-          <div key={t.id} className="flex flex-col">
-            {t.bestDeal ? (
-              <div className="mb-1.5">
-                <EnterpriseBadge />
-              </div>
-            ) : (
-              <div className="mb-1.5 h-[22px]" />
-            )}
-            <button
-              type="button"
-              onClick={() => handleCheckoutPurchase(t.id)}
-              disabled={
-                !!purchasingId ||
-                checkoutState === "pending" ||
-                checkoutState === "redirecting"
-              }
-              data-testid={`purchase-${t.id}`}
-              title={
-                stripeMode === "unconfigured"
-                  ? "Stripe publishable key is missing from the frontend build, but purchase will still be attempted through the configured checkout flow."
-                  : undefined
-              }
-              className="btn-shimmer flex flex-col items-center justify-center rounded-xl border border-[#E5E4E2]/25 bg-white/5 px-3 py-4 text-center transition hover:border-[#FFD700]/60 hover:bg-white/[0.08] disabled:opacity-60"
-            >
-              <span className="font-tech text-[11px] font-semibold uppercase tracking-widest text-[#BFC1C2]">
-                {t.name}
-              </span>
-              <span className="font-tech text-base font-bold text-white">
-                {t.units}
-              </span>
-              <span className="text-[11px] text-[#BFC1C2]">units</span>
-              <span className="mt-1 text-[10px] text-[#737373]">
-                {t.tokensPerUnit.toLocaleString()} tokens / unit
-              </span>
-              <span className="mt-2 flex items-center gap-1 text-lg font-semibold text-[#FFD700]">
-                {purchasingId === t.id || checkoutState === "pending" ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : (
-                  t.price
-                )}
-              </span>
-            </button>
-          </div>
+            <div key={t.id} className="flex flex-col">
+              {t.bestDeal ? (
+                <div className="mb-1.5">
+                  <EnterpriseBadge />
+                </div>
+              ) : (
+                <div className="mb-1.5 h-[22px]" />
+              )}
+              <button
+                type="button"
+                onClick={() => handleCheckoutPurchase(t.id)}
+                disabled={
+                  !!purchasingId ||
+                  checkoutState === "pending" ||
+                  checkoutState === "redirecting"
+                }
+                data-testid={`purchase-${t.id}`}
+                title={
+                  stripeMode === "unconfigured"
+                    ? "Stripe publishable key is missing from the frontend build, but purchase will still be attempted through the configured checkout flow."
+                    : undefined
+                }
+                className="btn-shimmer flex flex-col items-center justify-center rounded-xl border border-[#E5E4E2]/25 bg-white/5 px-3 py-4 text-center transition hover:border-[#FFD700]/60 hover:bg-white/[0.08] disabled:opacity-60"
+              >
+                <span className="font-tech text-[11px] font-semibold uppercase tracking-widest text-[#BFC1C2]">
+                  {t.name}
+                </span>
+                <span className="font-tech text-base font-bold text-white">
+                  {t.units}
+                </span>
+                <span className="text-[11px] text-[#BFC1C2]">units</span>
+                <span className="mt-1 text-[10px] text-[#737373]">
+                  {t.tokensPerUnit.toLocaleString()} tokens / unit
+                </span>
+                <span className="mt-2 flex items-center gap-1 text-lg font-semibold text-[#FFD700]">
+                  {purchasingId === t.id || checkoutState === "pending" ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    t.price
+                  )}
+                </span>
+              </button>
+            </div>
           ))}
       </div>
 

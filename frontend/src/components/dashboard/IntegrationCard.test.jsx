@@ -40,12 +40,6 @@ const renderCard = (props = {}) =>
 describe("IntegrationCard", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    Object.defineProperty(globalThis.navigator, "clipboard", {
-      value: {
-        writeText: mockWriteText.mockResolvedValue(undefined),
-      },
-      configurable: true,
-    });
   });
 
   it("does not request or expose a claim until the user generates one", async () => {
@@ -64,12 +58,12 @@ describe("IntegrationCard", () => {
   it("displays usage and blocked-attack totals for this runtime", () => {
     renderCard({ unitsConsumed: 1500, blockedAttacks: 3 });
 
-    expect(screen.getByTestId("claude-code-card-units-consumed")).toHaveTextContent(
-      "1,500",
-    );
-    expect(screen.getByTestId("claude-code-card-blocked-attacks")).toHaveTextContent(
-      "3",
-    );
+    expect(
+      screen.getByTestId("claude-code-card-units-consumed"),
+    ).toHaveTextContent("1,500");
+    expect(
+      screen.getByTestId("claude-code-card-blocked-attacks"),
+    ).toHaveTextContent("3");
   });
 
   it("requests and displays a valid one-time claim only after an explicit click", async () => {
@@ -109,9 +103,7 @@ describe("IntegrationCard", () => {
         "Unable to generate a secure install command. Please try again.",
       );
     });
-    expect(
-      screen.queryByText(invalidClaim.command),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(invalidClaim.command)).not.toBeInTheDocument();
     expect(screen.getByTestId("claude-code-card-copy")).toBeDisabled();
   });
 
@@ -147,9 +139,7 @@ describe("IntegrationCard", () => {
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledTimes(2);
     });
-    expect(
-      screen.queryByText(/unexpected-command/),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/unexpected-command/)).not.toBeInTheDocument();
     expect(screen.getByTestId("claude-code-card-copy")).toBeDisabled();
   });
 
@@ -176,16 +166,26 @@ describe("IntegrationCard", () => {
 
   it("copies the generated one-time command", async () => {
     const user = userEvent.setup();
+    Object.defineProperty(window.navigator, "clipboard", {
+      value: {
+        writeText: mockWriteText.mockResolvedValue(undefined),
+      },
+      configurable: true,
+    });
     const claim = makeClaim();
 
     renderCard({ onCreateClaim: jest.fn().mockResolvedValue(claim) });
 
     await user.click(screen.getByTestId("claude-code-card-generate"));
     await screen.findByText(claim.command);
-    await user.click(screen.getByTestId("claude-code-card-copy"));
+    const copyButton = screen.getByTestId("claude-code-card-copy");
+    expect(copyButton).toBeEnabled();
+    await user.click(copyButton);
 
-    expect(mockWriteText).toHaveBeenCalledWith(claim.command);
-    expect(mockToastSuccess).toHaveBeenCalledWith("Install command copied");
+    await waitFor(() => {
+      expect(mockWriteText).toHaveBeenCalledWith(claim.command);
+      expect(mockToastSuccess).toHaveBeenCalledWith("Install command copied");
+    });
   });
 
   it("rejects an expired claim instead of leaving its command available", async () => {

@@ -686,7 +686,10 @@ const Dashboard = () => {
     ],
   );
 
-  const installKeyDashboard = data?.metadata?.install_key_dashboard ?? {};
+  const installKeyDashboard = useMemo(
+    () => data?.metadata?.install_key_dashboard ?? {},
+    [data?.metadata?.install_key_dashboard],
+  );
   const securityProps = useMemo(
     () => ({
       unitsToday: installKeyDashboard.units_today ?? 0,
@@ -745,9 +748,7 @@ const Dashboard = () => {
         unitsConsumed: Number.isSafeInteger(runtimeSlot?.units_consumed)
           ? runtimeSlot.units_consumed
           : 0,
-        blockedAttacks: Number.isSafeInteger(
-          usageSummary.total_blocked_attacks,
-        )
+        blockedAttacks: Number.isSafeInteger(usageSummary.total_blocked_attacks)
           ? usageSummary.total_blocked_attacks
           : 0,
         onCreateClaim: createInstallClaim,

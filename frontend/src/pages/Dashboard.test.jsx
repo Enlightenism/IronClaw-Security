@@ -70,37 +70,43 @@ jest.mock("sonner", () => ({
 }));
 
 // ── WalletCard mock — captures props ───────────────────────────────────
-let capturedWalletProps = null;
+let mockCapturedWalletProps = null;
 
 jest.mock("@/components/dashboard/WalletCard", () => ({
   __esModule: true,
   default: (props) => {
-    capturedWalletProps = props;
+    mockCapturedWalletProps = props;
     return <div data-testid="wallet-card">WalletCard</div>;
   },
 }));
 
 // ── SecurityAnalysis stub — captures props ─────────────────────────────
-let capturedSecurityProps = null;
+let mockCapturedSecurityProps = null;
 
 jest.mock("@/components/dashboard/SecurityAnalysis", () => ({
   __esModule: true,
   default: (props) => {
-    capturedSecurityProps = props;
+    mockCapturedSecurityProps = props;
     return <div data-testid="security-analysis">SecurityAnalysis</div>;
   },
 }));
 
 // ── IntegrationCard stub ────────────────────────────────────────────────
-let capturedIntegrationProps = {};
+let mockCapturedIntegrationProps = {};
 
 jest.mock("@/components/dashboard/IntegrationCard", () => ({
   __esModule: true,
   default: (props) => {
-    capturedIntegrationProps[props.program] = props;
+    mockCapturedIntegrationProps[props.program] = props;
     return (
       <div data-testid={props.testid || `integration-card-${props.title}`}>
         <div>{props.title}</div>
+        <div data-testid={`${props.testid}-units-consumed`}>
+          {props.unitsConsumed}
+        </div>
+        <div data-testid={`${props.testid}-blocked-attacks`}>
+          {props.blockedAttacks}
+        </div>
         <button
           type="button"
           data-testid={`${props.testid}-generate`}
@@ -109,11 +115,7 @@ jest.mock("@/components/dashboard/IntegrationCard", () => ({
         >
           Generate
         </button>
-        <button
-          type="button"
-          data-testid={`${props.testid}-copy`}
-          disabled
-        >
+        <button type="button" data-testid={`${props.testid}-copy`} disabled>
           Copy
         </button>
       </div>
@@ -223,9 +225,9 @@ async function renderDashboard() {
 beforeEach(() => {
   jest.clearAllMocks();
   cleanup();
-  capturedWalletProps = null;
-  capturedSecurityProps = null;
-  capturedIntegrationProps = {};
+  mockCapturedWalletProps = null;
+  mockCapturedSecurityProps = null;
+  mockCapturedIntegrationProps = {};
   mockLocation.search = "";
   mockAuthState = {
     user: { email: "test@ironclaw.io" },
@@ -421,10 +423,10 @@ describe("WalletCard organizationId prop", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(capturedWalletProps).not.toBeNull();
+      expect(mockCapturedWalletProps).not.toBeNull();
     });
 
-    expect(capturedWalletProps.organizationId).toBe("org-abc");
+    expect(mockCapturedWalletProps.organizationId).toBe("org-abc");
   });
 
   it("passes organizationId='org-001' fallback when API response has no organization_id", async () => {
@@ -443,10 +445,10 @@ describe("WalletCard organizationId prop", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(capturedWalletProps).not.toBeNull();
+      expect(mockCapturedWalletProps).not.toBeNull();
     });
 
-    expect(capturedWalletProps.organizationId).toBe("org-001");
+    expect(mockCapturedWalletProps.organizationId).toBe("org-001");
   });
 
   it("passes organizationId='org-001' fallback when organization_id is null", async () => {
@@ -465,10 +467,10 @@ describe("WalletCard organizationId prop", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(capturedWalletProps).not.toBeNull();
+      expect(mockCapturedWalletProps).not.toBeNull();
     });
 
-    expect(capturedWalletProps.organizationId).toBe("org-001");
+    expect(mockCapturedWalletProps.organizationId).toBe("org-001");
   });
 });
 
@@ -618,36 +620,48 @@ describe("session_id payment polling", () => {
 // =============================================================================
 
 describe("handlePurchase — invalid package", () => {
-  it("calls toast.error for an unknown package ID", async () => {
+  it("surfaces backend validation errors for an unknown package ID", async () => {
+    mockApiPost.mockRejectedValue({
+      response: { data: { detail: "Invalid package selected." } },
+    });
+
     await renderDashboard();
 
     await waitFor(() => {
-      expect(capturedWalletProps).not.toBeNull();
+      expect(mockCapturedWalletProps).not.toBeNull();
     });
 
     await act(async () => {
-      await capturedWalletProps.onPurchase("pkg_invalid");
+      await mockCapturedWalletProps.onPurchase("pkg_invalid");
     });
 
-    expect(mockToastError).toHaveBeenCalledWith(
-      expect.stringContaining("Invalid"),
-    );
+    expect(mockToastError).toHaveBeenCalledWith("Invalid package selected.");
   });
 
-  it("does NOT call api.post for an unknown package ID", async () => {
+  it("uses the backend catalog as the source of truth for package validation", async () => {
+    mockApiPost.mockRejectedValue({
+      response: { data: { detail: "Invalid package selected." } },
+    });
+
     await renderDashboard();
 
     await waitFor(() => {
-      expect(capturedWalletProps).not.toBeNull();
+      expect(mockCapturedWalletProps).not.toBeNull();
     });
 
     const postCallsBefore = mockApiPost.mock.calls.length;
 
     await act(async () => {
-      await capturedWalletProps.onPurchase("pkg_invalid");
+      await mockCapturedWalletProps.onPurchase("pkg_invalid");
     });
 
-    expect(mockApiPost.mock.calls.length).toBe(postCallsBefore);
+    expect(mockApiPost).toHaveBeenCalledTimes(postCallsBefore + 1);
+    expect(mockApiPost).toHaveBeenCalledWith(
+      "/billing/checkout/sessions",
+      expect.objectContaining({ packageId: "pkg_invalid" }),
+    );
+    expect(mockToastError).toHaveBeenCalledWith("Invalid package selected.");
+    expect(globalThis.location.assign).not.toHaveBeenCalled();
   });
 });
 
@@ -672,11 +686,11 @@ describe("handlePurchase — valid package", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(capturedWalletProps).not.toBeNull();
+      expect(mockCapturedWalletProps).not.toBeNull();
     });
 
     await act(async () => {
-      await capturedWalletProps.onPurchase("pkg_5000");
+      await mockCapturedWalletProps.onPurchase("pkg_5000");
     });
 
     expect(mockApiPost).toHaveBeenCalledWith("/billing/checkout/sessions", {
@@ -707,11 +721,11 @@ describe("handlePurchase — valid package", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(capturedWalletProps).not.toBeNull();
+      expect(mockCapturedWalletProps).not.toBeNull();
     });
 
     await act(async () => {
-      await capturedWalletProps.onPurchase("pkg_5000");
+      await mockCapturedWalletProps.onPurchase("pkg_5000");
     });
 
     await waitFor(() => {
@@ -736,11 +750,11 @@ describe("handlePurchase — valid package", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(capturedWalletProps).not.toBeNull();
+      expect(mockCapturedWalletProps).not.toBeNull();
     });
 
     await act(async () => {
-      await capturedWalletProps.onPurchase("pkg_25000");
+      await mockCapturedWalletProps.onPurchase("pkg_25000");
     });
 
     await waitFor(() => {
@@ -768,11 +782,11 @@ describe("handlePurchase — valid package", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(capturedWalletProps).not.toBeNull();
+      expect(mockCapturedWalletProps).not.toBeNull();
     });
 
     await act(async () => {
-      await capturedWalletProps.onPurchase("pkg_60000");
+      await mockCapturedWalletProps.onPurchase("pkg_60000");
     });
 
     await waitFor(() => {
@@ -786,8 +800,8 @@ describe("handlePurchase — valid package", () => {
     for (const pkgId of validIds) {
       cleanup();
       jest.clearAllMocks();
-      capturedWalletProps = null;
-      capturedSecurityProps = null;
+      mockCapturedWalletProps = null;
+      mockCapturedSecurityProps = null;
       mockLocation.search = "";
       mockAuthState = {
         user: { email: "test@ironclaw.io" },
@@ -814,11 +828,11 @@ describe("handlePurchase — valid package", () => {
       await renderDashboard();
 
       await waitFor(() => {
-        expect(capturedWalletProps).not.toBeNull();
+        expect(mockCapturedWalletProps).not.toBeNull();
       });
 
       await act(async () => {
-        await capturedWalletProps.onPurchase(pkgId);
+        await mockCapturedWalletProps.onPurchase(pkgId);
       });
 
       expect(mockToastError).not.toHaveBeenCalled();
@@ -841,11 +855,11 @@ describe("handlePurchase — valid package", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(capturedWalletProps).not.toBeNull();
+      expect(mockCapturedWalletProps).not.toBeNull();
     });
 
     await act(async () => {
-      await capturedWalletProps.onPurchase("pkg_5000");
+      await mockCapturedWalletProps.onPurchase("pkg_5000");
     });
 
     await waitFor(() => {
@@ -869,11 +883,11 @@ describe("handlePurchase — valid package", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(capturedWalletProps).not.toBeNull();
+      expect(mockCapturedWalletProps).not.toBeNull();
     });
 
     await act(async () => {
-      await capturedWalletProps.onPurchase("pkg_5000");
+      await mockCapturedWalletProps.onPurchase("pkg_5000");
     });
 
     await waitFor(() => {
@@ -981,10 +995,10 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(capturedWalletProps).not.toBeNull();
+      expect(mockCapturedWalletProps).not.toBeNull();
     });
 
-    expect(capturedWalletProps.balance).toBe(9999);
+    expect(mockCapturedWalletProps.balance).toBe(9999);
   });
 
   it("renders all seven runtimes in canonical order and keeps unissued runtimes locked", async () => {
@@ -1013,7 +1027,9 @@ describe("dashboard structure", () => {
       .map((card) => card.getAttribute("data-testid"))
       .filter((cardId) => cardIds.includes(cardId));
     expect(renderedCardIds).toEqual(cardIds);
-    expect(screen.queryByTestId("security_guardian-card")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("security_guardian-card"),
+    ).not.toBeInTheDocument();
   });
 
   it("ignores masked dashboard keys and legacy command fields", async () => {
@@ -1106,7 +1122,7 @@ describe("dashboard structure", () => {
                 slug: "claude-code",
                 key_id: "key-claude-code",
               },
-              "openclaw": {
+              openclaw: {
                 available: true,
                 program: "openclaw",
                 slug: "openclaw",
@@ -1142,7 +1158,9 @@ describe("dashboard structure", () => {
     expect(screen.getAllByText("Hermes").length).toBeGreaterThan(0);
     expect(screen.queryAllByText("Hermes Agent")).toHaveLength(0);
     expect(screen.queryAllByText("Copilot")).toHaveLength(0);
-    expect(screen.queryByTestId("security_guardian-card")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("security_guardian-card"),
+    ).not.toBeInTheDocument();
   });
 
   it("passes attack and usage data to SecurityAnalysis", async () => {
@@ -1180,19 +1198,19 @@ describe("dashboard structure", () => {
     await renderDashboard();
 
     await waitFor(() => {
-      expect(capturedSecurityProps).not.toBeNull();
+      expect(mockCapturedSecurityProps).not.toBeNull();
     });
 
-    expect(capturedSecurityProps.unitsToday).toBe(11);
-    expect(capturedSecurityProps.unitsWeek).toBe(77);
-    expect(capturedSecurityProps.dailyUsage).toEqual(dailyUsage);
-    expect(capturedSecurityProps.attacks).toEqual(attacks);
-    expect(screen.getByTestId("claude-code-card-units-consumed")).toHaveTextContent(
-      "42",
-    );
-    expect(screen.getByTestId("claude-code-card-blocked-attacks")).toHaveTextContent(
-      "3",
-    );
+    expect(mockCapturedSecurityProps.unitsToday).toBe(11);
+    expect(mockCapturedSecurityProps.unitsWeek).toBe(77);
+    expect(mockCapturedSecurityProps.dailyUsage).toEqual(dailyUsage);
+    expect(mockCapturedSecurityProps.attacks).toEqual(attacks);
+    expect(
+      screen.getByTestId("claude-code-card-units-consumed"),
+    ).toHaveTextContent("42");
+    expect(
+      screen.getByTestId("claude-code-card-blocked-attacks"),
+    ).toHaveTextContent("3");
     expect(screen.getByTestId("attack-feed-blocked-total")).toHaveTextContent(
       "5",
     );
@@ -1337,7 +1355,9 @@ describe("attack feed pagination", () => {
 
     mockApiGet
       .mockResolvedValueOnce({
-        data: withInstallKeyDashboard(DEFAULT_DASH, { attacks: firstAttackSet }),
+        data: withInstallKeyDashboard(DEFAULT_DASH, {
+          attacks: firstAttackSet,
+        }),
       })
       .mockResolvedValueOnce({ data: DEFAULT_TOKENS })
       .mockResolvedValueOnce({

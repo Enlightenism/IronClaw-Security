@@ -130,8 +130,7 @@ const IntegrationCard = ({
 
   const normalizedCommand = available === true ? installCommand : "";
   const isLocked = !normalizedCommand;
-  const canGenerate =
-    available === true && typeof onCreateClaim === "function";
+  const canGenerate = available === true && typeof onCreateClaim === "function";
   const displayedUnitsConsumed =
     Number.isSafeInteger(unitsConsumed) && unitsConsumed >= 0
       ? unitsConsumed
@@ -305,9 +304,9 @@ const IntegrationCard = ({
       </div>
 
       <p className="mb-3 text-xs text-[#BFC1C2]">
-        Generate a one-time claim command for this agent host. Each claim can
-        be redeemed once and expires automatically. The token is visible in
-        your command history, so use a trusted terminal.
+        Generate a one-time claim command for this agent host. Each claim can be
+        redeemed once and expires automatically. The token is visible in your
+        command history, so use a trusted terminal.
       </p>
 
       <div className="flex items-stretch gap-2">
