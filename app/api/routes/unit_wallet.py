@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.core.auth import require_api_key
+from app.core.billing import TOKENS_PER_UNIT, UNIT_PACKAGE_CATALOG, resolve_package_id
 
 router = APIRouter(
     prefix="/ui/billing",
@@ -21,6 +22,7 @@ def _utc_now_iso() -> str:
 
 class UnitPackageView(BaseModel):
     package_id: str
+    aliases: list[str] = Field(default_factory=list)
     name: str
     unit_count: int = Field(ge=1)
     price_usd: float = Field(ge=0)
@@ -30,6 +32,7 @@ class UnitPackageView(BaseModel):
     description: str | None = None
     effective_price_per_1k_units: float = Field(ge=0)
     tokens_per_unit: int = Field(ge=1)
+    token_coverage: int = Field(ge=0)
 
 
 class UnitWalletBalanceView(BaseModel):
@@ -90,41 +93,20 @@ def _price_per_1k_units(price_usd: float, unit_count: int) -> float:
 
 _SAMPLE_PACKAGES: list[UnitPackageView] = [
     UnitPackageView(
-        package_id="pkg_5000",
-        name="Starter",
-        unit_count=5_000,
-        price_usd=20.0,
-        price_display="$20.00",
+        package_id=package["package_id"],
+        aliases=list(package["aliases"]),
+        name=package["name"],
+        unit_count=package["units"],
+        price_usd=float(package["price_usd"]),
+        price_display=f"${package['price_usd']:.2f}",
         active=True,
-        featured=False,
-        description="Entry package for light usage and initial production traffic.",
-        effective_price_per_1k_units=_price_per_1k_units(20.0, 5_000),
-        tokens_per_unit=25_000,
-    ),
-    UnitPackageView(
-        package_id="pkg_25000",
-        name="Team",
-        unit_count=25_000,
-        price_usd=90.0,
-        price_display="$90.00",
-        active=True,
-        featured=True,
-        description="Best balance for growing workloads and regular operational usage.",
-        effective_price_per_1k_units=_price_per_1k_units(90.0, 25_000),
-        tokens_per_unit=25_000,
-    ),
-    UnitPackageView(
-        package_id="pkg_60000",
-        name="Enterprise",
-        unit_count=60_000,
-        price_usd=180.0,
-        price_display="$180.00",
-        active=True,
-        featured=False,
-        description="High-volume prepaid package for heavier sustained usage.",
-        effective_price_per_1k_units=_price_per_1k_units(180.0, 60_000),
-        tokens_per_unit=25_000,
-    ),
+        featured=package["featured"],
+        description=package["description"],
+        effective_price_per_1k_units=_price_per_1k_units(float(package["price_usd"]), package["units"]),
+        tokens_per_unit=package["tokens_per_unit"],
+        token_coverage=package["token_coverage"],
+    )
+    for package in UNIT_PACKAGE_CATALOG
 ]
 
 
@@ -138,7 +120,7 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
         amount_usd=None,
         description="Usage debit for guarded execution and prompt protection activity.",
         reference_id="usage_evt_003",
-        metadata={"request_count": 16, "tokens_per_unit": 25_000},
+        metadata={"request_count": 16, "tokens_per_unit": TOKENS_PER_UNIT},
     ),
     UnitLedgerItem(
         entry_id="ledger_002",
@@ -153,7 +135,7 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
             "package_id": "pkg_25000",
             "package_name": "Team",
             "price_per_unit_usd": round(90.0 / 25_000, 6),
-            "tokens_per_unit": 25_000,
+            "tokens_per_unit": TOKENS_PER_UNIT,
         },
     ),
     UnitLedgerItem(
@@ -165,7 +147,7 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
         amount_usd=None,
         description="Usage debit for prior scan, review, and execution activity.",
         reference_id="usage_evt_001",
-        metadata={"request_count": 125, "tokens_per_unit": 25_000},
+        metadata={"request_count": 125, "tokens_per_unit": TOKENS_PER_UNIT},
     ),
 ]
 
@@ -200,8 +182,12 @@ def _build_usage_summary() -> UnitUsageSummaryView:
 
 
 def _find_package(package_id: str) -> UnitPackageView | None:
+    canonical_package_id = resolve_package_id(package_id)
+    if canonical_package_id is None:
+        return None
+
     for package in _SAMPLE_PACKAGES:
-        if package.package_id == package_id:
+        if package.package_id == canonical_package_id:
             return package
     return None
 
@@ -216,8 +202,8 @@ def get_unit_wallet() -> UnitWalletResponse:
         recent_ledger=_SAMPLE_LEDGER,
         notes=[
             "Prepaid wallet model: units are purchased in fixed packages and consumed by usage.",
-            "Available packages are 5,000 units for $20.00 USD, 25,000 units for $90.00 USD, and 60,000 units for $180.00 USD.",
-            "Each unit protects and inspects up to 25,000 tokens; usage above that is charged in additional 25,000-token unit chunks.",
+            "Available packages are " + ", ".join(f"{package.unit_count:,} units for ${package.price_usd:.2f} USD" for package in _SAMPLE_PACKAGES) + ".",
+            f"Each unit protects and inspects up to {TOKENS_PER_UNIT:,} tokens; usage above that is charged in additional {TOKENS_PER_UNIT:,}-token unit chunks.",
             "No recurring subscription state is tracked in this route.",
             "Current implementation returns in-memory sample data for UI scaffolding; Supabase persistence is the target backend.",
         ],

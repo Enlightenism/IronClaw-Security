@@ -6,16 +6,9 @@ from datetime import UTC, datetime
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.supabaseclient import (
-    BILLING_TIER_5K_PRICE_USD,
-    BILLING_TIER_5K_UNITS,
-    BILLING_TIER_25K_PRICE_USD,
-    BILLING_TIER_25K_UNITS,
-    BILLING_TIER_60K_PRICE_USD,
-    BILLING_TIER_60K_UNITS,
-    TOKENS_PER_UNIT,
-)
+from app.core.billing import TOKENS_PER_UNIT
 from app.ui.billing.package import (
+    PACKAGE_CATALOGUE,
     StripeStatus,
     _get_environment,
     _get_stripe_status,
@@ -26,17 +19,9 @@ router = APIRouter(
     tags=["billing-overview"],
 )
 
-_PLAN_PRICES_CENTS: dict[str, int] = {
-    "starter": BILLING_TIER_5K_PRICE_USD * 100,
-    "team": BILLING_TIER_25K_PRICE_USD * 100,
-    "enterprise": BILLING_TIER_60K_PRICE_USD * 100,
-}
+_PLAN_PRICES_CENTS: dict[str, int] = {plan: int(meta["price_cents"]) for plan, meta in PACKAGE_CATALOGUE.items()}
 
-_PLAN_INCLUDED_UNITS: dict[str, dict[str, int]] = {
-    "starter": {"protectionunits": BILLING_TIER_5K_UNITS},
-    "team": {"protectionunits": BILLING_TIER_25K_UNITS},
-    "enterprise": {"protectionunits": BILLING_TIER_60K_UNITS},
-}
+_PLAN_INCLUDED_UNITS: dict[str, dict[str, int]] = {plan: {"protectionunits": int(meta["units"])} for plan, meta in PACKAGE_CATALOGUE.items()}
 
 _UNIT_LABELS: dict[str, str] = {
     "protectionunits": "units",
@@ -313,7 +298,7 @@ def get_billing_overview() -> BillingOverviewResponse:
         invoices=invoices,
         notes=[
             "Billing overview exposes prepaid package state, package pricing, usage against included unit limits, and invoice lifecycle visibility.",
-            f"Package pricing is Starter ${BILLING_TIER_5K_PRICE_USD} for {BILLING_TIER_5K_UNITS:,} units, Team ${BILLING_TIER_25K_PRICE_USD} for {BILLING_TIER_25K_UNITS:,} units, and Enterprise ${BILLING_TIER_60K_PRICE_USD} for {BILLING_TIER_60K_UNITS:,} units.",
+            "Package pricing is " + ", ".join(f"{meta['label']} ${meta['price_usd']} for {meta['units']:,} units" for meta in PACKAGE_CATALOGUE.values()) + ".",
             f"Each protection unit covers up to {TOKENS_PER_UNIT:,} tokens; larger token volumes consume additional units in {TOKENS_PER_UNIT:,}-token chunks.",
             "planchangeurl on each package provides a direct link to the plan-change surface for that organization's current package.",
             "overallstatus is 'attention' when any package is past_due, 'notice' when any package is trialing, 'healthy' otherwise.",

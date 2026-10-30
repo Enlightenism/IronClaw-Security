@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from app.core.billing import (
+    PACKAGE_ALIASES,
     PLAN_DEFINITIONS,
     TOKENS_PER_UNIT,
     UNIT_PACKAGE_CATALOG,
@@ -30,6 +31,8 @@ from app.core.billing import (
     get_active_subscription_for_customer,
     get_billing_registry,
     resolve_billing_owner,
+    resolve_package_id,
+    resolve_plan_code,
 )
 from app.persistencebootstrap import InMemoryPersistenceStore
 
@@ -111,8 +114,48 @@ def test_unit_package_catalog_tokens_per_unit_matches_constant() -> None:
         assert entry["tokens_per_unit"] == TOKENS_PER_UNIT
 
 
+def test_unit_package_catalog_token_coverage_is_derived_from_units() -> None:
+    for entry in UNIT_PACKAGE_CATALOG:
+        assert entry["token_coverage"] == entry["units"] * entry["tokens_per_unit"]
+
+
+def test_unit_package_catalog_package_ids_match_plan_definitions() -> None:
+    for entry in UNIT_PACKAGE_CATALOG:
+        plan = PLAN_DEFINITIONS[entry["code"]]
+        assert entry["package_id"] == plan["package_id"]
+        assert entry["aliases"] == plan["aliases"]
+
+
+def test_package_aliases_resolve_to_canonical_plan_and_package_id() -> None:
+    for plan_code, plan in PLAN_DEFINITIONS.items():
+        aliases = (plan_code, plan["package_id"], *plan["aliases"])
+        for alias in aliases:
+            assert resolve_plan_code(alias) == plan_code
+            assert resolve_package_id(alias) == plan["package_id"]
+
+    assert resolve_plan_code("PKG5000") == "starter-5k"
+    assert resolve_package_id(" unknown-package ") is None
+
+
+def test_package_alias_registry_contains_every_normalized_alias() -> None:
+    expected_aliases = {alias.casefold() for plan_code, plan in PLAN_DEFINITIONS.items() for alias in (plan_code, plan["package_id"], *plan["aliases"])}
+    assert PACKAGE_ALIASES == expected_aliases
+
+
 def test_unit_package_catalog_required_keys_present() -> None:
-    required = {"code", "name", "units", "price_usd", "tokens_per_unit"}
+    required = {
+        "code",
+        "package_id",
+        "aliases",
+        "name",
+        "units",
+        "price_usd",
+        "tokens_per_unit",
+        "token_coverage",
+        "display_label",
+        "description",
+        "featured",
+    }
     for entry in UNIT_PACKAGE_CATALOG:
         assert required.issubset(entry.keys()), f"Missing keys in catalog entry {entry}"
 

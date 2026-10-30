@@ -6,6 +6,15 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.core.billing import (
+    FEATURED_PACKAGE_ID as _FEATURED_PACKAGE_ID,
+)
+from app.core.billing import (
+    TOKENS_PER_UNIT,
+)
+from app.core.billing import (
+    UNIT_PACKAGE_IDS as _ORDERED_PACKAGE_IDS,
+)
 from app.core.unit_wallet import UNIT_PACKAGE_CATALOG
 
 router = APIRouter(prefix="/billing-registry", tags=["billing-registry"])
@@ -53,11 +62,6 @@ class BillingRegistryResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-_TOKENS_PER_UNIT = 25_000
-_ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
-_FEATURED_PACKAGE_ID = "pkg_25000"
-
-
 def _build_packages() -> list[BillingRegistryPackageView]:
     packages: list[BillingRegistryPackageView] = []
 
@@ -69,7 +73,7 @@ def _build_packages() -> list[BillingRegistryPackageView]:
         price_usd = float(package["price_usd"])
         included_units = int(package["unit_amount"])
         unit_price_per_1k = round((price_usd / included_units) * 1000, 4) if included_units > 0 else 0.0
-        display_label = str(package.get("display_label", f"{included_units:,} units — ${price_usd:.2f}"))
+        display_label = str(package["display_label"])
 
         packages.append(
             BillingRegistryPackageView(
@@ -83,8 +87,10 @@ def _build_packages() -> list[BillingRegistryPackageView]:
                     "units_display": f"{included_units:,} units",
                     "display_label": display_label,
                     "effective_price_per_1k_units": unit_price_per_1k,
-                    "featured": package_id == _FEATURED_PACKAGE_ID,
-                    "tokens_per_unit": _TOKENS_PER_UNIT,
+                    "featured": bool(package["featured"]),
+                    "tokens_per_unit": int(package["tokens_per_unit"]),
+                    "token_coverage": int(package["token_coverage"]),
+                    "aliases": list(package["aliases"]),
                 },
             ),
         )
@@ -225,6 +231,12 @@ def _build_routes() -> list[BillingRegistryRouteView]:
 def get_billing_registry() -> BillingRegistryResponse:
     packages = _build_packages()
     routes = _build_routes()
+    current_pricing = ", ".join(f"${package.price_usd:.2f} for {package.included_units:,} units" for package in packages)
+    featured_package = next(
+        (package for package in packages if package.package_id == _FEATURED_PACKAGE_ID),
+        None,
+    )
+    featured_note = f"{featured_package.name} is the featured package for balanced ongoing usage." if featured_package is not None else "No featured package is currently available."
 
     return BillingRegistryResponse(
         status="ok",
@@ -235,9 +247,9 @@ def get_billing_registry() -> BillingRegistryResponse:
         routes=routes,
         notes=[
             "Billing is modeled as prepaid protection-unit bundles.",
-            "Available package pricing is $20 for 5,000 units, $90 for 25,000 units, and $180 for 60,000 units.",
-            "Each protection unit covers up to 25,000 tokens; larger token volumes consume additional units in 25,000-token chunks.",
-            "Team is the featured package for balanced ongoing usage.",
+            f"Available package pricing is {current_pricing}." if current_pricing else "No billing packages are currently available.",
+            f"Each protection unit covers up to {TOKENS_PER_UNIT:,} tokens; larger token volumes consume additional units in {TOKENS_PER_UNIT:,}-token chunks.",
+            featured_note,
             "All active billing API and UI routes are enumerated here for full system discoverability.",
             "requires_api_key=False denotes UI-layer routes served without an API key requirement.",
         ],

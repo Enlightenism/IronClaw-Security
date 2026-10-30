@@ -553,6 +553,7 @@ class TestCheckoutSessionRoutes:
                 _billing_path("/checkout/sessions"),
                 json={
                     "packageId": "pkg5000",
+                    "unitCredits": 42,
                     "quantity": 1,
                     "successUrl": _ALLOWED_SUCCESS_URL,
                     "cancelUrl": _ALLOWED_CANCEL_URL,
@@ -571,7 +572,7 @@ class TestCheckoutSessionRoutes:
             success_url=_ALLOWED_SUCCESS_URL,
             cancel_url=_ALLOWED_CANCEL_URL,
             customer_id=None,
-            metadata={"source": "test", "package_id": "pkg5000", "org_id": ORG_ID},
+            metadata={"source": "test", "package_id": "pkg_5000", "org_id": ORG_ID},
         )
 
     @pytest.mark.parametrize(

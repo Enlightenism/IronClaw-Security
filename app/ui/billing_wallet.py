@@ -110,7 +110,7 @@ def get_billing_wallet(
         recent_entries=[_ledger_entry_to_view(entry) for entry in entries],
         notes=[
             "Billing wallet reflects prepaid protection-unit balance state for a specific owner key.",
-            "Each protection unit covers up to 25,000 tokens; larger token volumes consume additional units in 25,000-token chunks.",
+            f"Each protection unit covers up to {TOKENS_PER_UNIT:,} tokens; larger token volumes consume additional units in {TOKENS_PER_UNIT:,}-token chunks.",
             "Recent entries provide a lightweight preview of purchase and debit activity.",
             "Use the billing ledger routes for deeper wallet activity inspection.",
         ],

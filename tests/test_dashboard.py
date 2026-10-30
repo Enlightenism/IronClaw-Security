@@ -311,6 +311,7 @@ class TestDashboardOverviewRoute:
             "service",
             "environment",
             "status",
+            "wallet_units",
             "kpis",
             "alerts",
             "timestamp",
@@ -634,10 +635,7 @@ class TestDashboardWalletKPIs:
             )
             assert response.status_code == 200
             body = response.json()
-            wallet = body.get("wallet")
-            if wallet is not None:
-                assert wallet["unit_balance"] == 750
-                assert wallet["units_consumed"] == 250
+            assert body["wallet_units"] == 750
         finally:
             _clear_registry_overrides()
 
@@ -650,6 +648,7 @@ class TestDashboardWalletKPIs:
                 params={"owner_key": _OWNER_KEY},
             )
             assert response.status_code == 200
+            assert response.json()["wallet_units"] == 0
         finally:
             _clear_registry_overrides()
 
@@ -676,9 +675,7 @@ class TestDashboardWalletKPIs:
             )
             assert response.status_code == 200
             body = response.json()
-            wallet = body.get("wallet")
-            if wallet is not None:
-                assert wallet["unit_balance"] == 9999
+            assert body["wallet_units"] == 9999
         finally:
             _clear_registry_overrides()
 

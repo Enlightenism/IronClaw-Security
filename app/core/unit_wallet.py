@@ -9,6 +9,8 @@ from threading import Lock
 from typing import Any
 import uuid
 
+from app.supabaseclient import TOKENS_PER_UNIT as TOKEN_CHUNK_SIZE
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -91,9 +93,6 @@ class InsufficientUnitsError(ValueError):
         self.owner_key = str(owner_key)
 
 
-TOKEN_CHUNK_SIZE: int = 25_000
-
-
 def units_required_for_tokens(token_count: int) -> int:
     if token_count <= 0:
         return 0
@@ -101,126 +100,27 @@ def units_required_for_tokens(token_count: int) -> int:
 
 
 def _build_package_catalog() -> dict[str, dict[str, Any]]:
-    try:
-        from app.core.billing import PLAN_DEFINITIONS
+    from app.core.billing import UNIT_PACKAGE_CATALOG
 
-        _PKG_META: dict[str, dict[str, str]] = {
-            "starter-5k": {
-                "package_id": "pkg_5000",
-                "name": "Starter",
-                "display_label": "5,000 units — $20.00",
-                "description": ("Prepaid protection units for individual builders who want guarded prompt handling, tool-call review, source inspection, and safe response release."),
-            },
-            "team-25k": {
-                "package_id": "pkg_25000",
-                "name": "Team",
-                "display_label": "25,000 units — $90.00",
-                "description": ("Prepaid protection units for teams running higher volumes of AI-assisted development, research, and guarded agent workflows."),
-            },
-            "enterprise-60k": {
-                "package_id": "pkg_60000",
-                "name": "Enterprise",
-                "display_label": "60,000 units — $180.00",
-                "description": ("Prepaid protection units for organizations protecting large-scale agent operations, sensitive workflows, and high-frequency prompt activity."),
-            },
+    return {
+        entry["package_id"]: {
+            "package_id": entry["package_id"],
+            "code": entry["code"],
+            "aliases": entry["aliases"],
+            "name": entry["name"],
+            "unit_amount": entry["units"],
+            "price_usd": float(entry["price_usd"]),
+            "display_label": entry["display_label"],
+            "description": entry["description"],
+            "tokens_per_unit": entry["tokens_per_unit"],
+            "token_coverage": entry["token_coverage"],
+            "featured": entry["featured"],
         }
-
-        catalog: dict[str, dict[str, Any]] = {}
-        for plan_code, plan_def in PLAN_DEFINITIONS.items():
-            meta = _PKG_META.get(plan_code)
-            if meta is None:
-                logger.warning(
-                    "unit_wallet: no package metadata for plan_code=%r — skipping",
-                    plan_code,
-                )
-                continue
-            pkg_id = meta["package_id"]
-            catalog[pkg_id] = {
-                "package_id": pkg_id,
-                "name": meta["name"],
-                "unit_amount": plan_def["unit_limit"],
-                "price_usd": float(plan_def["price_usd"]),
-                "display_label": meta["display_label"],
-                "description": meta["description"],
-                "tokens_per_unit": TOKEN_CHUNK_SIZE,
-            }
-        return catalog
-
-    except Exception:
-        logger.exception(
-            "unit_wallet: failed to derive catalog from billing.PLAN_DEFINITIONS; using hardcoded fallback",
-        )
-        return {
-            "pkg_5000": {
-                "package_id": "pkg_5000",
-                "name": "Starter",
-                "unit_amount": 5_000,
-                "price_usd": 20.00,
-                "display_label": "5,000 units — $20.00",
-                "description": ("Prepaid protection units for individual builders who want guarded prompt handling, tool-call review, source inspection, and safe response release."),
-                "tokens_per_unit": TOKEN_CHUNK_SIZE,
-            },
-            "pkg_25000": {
-                "package_id": "pkg_25000",
-                "name": "Team",
-                "unit_amount": 25_000,
-                "price_usd": 90.00,
-                "display_label": "25,000 units — $90.00",
-                "description": ("Prepaid protection units for teams running higher volumes of AI-assisted development, research, and guarded agent workflows."),
-                "tokens_per_unit": TOKEN_CHUNK_SIZE,
-            },
-            "pkg_60000": {
-                "package_id": "pkg_60000",
-                "name": "Enterprise",
-                "unit_amount": 60_000,
-                "price_usd": 180.00,
-                "display_label": "60,000 units — $180.00",
-                "description": ("Prepaid protection units for organizations protecting large-scale agent operations, sensitive workflows, and high-frequency prompt activity."),
-                "tokens_per_unit": TOKEN_CHUNK_SIZE,
-            },
-        }
+        for entry in UNIT_PACKAGE_CATALOG
+    }
 
 
 UNIT_PACKAGE_CATALOG: dict[str, dict[str, Any]] = _build_package_catalog()
-
-_EXPECTED_PACKAGES = {
-    "pkg_5000": (5_000, 20.00),
-    "pkg_25000": (25_000, 90.00),
-    "pkg_60000": (60_000, 180.00),
-}
-
-for _pkg_id, (_expected_units, _expected_price) in _EXPECTED_PACKAGES.items():
-    _entry = UNIT_PACKAGE_CATALOG.get(_pkg_id)
-    if _entry is None:
-        logger.error(
-            "unit_wallet: UNIT_PACKAGE_CATALOG is missing required package %r",
-            _pkg_id,
-        )
-        raise RuntimeError(f"unit_wallet: UNIT_PACKAGE_CATALOG is missing required package {_pkg_id!r}")
-    if _entry["unit_amount"] != _expected_units:
-        logger.error(
-            "unit_wallet: %s unit_amount mismatch: got %r, expected %r",
-            _pkg_id,
-            _entry["unit_amount"],
-            _expected_units,
-        )
-        raise RuntimeError(f"unit_wallet: {_pkg_id} unit_amount mismatch: got {_entry['unit_amount']}, expected {_expected_units}")
-    if _entry["price_usd"] != _expected_price:
-        logger.error(
-            "unit_wallet: %s price_usd mismatch: got %r, expected %r",
-            _pkg_id,
-            _entry["price_usd"],
-            _expected_price,
-        )
-        raise RuntimeError(f"unit_wallet: {_pkg_id} price_usd mismatch: got {_entry['price_usd']}, expected {_expected_price}")
-    if _entry["tokens_per_unit"] != TOKEN_CHUNK_SIZE:
-        logger.error(
-            "unit_wallet: %s tokens_per_unit mismatch: got %r, expected %r",
-            _pkg_id,
-            _entry["tokens_per_unit"],
-            TOKEN_CHUNK_SIZE,
-        )
-        raise RuntimeError(f"unit_wallet: {_pkg_id} tokens_per_unit mismatch: got {_entry['tokens_per_unit']}, expected {TOKEN_CHUNK_SIZE}")
 
 _WALLET_CACHE_MAX: int = 5_000
 _LEDGER_MAX_SIZE: int = 10_000

@@ -85,6 +85,7 @@ class DashboardResponse(BaseModel):
     service: str = Field(min_length=1, max_length=120)
     timestamp: str = Field(min_length=1)
     environment: str = Field(min_length=1, max_length=120)
+    wallet_units: int = Field(default=0, ge=0)
     kpis: list[DashboardKPI] = Field(default_factory=list)
     alerts: list[DashboardAlertItem] = Field(default_factory=list)
     activity: list[DashboardActivityItem] = Field(default_factory=list)
@@ -430,6 +431,7 @@ def get_dashboard_overview(
         service="ironclaw-dashboard",
         timestamp=_utc_now_iso(),
         environment="production",
+        wallet_units=balance_units,
         kpis=[
             DashboardKPI(label="Unit Balance", value=str(balance_units), tone=units_tone),
             DashboardKPI(label="Units Consumed", value=str(total_consumed), tone="neutral"),

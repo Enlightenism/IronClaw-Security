@@ -9,6 +9,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from app.core.auth import AuthContext, get_auth_context
+from app.core.billing import (
+    PACKAGE_ALIASES,
+    PLAN_DEFINITIONS,
+    resolve_package_id,
+    resolve_plan_code,
+)
 from app.core.settings import get_settings
 from app.services.secrets_vault import vault
 from app.services.stripe_service import (
@@ -54,19 +60,13 @@ def _resolve_customer_id(svc: StripeService, org_id: str) -> str | None:
 
 
 PACKAGE_PRICE_ENV_MAP: dict[str, str] = {
-    "pkg5000": "BILLING_TIER_5K_PRICE_ID",
-    "pkg25000": "BILLING_TIER_25K_PRICE_ID",
-    "pkg60000": "BILLING_TIER_60K_PRICE_ID",
-}
-
-PACKAGE_UNIT_CREDITS: dict[str, int] = {
-    "pkg5000": 5000,
-    "pkg25000": 25000,
-    "pkg60000": 60000,
+    "starter-5k": "BILLING_TIER_5K_PRICE_ID",
+    "team-25k": "BILLING_TIER_25K_PRICE_ID",
+    "enterprise-60k": "BILLING_TIER_60K_PRICE_ID",
 }
 
 VALID_CHECKOUT_MODES: frozenset[str] = frozenset(m.value for m in StripeCheckoutMode)
-VALID_PACKAGE_IDS: frozenset[str] = frozenset(PACKAGE_PRICE_ENV_MAP.keys())
+VALID_PACKAGE_IDS = PACKAGE_ALIASES
 
 # Keep redirect validation aligned with the same canonical domain family used by settings.
 # This prevents the billing flow from behaving like different apps depending on whether the
@@ -175,7 +175,8 @@ def _is_allowed_redirect_url(value: str) -> bool:
 
 
 def _configured_price_id_for_package(package_id: str) -> str:
-    env_key = PACKAGE_PRICE_ENV_MAP.get(package_id)
+    plan_code = resolve_plan_code(package_id)
+    env_key = PACKAGE_PRICE_ENV_MAP.get(plan_code or "")
     if not env_key:
         raise _http_400(
             f"Unsupported package_id '{package_id}'.",
@@ -194,14 +195,14 @@ def _configured_price_id_for_package(package_id: str) -> str:
 
 
 def _unit_credits_for_package(package_id: str) -> int:
-    units = PACKAGE_UNIT_CREDITS.get(package_id)
-    if units is None:
+    plan_code = resolve_plan_code(package_id)
+    if plan_code is None:
         raise _http_400(
             f"Unsupported package_id '{package_id}'.",
             code="unsupported_package_id",
             extra={"package_id": package_id, "valid_package_ids": sorted(VALID_PACKAGE_IDS)},
         )
-    return units
+    return PLAN_DEFINITIONS[plan_code]["unit_limit"]
 
 
 def _coerce_optional_bool(value: object) -> bool | None:
@@ -285,7 +286,7 @@ class CheckoutSessionCreateRequest(BaseModel):
     package_id: str | None = Field(
         default=None,
         alias="packageId",
-        description="IronClaw package identifier: pkg5000, pkg25000, pkg60000",
+        description="IronClaw package ID or supported alias",
     )
     price_id: str = Field(
         default="",
@@ -327,9 +328,10 @@ class CheckoutSessionCreateRequest(BaseModel):
         normalized = value.strip()
         if not normalized:
             return None
-        if normalized not in VALID_PACKAGE_IDS:
-            raise ValueError("invalid package_id, must be one of: pkg5000, pkg25000, pkg60000")
-        return normalized
+        canonical_package_id = resolve_package_id(normalized)
+        if canonical_package_id is None:
+            raise ValueError(f"invalid package_id, supported identifiers: {', '.join(sorted(VALID_PACKAGE_IDS))}")
+        return canonical_package_id
 
     @field_validator("price_id")
     @classmethod
@@ -549,7 +551,7 @@ def _normalize_checkout_inputs(body: CheckoutSessionCreateRequest) -> tuple[str,
 
     if package_id:
         resolved_price_id = _configured_price_id_for_package(package_id)
-        resolved_unit_credits = body.unit_credits if body.unit_credits > 0 else _unit_credits_for_package(package_id)
+        resolved_unit_credits = _unit_credits_for_package(package_id)
         return resolved_price_id, resolved_unit_credits
 
     if price_id:
@@ -968,7 +970,7 @@ async def create_checkout_session(
 
     metadata = dict(body.metadata)
     if body.package_id:
-        metadata.setdefault("package_id", body.package_id)
+        metadata["package_id"] = body.package_id
     metadata.setdefault("org_id", org_id)
 
     customer_id = body.customer_id

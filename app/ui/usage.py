@@ -7,7 +7,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from app.actionusage import build_action_usage
-from app.core.unit_wallet import UNIT_PACKAGE_CATALOG
+from app.core.billing import FEATURED_PACKAGE_ID as _FEATURED_PACKAGE_ID
+from app.core.billing import UNIT_PACKAGE_IDS as _ORDERED_PACKAGE_IDS
+from app.core.billing import resolve_package_id
+from app.core.unit_wallet import TOKEN_CHUNK_SIZE as _TOKENS_PER_UNIT
+from app.core.unit_wallet import UNIT_PACKAGE_CATALOG, units_required_for_tokens
 from app.unitwallet import build_unit_wallet
 
 router = APIRouter(prefix="/ui/usage", tags=["ui-usage"])
@@ -28,73 +32,57 @@ except Exception:
     _SUPABASE_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
-# Canonical package/pricing constants — single source of truth
+# Canonical package/pricing values are derived from app.core.billing.
 # ---------------------------------------------------------------------------
-_TOKENS_PER_UNIT = 25_000
-_ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
-_FEATURED_PACKAGE_ID = "pkg_25000"
-
-_PRICING_FALLBACK: dict[str, tuple[int, float, str, str]] = {
-    "pkg_5000": (
-        5_000,
-        20.00,
-        "Starter",
-        "5,000 units — $20.00",
-    ),
-    "pkg_25000": (
-        25_000,
-        90.00,
-        "Team",
-        "25,000 units — $90.00",
-    ),
-    "pkg_60000": (
-        60_000,
-        180.00,
-        "Enterprise",
-        "60,000 units — $180.00",
-    ),
-}
 
 
 # ---------------------------------------------------------------------------
 # Token → unit consumption logic
-# 1 unit covers up to _TOKENS_PER_UNIT (25,000) tokens.
-# Any overflow consumes one additional unit per 25,000-token chunk.
+# 1 unit covers up to _TOKENS_PER_UNIT tokens.
+# Any overflow consumes one additional unit per token chunk.
 # ---------------------------------------------------------------------------
 def _units_required_for_tokens(token_count: int) -> int:
-    if token_count <= 0:
-        return 0
-    full_chunks, remainder = divmod(token_count, _TOKENS_PER_UNIT)
-    return full_chunks + (1 if remainder > 0 else 0)
+    return units_required_for_tokens(token_count)
 
 
 def _get_package_metadata(package_id: str) -> dict[str, Any]:
-    package = UNIT_PACKAGE_CATALOG.get(package_id)
-    if package is not None:
-        price_usd = float(package["price_usd"])
-        included_units = int(package["unit_amount"])
-        name = str(package["name"])
-        display_label = str(package.get("display_label", ""))
-    else:
-        fallback = _PRICING_FALLBACK.get(package_id)
-        if fallback is None:
-            return {}
-        included_units, price_usd, name, display_label = fallback
+    canonical_package_id = resolve_package_id(package_id)
+    if canonical_package_id is None:
+        return {}
+    package = UNIT_PACKAGE_CATALOG[canonical_package_id]
+    price_usd = float(package["price_usd"])
+    included_units = int(package["unit_amount"])
+    name = str(package["name"])
+    display_label = str(package["display_label"])
 
     price_per_1k = round((price_usd / included_units) * 1_000, 4) if included_units > 0 else 0.0
     return {
-        "package_id": package_id,
+        "package_id": canonical_package_id,
+        "aliases": list(package["aliases"]),
         "name": name,
         "display_label": display_label,
         "price_usd": price_usd,
         "price_display": f"${price_usd:.2f}",
         "included_units": included_units,
         "units_display": f"{included_units:,} units",
-        "tokens_per_unit": _TOKENS_PER_UNIT,
-        "max_tokens_covered": included_units * _TOKENS_PER_UNIT,
+        "tokens_per_unit": int(package["tokens_per_unit"]),
+        "token_coverage": int(package["token_coverage"]),
+        "max_tokens_covered": int(package["token_coverage"]),
         "effective_price_per_1k_units": price_per_1k,
-        "featured": package_id == _FEATURED_PACKAGE_ID,
+        "featured": bool(package["featured"]),
     }
+
+
+def _package_pricing_summary() -> str:
+    pricing: list[str] = []
+    for package_id in _ORDERED_PACKAGE_IDS:
+        package = UNIT_PACKAGE_CATALOG.get(package_id)
+        if package is None:
+            continue
+        pricing.append(
+            f"{package['name']}: ${float(package['price_usd']):.2f} / {int(package['unit_amount']):,} units",
+        )
+    return " · ".join(pricing)
 
 
 # ---------------------------------------------------------------------------
@@ -139,9 +127,7 @@ def _fetch_supabase_wallet() -> dict[str, Any]:
         wallet_units: int = int(row.get("wallet_units") or 0)
         has_paid: bool = bool(row.get("has_paid", False))
         last_payment: dict[str, Any] = row.get("last_payment") or {}
-        active_package_id: str = last_payment.get("package_id", _FEATURED_PACKAGE_ID)
-        if active_package_id not in _ORDERED_PACKAGE_IDS:
-            active_package_id = _FEATURED_PACKAGE_ID
+        active_package_id = resolve_package_id(str(last_payment.get("package_id") or "")) or _FEATURED_PACKAGE_ID
         pkg_meta = _get_package_metadata(active_package_id)
         return {
             "source": "supabase",
@@ -194,6 +180,7 @@ async def usage_root(request: Request) -> HTMLResponse:
     sb_wallet_units = sb_wallet.get("wallet_units", 0)
     sb_tokens = sb_usage.get("total_tokens_covered", 0)
     pkg_rows = "".join(f"<li>{_get_package_metadata(pid).get('display_label', pid)} — tokens_per_unit: {_TOKENS_PER_UNIT:,}</li>" for pid in _ORDERED_PACKAGE_IDS)
+    package_pricing = _package_pricing_summary()
 
     html = _render_html(
         "Usage Overview",
@@ -226,7 +213,7 @@ async def usage_root(request: Request) -> HTMLResponse:
         (1 unit = {_TOKENS_PER_UNIT:,} tokens; additional units consumed in {_TOKENS_PER_UNIT:,}-token chunks)
     </div>
     <ul>
-        <li>Packages: Starter $20 / 5,000 units — Team $90 / 25,000 units — Enterprise $180 / 60,000 units</li>
+        <li>Packages: {package_pricing}</li>
         {pkg_rows}
     </ul>
 </section>
@@ -360,7 +347,7 @@ async def usage_event(request: Request) -> HTMLResponse:
         <dt>tokens per unit</dt>
         <dd>{_TOKENS_PER_UNIT:,} — additional units consumed in {_TOKENS_PER_UNIT:,}-token chunks</dd>
     </dl>
-    <p>Billing: $20 / 5,000 units (Starter) · $90 / 25,000 units (Team) · $180 / 60,000 units (Enterprise)</p>
+    <p>Billing: {_package_pricing_summary()}</p>
 </section>
 """,
     )
@@ -408,7 +395,7 @@ async def usage_summary(request: Request) -> HTMLResponse:
         <li>tokens per unit: {_TOKENS_PER_UNIT:,}</li>
         <li>unit consumption model: 1 unit covers up to {_TOKENS_PER_UNIT:,} tokens;
             additional units consumed in {_TOKENS_PER_UNIT:,}-token chunks</li>
-        <li>Starter: $20 / 5,000 units · Team: $90 / 25,000 units · Enterprise: $180 / 60,000 units</li>
+        <li>{_package_pricing_summary()}</li>
     </ul>
 </section>
 """,

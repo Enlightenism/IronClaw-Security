@@ -92,6 +92,7 @@ class DashboardResponse(BaseModel):
     service: str
     timestamp: str
     environment: str
+    wallet_units: int = Field(default=0, ge=0)
     kpis: list[DashboardStatView] = Field(default_factory=list)
     alerts: list[DashboardIncidentView] = Field(default_factory=list)
     activity: list[DashboardQueueView] = Field(default_factory=list)
@@ -555,6 +556,7 @@ def get_dashboard_overview(
         service="ironclaw-security",
         timestamp=now,
         environment=settings.environment,
+        wallet_units=wallet_kpi.unit_balance if wallet_kpi is not None else 0,
         kpis=[
             DashboardStatView(
                 key="protected_requests",

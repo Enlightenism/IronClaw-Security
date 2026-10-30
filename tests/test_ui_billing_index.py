@@ -3,8 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 # ---------------------------------------------------------------------------
-# Canonical value-pinning table — single source of truth for this test module.
-# Mirrors UNIT_PACKAGE_CATALOG and _PRICING_FALLBACK in app/ui/billing_index.py.
+# Pin the public package values so catalog changes require an intentional test update.
 # ---------------------------------------------------------------------------
 
 
@@ -187,6 +186,14 @@ def test_billing_index_each_package_featured_is_bool(test_client: TestClient) ->
 def test_billing_index_each_package_metadata_is_dict(test_client: TestClient) -> None:
     for i, pkg in enumerate(_get_body(test_client)["packages"]):
         assert isinstance(pkg["metadata"], dict), f"packages[{i}].metadata must be dict"
+
+
+def test_billing_index_package_metadata_has_aliases_and_token_coverage(test_client: TestClient) -> None:
+    for package in _get_body(test_client)["packages"]:
+        metadata = package["metadata"]
+        assert isinstance(metadata["aliases"], list)
+        assert isinstance(metadata["tokens_per_unit"], int)
+        assert metadata["token_coverage"] == package["included_units"] * metadata["tokens_per_unit"]
 
 
 # ---------------------------------------------------------------------------

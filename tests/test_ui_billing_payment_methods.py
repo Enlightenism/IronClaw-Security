@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 import pytest
 
+from app.core.billing import PLAN_DEFINITIONS
 from app.main import app as _app
 from app.supabaseclient import TOKENS_PER_UNIT
 from app.ui.billing.payment_methods import (
@@ -362,6 +363,14 @@ class TestPackageCatalogueReload:
         catalogue = _build_package_catalogue()
         for key in ("starter", "team", "enterprise"):
             assert catalogue[key]["tokens_per_unit"] == TOKENS_PER_UNIT
+
+    def test_build_package_catalogue_exposes_canonical_identifiers(self) -> None:
+        catalogue = _build_package_catalogue()
+        for plan in PLAN_DEFINITIONS.values():
+            entry = catalogue[plan["name"].casefold()]
+            assert entry["code"] == plan["code"]
+            assert entry["package_id"] == plan["package_id"]
+            assert entry["aliases"] == list(plan["aliases"])
 
 
 class TestStripeMode:

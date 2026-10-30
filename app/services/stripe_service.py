@@ -12,20 +12,12 @@ import time
 from typing import Any
 from uuid import uuid4
 
+from app.core.billing import PLAN_DEFINITIONS, TOKENS_PER_UNIT
 from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import _read_event_ledger_record, _write_event_ledger_record
 from app.core.unit_wallet import get_unit_wallet_registry
 from app.services.install_key_provisioning import InstallKeyProvisioningService
 from app.services.secrets_vault import vault
-from app.supabaseclient import (
-    BILLING_TIER_5K_PRICE_USD,
-    BILLING_TIER_5K_UNITS,
-    BILLING_TIER_25K_PRICE_USD,
-    BILLING_TIER_25K_UNITS,
-    BILLING_TIER_60K_PRICE_USD,
-    BILLING_TIER_60K_UNITS,
-    TOKENS_PER_UNIT,
-)
 
 
 def provision_install_key_service(*, billing_registry: Any | None = None) -> InstallKeyProvisioningService:
@@ -46,52 +38,38 @@ _SCHEMA_VERSION = "1.0"
 _INVOICE_CACHE_MAX = 200
 
 # ---------------------------------------------------------------------------
-# Billing tier catalogue — single source of truth imported from supabaseclient
-# Starter   :  5,000 units → $20 USD
-# Team      : 25,000 units → $90 USD
-# Enterprise: 60,000 units → $180 USD
-# Each protection unit covers up to 25,000 tokens.
-# TOKENS_PER_UNIT = 25_000  (imported above)
-# Scans are UNLIMITED — units auto-deduct in TOKENS_PER_UNIT chunks with no ceiling.
+# Billing tier catalogue view derived from app.core.billing.PLAN_DEFINITIONS.
 # ---------------------------------------------------------------------------
 
 PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
-    "starter": {
-        "label": "Starter",
-        "units": BILLING_TIER_5K_UNITS,
-        "price_usd": BILLING_TIER_5K_PRICE_USD,
-        "tokens_per_unit": TOKENS_PER_UNIT,
-        "notes": f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens · no scan ceiling",
-    },
-    "team": {
-        "label": "Team",
-        "units": BILLING_TIER_25K_UNITS,
-        "price_usd": BILLING_TIER_25K_PRICE_USD,
-        "tokens_per_unit": TOKENS_PER_UNIT,
-        "notes": f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens · no scan ceiling",
-    },
-    "enterprise": {
-        "label": "Enterprise",
-        "units": BILLING_TIER_60K_UNITS,
-        "price_usd": BILLING_TIER_60K_PRICE_USD,
-        "tokens_per_unit": TOKENS_PER_UNIT,
-        "notes": f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens · no scan ceiling",
-    },
+    plan["name"].casefold(): {
+        "package_id": plan["package_id"],
+        "aliases": list(plan["aliases"]),
+        "label": plan["name"],
+        "units": plan["unit_limit"],
+        "price_usd": plan["price_usd"],
+        "tokens_per_unit": plan["tokens_per_unit"],
+        "token_coverage": plan["unit_limit"] * plan["tokens_per_unit"],
+        "description": plan["description"],
+        "featured": plan["featured"],
+        "notes": f"{plan['unit_limit']:,} units · ${plan['price_usd']} USD · each unit protects up to {plan['tokens_per_unit']:,} tokens · no scan ceiling",
+    }
+    for plan in PLAN_DEFINITIONS.values()
 }
 
 
 def units_for_tokens(token_count: int) -> int:
     """
     Return the number of protection units required to cover token_count tokens.
-    Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+    Each unit covers up to TOKENS_PER_UNIT tokens.
     Partial chunks consume a full unit. No ceiling — scales to any token count.
 
     Examples:
-        units_for_tokens(1)         → 1
-        units_for_tokens(25_000)    → 1
-        units_for_tokens(25_001)    → 2
-        units_for_tokens(75_000)    → 3
-        units_for_tokens(1_000_000) → 40
+        units_for_tokens(1)                    → 1
+        units_for_tokens(TOKENS_PER_UNIT)      → 1
+        units_for_tokens(TOKENS_PER_UNIT + 1)  → 2
+        units_for_tokens(3 * TOKENS_PER_UNIT)  → 3
+        units_for_tokens(40 * TOKENS_PER_UNIT) → 40
     """
     if token_count <= 0:
         return 0
@@ -772,9 +750,9 @@ class StripeService:
     - Thread-safe in-memory state with full reset for test isolation.
 
     Unit model:
-    - Each protection unit covers up to TOKENS_PER_UNIT (25,000) tokens.
-    - Scans are UNLIMITED — units auto-deduct in 25,000-token chunks with no ceiling.
-    - Packages: Starter 5,000 units/$20 · Team 25,000 units/$90 · Enterprise 60,000 units/$180.
+    - Each protection unit covers up to TOKENS_PER_UNIT tokens.
+    - Scans are UNLIMITED — units auto-deduct in TOKENS_PER_UNIT chunks with no ceiling.
+    - Package amounts and prices are sourced from the canonical package catalogue.
     - Use units_for_tokens(n) to convert a raw token count to required unit debit.
     - StripeInsufficientUnitsError is raised (not a generic error) so callers can
       trigger auto-purchase flows instead of hard-failing.
@@ -1336,13 +1314,10 @@ class StripeService:
         - mode=payment: one-time purchase that grants unit_credits on completion.
         - mode=subscription: recurring subscription with optional metered usage.
         - unit_credits: number of IronClaw units to credit on checkout.session.completed.
-          Each unit protects up to TOKENS_PER_UNIT (25,000) tokens with no scan ceiling.
+          Each unit protects up to TOKENS_PER_UNIT tokens with no scan ceiling.
           Use units_for_tokens(n) to derive the correct unit_credits from a token budget.
 
-        Package reference (from PACKAGE_CATALOGUE):
-          Starter:    5,000 units / $20 USD  — each unit ≤ 25,000 tokens · unlimited scans
-          Team:      25,000 units / $90 USD  — each unit ≤ 25,000 tokens · unlimited scans
-          Enterprise: 60,000 units / $180 USD — each unit ≤ 25,000 tokens · unlimited scans
+        Package amounts and prices are derived from PACKAGE_CATALOGUE.
         """
         # Existing validation kept intact, plus guarded checks for critical inputs.
         if quantity < 1:
@@ -1603,7 +1578,7 @@ class StripeService:
         Debit units from an org's balance.
         Raises StripeInsufficientUnitsError when the org has insufficient balance.
         The on_insufficient_units callback (if set at init) is also fired.
-        Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+        Each unit covers up to TOKENS_PER_UNIT tokens.
         """
         if amount <= 0:
             raise StripeServiceError("debit amount must be > 0")
@@ -1649,7 +1624,7 @@ class StripeService:
     ) -> UnitBalanceResponse:
         """
         Debit the exact number of units required to cover token_count tokens.
-        Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+        Each unit covers up to TOKENS_PER_UNIT tokens.
         Partial chunks consume a full unit (ceiling division). No scan ceiling.
         Raises StripeInsufficientUnitsError if the org has insufficient balance.
         """

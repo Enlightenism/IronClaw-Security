@@ -12,8 +12,12 @@ from app.core.auth import AuthContext, get_auth_context
 from app.routers.stripe_router import get_stripe_service
 from app.services.stripe_service import StripeService, StripeServiceError
 from app.supabaseclient import TOKENS_PER_UNIT, get_supabase_client, is_supabase_configured
-from app.ui.billing.package import PACKAGE_CATALOGUE as _BASE_PACKAGE_CATALOGUE
-from app.ui.billing.package import StripeStatus, _get_stripe_status
+from app.ui.billing.package import (
+    PackageCatalogueEntry,
+    StripeStatus,
+    _build_package_catalogue,
+    _get_stripe_status,
+)
 
 __all__ = [
     "PACKAGE_CATALOGUE",
@@ -77,6 +81,7 @@ router = APIRouter(tags=["billing-payment-methods"])
 
 _MAX_METHODS = 4
 _PAYMENT_METHODS_TABLE = "billing_payment_methods"
+PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = _build_package_catalogue()
 
 _STATUS_COLOR: dict[str, str] = {
     "active": "success",
@@ -160,17 +165,6 @@ class BillingPaymentMethodStatusCount(BaseModel):
     statuscolor: str
 
 
-class PackageCatalogueEntry(BaseModel):
-    label: str
-    units: int
-    price_usd: int
-    price_cents: int
-    tokens_per_unit: int
-    token_coverage: int
-    stripe_price_id: str
-    notes: str
-
-
 class BillingPaymentMethodsResponse(BaseModel):
     generatedat: str
     environment: str
@@ -228,23 +222,6 @@ class DeletePaymentMethodResponse(BaseModel):
     generatedat: str
     environment: str
     message: str
-
-
-# ---------------------------------------------------------------------------
-# PACKAGE_CATALOGUE
-# ---------------------------------------------------------------------------
-
-
-def _build_package_catalogue() -> dict[str, dict[str, Any]]:
-    catalogue: dict[str, dict[str, Any]] = {}
-    for key, base in _BASE_PACKAGE_CATALOGUE.items():
-        entry = dict(base)
-        entry["stripe_price_id"] = os.environ.get(f"STRIPE_PRICE_ID_{key.upper()}", "")
-        catalogue[key] = entry
-    return catalogue
-
-
-PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = _build_package_catalogue()
 
 
 # ---------------------------------------------------------------------------

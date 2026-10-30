@@ -449,9 +449,8 @@ def test_exactly_30_requests_all_succeed():
 def test_31st_request_is_blocked():
     key = "load:31st-blocked"
     _clear_bucket(key)
+    _fill_bucket(key, _RATE_LIMIT_MAX_REQUESTS)
     with patch("app.api.scan._client_rate_limit_key", return_value=key):
-        for _ in range(_RATE_LIMIT_MAX_REQUESTS):
-            client.post("/api/scan/", json=SAFE_PAYLOAD)
         blocked = client.post("/api/scan/", json=SAFE_PAYLOAD)
     assert blocked.status_code == 429
 
@@ -459,9 +458,8 @@ def test_31st_request_is_blocked():
 def test_requests_beyond_limit_all_blocked():
     key = "load:beyond-limit"
     _clear_bucket(key)
+    _fill_bucket(key, _RATE_LIMIT_MAX_REQUESTS)
     with patch("app.api.scan._client_rate_limit_key", return_value=key):
-        for _ in range(_RATE_LIMIT_MAX_REQUESTS):
-            client.post("/api/scan/", json=SAFE_PAYLOAD)
         blocked_statuses = [client.post("/api/scan/", json=SAFE_PAYLOAD).status_code for _ in range(5)]
     assert all(sc == 429 for sc in blocked_statuses)
 
@@ -469,11 +467,10 @@ def test_requests_beyond_limit_all_blocked():
 def test_remaining_header_reaches_zero_on_last_allowed():
     key = "load:zero-remaining"
     _clear_bucket(key)
-    last_resp = None
+    _fill_bucket(key, _RATE_LIMIT_MAX_REQUESTS - 1)
     with patch("app.api.scan._client_rate_limit_key", return_value=key):
-        for _ in range(_RATE_LIMIT_MAX_REQUESTS):
-            last_resp = client.post("/api/scan/", json=SAFE_PAYLOAD)
-    assert int(last_resp.headers["x-ratelimit-remaining"]) == 0
+        last_response = client.post("/api/scan/", json=SAFE_PAYLOAD)
+    assert int(last_response.headers["x-ratelimit-remaining"]) == 0
 
 
 # ---------------------------------------------------------------------------

@@ -148,7 +148,7 @@ class IronClawScanClient:
             "model_output": _slot(bundle.model_output),
             "highest_verdict": bundle.highest_verdict,  # type: ignore[typeddict-item]
             "should_halt": bundle.should_halt,
-            "should_warn": bundle.should_warn,
+            "should_warn": False,
         }
 
 

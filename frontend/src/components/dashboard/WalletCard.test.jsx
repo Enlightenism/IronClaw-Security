@@ -97,6 +97,43 @@ const TWO_METHODS_RESPONSE = {
   },
 };
 
+const BILLING_CATALOGUE_RESPONSE = {
+  data: {
+    packages: {
+      starter: {
+        package_id: "pkg_5000",
+        aliases: ["pkg5000", "starter"],
+        label: "Starter",
+        units: 5000,
+        price_usd: 20,
+        tokens_per_unit: 25000,
+        token_coverage: 125000000,
+        featured: false,
+      },
+      team: {
+        package_id: "pkg_25000",
+        aliases: ["pkg25000", "team"],
+        label: "Team",
+        units: 25000,
+        price_usd: 90,
+        tokens_per_unit: 25000,
+        token_coverage: 625000000,
+        featured: true,
+      },
+      enterprise: {
+        package_id: "pkg_60000",
+        aliases: ["pkg60000", "enterprise"],
+        label: "Enterprise",
+        units: 60000,
+        price_usd: 180,
+        tokens_per_unit: 25000,
+        token_coverage: 1500000000,
+        featured: false,
+      },
+    },
+  },
+};
+
 const DEFAULT_PROPS = {
   balance: 500,
   lastPayment: null,
@@ -131,6 +168,7 @@ beforeEach(() => {
     ...ORIGINAL_ENV,
     REACT_APP_STRIPE_PUBLISHABLE_KEY: "pk_test_abc123",
   };
+  mockApiGet.mockResolvedValue(BILLING_CATALOGUE_RESPONSE);
   setupEmptyMethods();
 });
 
@@ -174,9 +212,9 @@ describe("WalletCard — no Stripe key", () => {
     await renderWalletCard({
       organizationId: "",
     });
-    expect(screen.getByTestId("purchase-pkg5000")).not.toBeDisabled();
-    expect(screen.getByTestId("purchase-pkg25000")).not.toBeDisabled();
-    expect(screen.getByTestId("purchase-pkg60000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg_5000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg_25000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg_60000")).not.toBeDisabled();
   });
 
   it("renders the current no-key runtime behavior", async () => {
@@ -209,16 +247,16 @@ describe("WalletCard — current Stripe mode behavior", () => {
 
   it("all three purchase buttons are enabled when purchasingId is null", async () => {
     await renderWalletCard({ purchasingId: null, organizationId: "" });
-    expect(screen.getByTestId("purchase-pkg5000")).not.toBeDisabled();
-    expect(screen.getByTestId("purchase-pkg25000")).not.toBeDisabled();
-    expect(screen.getByTestId("purchase-pkg60000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg_5000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg_25000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg_60000")).not.toBeDisabled();
   });
 
   it("purchase buttons are disabled when purchasingId is set to a tier ID", async () => {
-    await renderWalletCard({ purchasingId: "pkg5000", organizationId: "" });
-    expect(screen.getByTestId("purchase-pkg5000")).toBeDisabled();
-    expect(screen.getByTestId("purchase-pkg25000")).toBeDisabled();
-    expect(screen.getByTestId("purchase-pkg60000")).toBeDisabled();
+    await renderWalletCard({ purchasingId: "pkg_5000", organizationId: "" });
+    expect(screen.getByTestId("purchase-pkg_5000")).toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg_25000")).toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg_60000")).toBeDisabled();
   });
 });
 
@@ -245,36 +283,36 @@ describe("balance display", () => {
 // =============================================================================
 
 describe("tier purchase buttons", () => {
-  it("clicking purchase-pkg5000 calls onPurchase with exactly 'pkg5000'", async () => {
+  it("clicking purchase-pkg_5000 calls onPurchase with the canonical package ID", async () => {
     const user = userEvent.setup();
     const onPurchase = jest.fn();
 
     await renderWalletCard({ onPurchase, organizationId: "" });
 
-    await user.click(screen.getByTestId("purchase-pkg5000"));
-    expect(onPurchase).toHaveBeenCalledWith("pkg5000");
+    await user.click(screen.getByTestId("purchase-pkg_5000"));
+    expect(onPurchase).toHaveBeenCalledWith("pkg_5000");
     expect(onPurchase).toHaveBeenCalledTimes(1);
   });
 
-  it("clicking purchase-pkg25000 calls onPurchase with exactly 'pkg25000'", async () => {
+  it("clicking purchase-pkg_25000 calls onPurchase with the canonical package ID", async () => {
     const user = userEvent.setup();
     const onPurchase = jest.fn();
 
     await renderWalletCard({ onPurchase, organizationId: "" });
 
-    await user.click(screen.getByTestId("purchase-pkg25000"));
-    expect(onPurchase).toHaveBeenCalledWith("pkg25000");
+    await user.click(screen.getByTestId("purchase-pkg_25000"));
+    expect(onPurchase).toHaveBeenCalledWith("pkg_25000");
     expect(onPurchase).toHaveBeenCalledTimes(1);
   });
 
-  it("clicking purchase-pkg60000 calls onPurchase with exactly 'pkg60000'", async () => {
+  it("clicking purchase-pkg_60000 calls onPurchase with the canonical package ID", async () => {
     const user = userEvent.setup();
     const onPurchase = jest.fn();
 
     await renderWalletCard({ onPurchase, organizationId: "" });
 
-    await user.click(screen.getByTestId("purchase-pkg60000"));
-    expect(onPurchase).toHaveBeenCalledWith("pkg60000");
+    await user.click(screen.getByTestId("purchase-pkg_60000"));
+    expect(onPurchase).toHaveBeenCalledWith("pkg_60000");
     expect(onPurchase).toHaveBeenCalledTimes(1);
   });
 
@@ -284,7 +322,7 @@ describe("tier purchase buttons", () => {
     await renderWalletCard({ onPurchase: undefined, organizationId: "" });
 
     await expect(
-      user.click(screen.getByTestId("purchase-pkg5000")),
+      user.click(screen.getByTestId("purchase-pkg_5000")),
     ).resolves.toBeUndefined();
     expect(mockToastError).toHaveBeenCalledWith(
       "Purchase action is unavailable.",
@@ -302,15 +340,15 @@ describe("tier purchase buttons", () => {
 
     await renderWalletCard({ onPurchase, organizationId: "org-001" });
 
-    await user.click(screen.getByTestId("purchase-pkg5000"));
+    await user.click(screen.getByTestId("purchase-pkg_5000"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("purchase-pkg5000")).toBeDisabled();
-      expect(screen.getByTestId("purchase-pkg25000")).toBeDisabled();
-      expect(screen.getByTestId("purchase-pkg60000")).toBeDisabled();
+      expect(screen.getByTestId("purchase-pkg_5000")).toBeDisabled();
+      expect(screen.getByTestId("purchase-pkg_25000")).toBeDisabled();
+      expect(screen.getByTestId("purchase-pkg_60000")).toBeDisabled();
     });
 
-    expect(onPurchase).toHaveBeenCalledWith("pkg5000");
+    expect(onPurchase).toHaveBeenCalledWith("pkg_5000");
   });
 });
 
@@ -643,7 +681,7 @@ describe("Payment method interactions", () => {
     const button = await screen.findByTestId("add-new-card-btn");
     await user.click(button);
 
-    expect(onPurchase).toHaveBeenCalledWith("pkg5000");
+    expect(onPurchase).toHaveBeenCalledWith("pkg_5000");
   });
 });
 

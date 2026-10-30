@@ -15,42 +15,61 @@ import { useCountUp } from "@/hooks/useCountUp";
 import api, { paymentMethods } from "@/lib/api";
 import { toast } from "sonner";
 
-const TOKENS_PER_UNIT = 25_000;
-
-const TIERS = [
-  {
-    id: "pkg5000",
-    name: "Starter",
-    units: "5,000",
-    unitCount: 5000,
-    price: "$20",
-    priceUsd: 20,
-    tokensPerUnit: TOKENS_PER_UNIT,
-  },
-  {
-    id: "pkg25000",
-    name: "Team",
-    units: "25,000",
-    unitCount: 25000,
-    price: "$90",
-    priceUsd: 90,
-    tokensPerUnit: TOKENS_PER_UNIT,
-  },
-  {
-    id: "pkg60000",
-    name: "Enterprise",
-    units: "60,000",
-    unitCount: 60000,
-    price: "$180",
-    priceUsd: 180,
-    bestDeal: true,
-    tokensPerUnit: TOKENS_PER_UNIT,
-  },
-];
-
-const DEFAULT_ADD_CARD_PACKAGE_ID = "pkg5000";
-const VALID_PACKAGE_IDS = new Set(TIERS.map((t) => t.id));
 const paymentMethodCache = new Map();
+
+const normalizeBillingPackages = (data) => {
+  const packages = data?.packages;
+  if (!packages || typeof packages !== "object" || Array.isArray(packages)) {
+    throw new Error("Billing catalogue did not include a package map.");
+  }
+
+  const tiers = Object.values(packages).map((packageInfo) => {
+    const unitCount = Number(packageInfo?.units);
+    const priceUsd = Number(packageInfo?.price_usd);
+    const tokensPerUnit = Number(packageInfo?.tokens_per_unit);
+    const tokenCoverage = Number(packageInfo?.token_coverage);
+    const id =
+      typeof packageInfo?.package_id === "string"
+        ? packageInfo.package_id.trim()
+        : "";
+    const name =
+      typeof packageInfo?.label === "string" ? packageInfo.label.trim() : "";
+
+    if (
+      !id ||
+      !name ||
+      !Number.isSafeInteger(unitCount) ||
+      unitCount <= 0 ||
+      !Number.isFinite(priceUsd) ||
+      priceUsd <= 0 ||
+      !Number.isSafeInteger(tokensPerUnit) ||
+      tokensPerUnit <= 0 ||
+      tokenCoverage !== unitCount * tokensPerUnit
+    ) {
+      throw new Error("Billing catalogue contains an invalid package.");
+    }
+
+    return {
+      id,
+      name,
+      units: unitCount.toLocaleString(),
+      unitCount,
+      price: `$${priceUsd.toLocaleString("en-US", {
+        maximumFractionDigits: 2,
+      })}`,
+      priceUsd,
+      tokensPerUnit,
+      tokenCoverage,
+      bestDeal: packageInfo.featured === true,
+    };
+  });
+
+  if (!tiers.length) {
+    throw new Error("Billing catalogue contains no packages.");
+  }
+
+  return tiers;
+};
 
 const getStripePublishableKey = () =>
   process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY ?? "";
@@ -245,6 +264,7 @@ const PaymentMethodPanel = ({
   onPurchase,
   onAddCard,
   purchasingId,
+  defaultPackageId,
 }) => {
   const cachedEntry = useMemo(
     () =>
@@ -487,11 +507,11 @@ const PaymentMethodPanel = ({
         onClick={() => {
           if (onAddCard) {
             onAddCard();
-          } else if (VALID_PACKAGE_IDS.has(DEFAULT_ADD_CARD_PACKAGE_ID)) {
-            onPurchase(DEFAULT_ADD_CARD_PACKAGE_ID);
+          } else if (defaultPackageId) {
+            onPurchase(defaultPackageId);
           }
         }}
-        disabled={!!purchasingId}
+        disabled={!!purchasingId || !defaultPackageId}
         data-testid="add-new-card-btn"
         className="flex items-center gap-1.5 self-end rounded-lg border border-[#E5E4E2]/20 px-3 py-1.5 text-xs text-[#BFC1C2] transition hover:border-[#FFD700]/50 hover:text-white disabled:opacity-50"
       >
@@ -513,10 +533,45 @@ const WalletCard = ({
   const stripePublishableKey = getStripePublishableKey();
   const stripeMode = getStripeMode(stripePublishableKey);
   const [checkoutState, setCheckoutState] = useState("idle");
+  const [tiers, setTiers] = useState([]);
+  const [catalogueLoading, setCatalogueLoading] = useState(true);
+  const [catalogueError, setCatalogueError] = useState(false);
+
+  const packageIds = useMemo(() => new Set(tiers.map((tier) => tier.id)), [tiers]);
+  const defaultPackageId = tiers[0]?.id ?? null;
+
+  useEffect(() => {
+    let active = true;
+
+    const loadCatalogue = async () => {
+      try {
+        const { data } = await api.get("/billing/catalogue");
+        const nextTiers = normalizeBillingPackages(data);
+        if (active) {
+          setTiers(nextTiers);
+          setCatalogueError(false);
+        }
+      } catch {
+        if (active) {
+          setCatalogueError(true);
+          toast.error("Billing packages could not be loaded.");
+        }
+      } finally {
+        if (active) {
+          setCatalogueLoading(false);
+        }
+      }
+    };
+
+    loadCatalogue();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleCheckoutPurchase = useCallback(
     (tierId) => {
-      if (!VALID_PACKAGE_IDS.has(tierId)) {
+      if (!packageIds.has(tierId)) {
         toast.error("Invalid package selected.");
         return;
       }
@@ -529,14 +584,14 @@ const WalletCard = ({
       setCheckoutState("pending");
       onPurchase(tierId);
     },
-    [onPurchase],
+    [onPurchase, packageIds],
   );
 
   const handleAddCardClick = useCallback(() => {
-    if (VALID_PACKAGE_IDS.has(DEFAULT_ADD_CARD_PACKAGE_ID)) {
-      onPurchase(DEFAULT_ADD_CARD_PACKAGE_ID);
+    if (defaultPackageId && packageIds.has(defaultPackageId)) {
+      onPurchase(defaultPackageId);
     }
-  }, [onPurchase]);
+  }, [defaultPackageId, onPurchase, packageIds]);
 
   return (
     <div className="glass-platinum rounded-2xl p-7" data-testid="wallet-card">
@@ -571,7 +626,19 @@ const WalletCard = ({
       </p>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {TIERS.map((t) => (
+        {catalogueLoading && (
+          <div className="text-xs text-[#BFC1C2]" role="status">
+            Loading protection packages…
+          </div>
+        )}
+        {catalogueError && (
+          <div className="text-xs text-[#FCA5A5]" role="alert">
+            Billing packages are unavailable. Refresh the page to try again.
+          </div>
+        )}
+        {!catalogueLoading &&
+          !catalogueError &&
+          tiers.map((t) => (
           <div key={t.id} className="flex flex-col">
             {t.bestDeal ? (
               <div className="mb-1.5">
@@ -615,7 +682,7 @@ const WalletCard = ({
               </span>
             </button>
           </div>
-        ))}
+          ))}
       </div>
 
       <div
@@ -643,6 +710,7 @@ const WalletCard = ({
           onPurchase={handleCheckoutPurchase}
           onAddCard={handleAddCardClick}
           purchasingId={purchasingId}
+          defaultPackageId={defaultPackageId}
         />
       </div>
     </div>

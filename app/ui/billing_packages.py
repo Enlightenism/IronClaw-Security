@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.api.routes.billing import PACKAGE_CATALOG
+from app.core.billing import FEATURED_PACKAGE_ID, TOKENS_PER_UNIT, UNIT_PACKAGE_IDS
 
 router = APIRouter(prefix="/billing-packages", tags=["billing-packages"])
 
@@ -35,15 +36,10 @@ class BillingPackagesResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-_TOKENS_PER_UNIT = 25_000
-_ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
-_FEATURED_PACKAGE_ID = "pkg_25000"
-
-
 def _build_package_items() -> list[BillingPackagesItemView]:
     items: list[BillingPackagesItemView] = []
 
-    for package_id in _ORDERED_PACKAGE_IDS:
+    for package_id in UNIT_PACKAGE_IDS:
         package = PACKAGE_CATALOG.get(package_id)
         if package is None:
             continue
@@ -51,7 +47,7 @@ def _build_package_items() -> list[BillingPackagesItemView]:
         price_usd = float(package["price_usd"])
         included_units = int(package["included_units"])
         effective_price_per_1k_units = round((price_usd / included_units) * 1000, 4) if included_units > 0 else 0.0
-        display_label = str(package.get("display_label", f"{included_units:,} units — ${price_usd:.2f}"))
+        display_label = str(package["display_label"])
 
         items.append(
             BillingPackagesItemView(
@@ -60,13 +56,15 @@ def _build_package_items() -> list[BillingPackagesItemView]:
                 price_usd=price_usd,
                 included_units=included_units,
                 description=str(package["description"]),
-                featured=package_id == _FEATURED_PACKAGE_ID,
+                featured=bool(package["featured"]),
                 metadata={
                     "price_display": f"${price_usd:.2f}",
                     "units_display": f"{included_units:,} units",
                     "display_label": display_label,
                     "effective_price_per_1k_units": effective_price_per_1k_units,
-                    "tokens_per_unit": _TOKENS_PER_UNIT,
+                    "tokens_per_unit": int(package["tokens_per_unit"]),
+                    "token_coverage": int(package["token_coverage"]),
+                    "aliases": list(package["aliases"]),
                 },
             ),
         )
@@ -77,6 +75,7 @@ def _build_package_items() -> list[BillingPackagesItemView]:
 @router.get("", response_model=BillingPackagesResponse)
 def get_billing_packages() -> BillingPackagesResponse:
     items = _build_package_items()
+    featured_package = next(item for item in items if item.package_id == FEATURED_PACKAGE_ID)
 
     return BillingPackagesResponse(
         status="ok",
@@ -86,12 +85,12 @@ def get_billing_packages() -> BillingPackagesResponse:
         items=items,
         notes=[
             "Billing is sold as prepaid protection-unit bundles.",
-            "Current package pricing is $20 for 5,000 units, $90 for 25,000 units, and $180 for 60,000 units.",
-            "Each protection unit covers up to 25,000 tokens; larger token volumes consume additional units in 25,000-token chunks.",
-            "Team is the featured package for balanced operational usage.",
+            "Current package pricing: " + ", ".join(f"${item.price_usd:.2f} for {item.included_units:,} units" for item in items) + ".",
+            f"Each protection unit covers up to {TOKENS_PER_UNIT:,} tokens; larger token volumes consume additional units in {TOKENS_PER_UNIT:,}-token chunks.",
+            f"{featured_package.name} is the featured package for balanced operational usage.",
         ],
         metadata={
             "source_catalog": "app.api.routes.billing.PACKAGE_CATALOG",
-            "featured_package_id": _FEATURED_PACKAGE_ID,
+            "featured_package_id": FEATURED_PACKAGE_ID,
         },
     )

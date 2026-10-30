@@ -14,12 +14,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.auth import AuthContext, get_auth_context, require_auth_context
-from app.core.billing import resolve_billing_owner
+from app.core.billing import resolve_billing_owner, resolve_package_id
 from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import InstallKeyAlreadyExistsError, get_install_key_registry
 from app.core.unit_wallet import (
     ORG_KEY_PREFIX,
     TOKEN_CHUNK_SIZE,
+    UNIT_PACKAGE_CATALOG,
     get_unit_wallet_registry,
     units_required_for_tokens,
 )
@@ -37,57 +38,23 @@ _PURCHASES_MAX_SIZE: int = 1_000
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _ORG_KEY_RE = re.compile(r"^ic_org_")
 
-_BILLING_PACKAGE_FALLBACK: dict[str, dict[str, Any]] = {
-    "pkg_5000": {
-        "package_id": "pkg_5000",
-        "name": "Starter",
-        "price_usd": 20.00,
-        "included_units": 5_000,
-        "display_label": "5,000 units — $20.00",
-        "description": ("Prepaid protection units for individual builders who want guarded prompt handling, tool-call review, source inspection, and safe response release."),
-    },
-    "pkg_25000": {
-        "package_id": "pkg_25000",
-        "name": "Team",
-        "price_usd": 90.00,
-        "included_units": 25_000,
-        "display_label": "25,000 units — $90.00",
-        "description": ("Prepaid protection units for teams running higher volumes of AI-assisted development, research, and guarded agent workflows."),
-    },
-    "pkg_60000": {
-        "package_id": "pkg_60000",
-        "name": "Enterprise",
-        "price_usd": 180.00,
-        "included_units": 60_000,
-        "display_label": "60,000 units — $180.00",
-        "description": ("Prepaid protection units for organizations protecting large-scale agent operations, sensitive workflows, and high-frequency prompt activity."),
-    },
-}
-
 
 def _derive_package_catalog() -> dict[str, dict[str, Any]]:
-    try:
-        from app.core.unit_wallet import UNIT_PACKAGE_CATALOG  # noqa: PLC0415
-
-        required_ids = set(_BILLING_PACKAGE_FALLBACK)
-        catalog: dict[str, dict[str, Any]] = {}
-        for pkg_id in required_ids:
-            source = UNIT_PACKAGE_CATALOG.get(pkg_id)
-            if source is not None:
-                catalog[pkg_id] = {
-                    "package_id": pkg_id,
-                    "name": str(source["name"]),
-                    "price_usd": float(source["price_usd"]),
-                    "included_units": int(source["unit_amount"]),
-                    "display_label": str(source.get("display_label", "")),
-                    "description": str(source.get("description", "")),
-                }
-            else:
-                catalog[pkg_id] = _BILLING_PACKAGE_FALLBACK[pkg_id]
-        return catalog
-    except Exception:
-        logger.exception("billing: failed to derive PACKAGE_CATALOG from unit_wallet; using hardcoded fallback")
-        return dict(_BILLING_PACKAGE_FALLBACK)
+    return {
+        package_id: {
+            "package_id": package_id,
+            "aliases": list(source["aliases"]),
+            "name": str(source["name"]),
+            "price_usd": float(source["price_usd"]),
+            "included_units": int(source["unit_amount"]),
+            "display_label": str(source["display_label"]),
+            "description": str(source["description"]),
+            "tokens_per_unit": int(source["tokens_per_unit"]),
+            "token_coverage": int(source["token_coverage"]),
+            "featured": bool(source["featured"]),
+        }
+        for package_id, source in UNIT_PACKAGE_CATALOG.items()
+    }
 
 
 PACKAGE_CATALOG: dict[str, dict[str, Any]] = _derive_package_catalog()
@@ -95,6 +62,7 @@ PACKAGE_CATALOG: dict[str, dict[str, Any]] = _derive_package_catalog()
 
 class BillingPackageView(BaseModel):
     package_id: str
+    aliases: list[str] = Field(default_factory=list)
     name: str
     price_usd: float
     included_units: int
@@ -102,6 +70,7 @@ class BillingPackageView(BaseModel):
     description: str
     token_coverage: int
     tokens_per_unit: int
+    featured: bool = False
 
 
 class ProtectionValueView(BaseModel):
@@ -556,16 +525,17 @@ def _find_matching_purchase(
 
 def _package_to_view(pkg_id: str, pkg: dict[str, Any]) -> BillingPackageView:
     included_units = int(pkg["included_units"])
-    token_coverage = included_units * TOKEN_CHUNK_SIZE
     return BillingPackageView(
         package_id=pkg_id,
+        aliases=list(pkg["aliases"]),
         name=str(pkg["name"]),
         price_usd=float(pkg["price_usd"]),
         included_units=included_units,
         display_label=str(pkg.get("display_label", "")),
         description=str(pkg.get("description", "")),
-        token_coverage=token_coverage,
-        tokens_per_unit=TOKEN_CHUNK_SIZE,
+        token_coverage=int(pkg["token_coverage"]),
+        tokens_per_unit=int(pkg["tokens_per_unit"]),
+        featured=bool(pkg["featured"]),
     )
 
 
@@ -721,7 +691,14 @@ def purchase_package(
     body: BillingPackagePurchaseRequest,
     auth_ctx: AuthContext = Depends(get_auth_context),
 ) -> BillingPackagePurchaseResponse:
-    pkg = PACKAGE_CATALOG.get(body.package_id)
+    canonical_package_id = resolve_package_id(body.package_id)
+    if canonical_package_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown package_id: {body.package_id!r}",
+        )
+
+    pkg = PACKAGE_CATALOG.get(canonical_package_id)
     if pkg is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -738,7 +715,7 @@ def purchase_package(
 
     purchase_metadata = {
         **body.metadata,
-        "package_id": body.package_id,
+        "package_id": canonical_package_id,
         "buyer_name": body.buyer_name,
         "buyer_email": buyer_email_normalized,
         "owner_key": owner_key,
@@ -751,15 +728,15 @@ def purchase_package(
 
     purchase = BillingPackagePurchaseView(
         purchase_id=purchase_id,
-        package_id=body.package_id,
+        package_id=canonical_package_id,
         package_name=str(pkg["name"]),
         buyer_name=body.buyer_name,
         buyer_email=buyer_email_normalized,
         owner_key=owner_key,
         price_usd=float(pkg["price_usd"]),
         granted_units=0,
-        token_coverage=int(pkg["included_units"]) * TOKEN_CHUNK_SIZE,
-        tokens_per_unit=TOKEN_CHUNK_SIZE,
+        token_coverage=int(pkg["token_coverage"]),
+        tokens_per_unit=int(pkg["tokens_per_unit"]),
         created_at=created_at,
         payment_id=None,
         payment_status="pending",

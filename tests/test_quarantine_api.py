@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from httpx2 import Response
 
 from app.main import app
 
@@ -20,7 +21,7 @@ def _auth_headers() -> dict[str, str]:
     return {"x-api-key": "test-api-key"}
 
 
-def _create_item(overrides: dict | None = None) -> dict:
+def _create_item(overrides: dict | None = None) -> Response:
     payload = {**_VALID_PAYLOAD, **(overrides or {})}
     response = client.post("/quarantine/", json=payload, headers=_auth_headers())
     assert response.status_code in {200, 201, 401, 403}

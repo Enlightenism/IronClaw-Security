@@ -3,21 +3,14 @@ from __future__ import annotations
 from collections import Counter
 from datetime import UTC, datetime
 import logging
-import math
 import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.core.billing import PLAN_DEFINITIONS, TOKENS_PER_UNIT, units_required_for_tokens
 from app.supabaseclient import (
-    BILLING_TIER_5K_PRICE_USD,
-    BILLING_TIER_5K_UNITS,
-    BILLING_TIER_25K_PRICE_USD,
-    BILLING_TIER_25K_UNITS,
-    BILLING_TIER_60K_PRICE_USD,
-    BILLING_TIER_60K_UNITS,
-    TOKENS_PER_UNIT,
     get_supabase_client,
     is_supabase_configured,
 )
@@ -44,46 +37,29 @@ _USAGE_STATUS_COLOR: dict[str, str] = {
 }
 
 _VALID_STATUSES: frozenset[str] = frozenset(_STATUS_COLOR.keys())
-_VALID_PLANS: frozenset[str] = frozenset({"starter", "team", "enterprise"})
+_VALID_PLANS: frozenset[str] = frozenset(plan["name"].casefold() for plan in PLAN_DEFINITIONS.values())
 
 # ---------------------------------------------------------------------------
-# Base package catalogue — no stripe_price_id defaults.
-# stripe_price_id is always resolved from env at call time via
-# _build_package_catalogue(); the base dict intentionally omits the key so
-# that an unset env var always produces "" and never a stale hardcoded value.
-# starter    :  5,000 units → $20 USD
-# team       : 25,000 units → $90 USD
-# enterprise : 60,000 units → $180 USD
+# Package data derives from PLAN_DEFINITIONS. Stripe price IDs are resolved
+# from the environment at call time and are not part of the billing catalog.
 # ---------------------------------------------------------------------------
 
 _BASE_PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
-    "starter": {
-        "label": "Starter",
-        "units": BILLING_TIER_5K_UNITS,
-        "price_usd": BILLING_TIER_5K_PRICE_USD,
-        "price_cents": BILLING_TIER_5K_PRICE_USD * 100,
-        "tokens_per_unit": TOKENS_PER_UNIT,
-        "token_coverage": BILLING_TIER_5K_UNITS * TOKENS_PER_UNIT,
-        "notes": (f"{BILLING_TIER_5K_UNITS:,} units · ${BILLING_TIER_5K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
-    },
-    "team": {
-        "label": "Team",
-        "units": BILLING_TIER_25K_UNITS,
-        "price_usd": BILLING_TIER_25K_PRICE_USD,
-        "price_cents": BILLING_TIER_25K_PRICE_USD * 100,
-        "tokens_per_unit": TOKENS_PER_UNIT,
-        "token_coverage": BILLING_TIER_25K_UNITS * TOKENS_PER_UNIT,
-        "notes": (f"{BILLING_TIER_25K_UNITS:,} units · ${BILLING_TIER_25K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
-    },
-    "enterprise": {
-        "label": "Enterprise",
-        "units": BILLING_TIER_60K_UNITS,
-        "price_usd": BILLING_TIER_60K_PRICE_USD,
-        "price_cents": BILLING_TIER_60K_PRICE_USD * 100,
-        "tokens_per_unit": TOKENS_PER_UNIT,
-        "token_coverage": BILLING_TIER_60K_UNITS * TOKENS_PER_UNIT,
-        "notes": (f"{BILLING_TIER_60K_UNITS:,} units · ${BILLING_TIER_60K_PRICE_USD} USD · each unit protects up to {TOKENS_PER_UNIT:,} tokens"),
-    },
+    plan["name"].casefold(): {
+        "code": plan["code"],
+        "package_id": plan["package_id"],
+        "aliases": list(plan["aliases"]),
+        "label": plan["name"],
+        "units": plan["unit_limit"],
+        "price_usd": plan["price_usd"],
+        "price_cents": plan["price_usd"] * 100,
+        "tokens_per_unit": plan["tokens_per_unit"],
+        "token_coverage": plan["unit_limit"] * plan["tokens_per_unit"],
+        "description": plan["description"],
+        "featured": plan["featured"],
+        "notes": (f"{plan['unit_limit']:,} units · ${plan['price_usd']} USD · each unit protects up to {plan['tokens_per_unit']:,} tokens"),
+    }
+    for plan in PLAN_DEFINITIONS.values()
 }
 
 
@@ -107,8 +83,8 @@ def _build_package_catalogue() -> dict[str, dict[str, Any]]:
 # picked up on every request.
 PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = _build_package_catalogue()
 
-_PLAN_UNITS: dict[str, int] = {plan: meta["units"] for plan, meta in _BASE_PACKAGE_CATALOGUE.items()}
-_PLAN_PRICE_CENTS: dict[str, int] = {plan: meta["price_cents"] for plan, meta in _BASE_PACKAGE_CATALOGUE.items()}
+_PLAN_UNITS: dict[str, int] = {plan: int(meta["units"]) for plan, meta in _BASE_PACKAGE_CATALOGUE.items()}
+_PLAN_PRICE_CENTS: dict[str, int] = {plan: int(meta["price_cents"]) for plan, meta in _BASE_PACKAGE_CATALOGUE.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -157,18 +133,16 @@ def _get_stripe_status() -> StripeStatus:
 def units_for_tokens(token_count: int) -> int:
     """
     Return the number of protection units required to cover token_count tokens.
-    Each unit covers up to TOKENS_PER_UNIT (25,000) tokens.
+    Each unit covers up to TOKENS_PER_UNIT tokens.
     Partial chunks consume a full unit (ceiling division).
 
     Examples:
         units_for_tokens(1)       -> 1
-        units_for_tokens(25_000)  -> 1
-        units_for_tokens(25_001)  -> 2
-        units_for_tokens(75_000)  -> 3
+        units_for_tokens(TOKENS_PER_UNIT)      -> 1
+        units_for_tokens(TOKENS_PER_UNIT + 1)  -> 2
+        units_for_tokens(3 * TOKENS_PER_UNIT)  -> 3
     """
-    if token_count <= 0:
-        return 0
-    return math.ceil(token_count / TOKENS_PER_UNIT)
+    return units_required_for_tokens(token_count)
 
 
 def _get_environment() -> str:
@@ -234,12 +208,16 @@ class BillingPackagePlanCount(BaseModel):
 
 
 class PackageCatalogueEntry(BaseModel):
+    code: str
+    package_id: str
+    aliases: list[str] = Field(default_factory=list)
     label: str
     units: int
     price_usd: int
     price_cents: int
     tokens_per_unit: int
     token_coverage: int
+    featured: bool = False
     stripe_price_id: str = ""
     notes: str
 
@@ -340,8 +318,10 @@ def _make_item(
     invoiceid: str | None = None,
     expiresat: str | None = None,
 ) -> BillingPackageListItem:
-    plan_units = _PLAN_UNITS.get(plan, BILLING_TIER_5K_UNITS)
-    price_cents = _PLAN_PRICE_CENTS.get(plan, BILLING_TIER_5K_PRICE_USD * 100)
+    plan_metadata = _BASE_PACKAGE_CATALOGUE.get(plan, _BASE_PACKAGE_CATALOGUE["starter"])
+    plan_units = int(plan_metadata["units"])
+    price_cents = int(plan_metadata["price_cents"])
+    tokens_per_unit = int(plan_metadata["tokens_per_unit"])
     return BillingPackageListItem(
         packageid=packageid,
         organizationid=organizationid,
@@ -355,8 +335,8 @@ def _make_item(
         usage=usage,
         overallusagestatus=_overall_usage_status(usage),
         invoiceid=invoiceid,
-        tokens_per_unit=TOKENS_PER_UNIT,
-        token_coverage=plan_units * TOKENS_PER_UNIT,
+        tokens_per_unit=tokens_per_unit,
+        token_coverage=plan_units * tokens_per_unit,
     )
 
 
@@ -375,7 +355,7 @@ def _fetch_packages_from_supabase() -> list[BillingPackageListItem] | None:
         items: list[BillingPackageListItem] = []
         for row in rows:
             plan = str(row.get("plan", "starter"))
-            plan_units = _PLAN_UNITS.get(plan, BILLING_TIER_5K_UNITS)
+            plan_units = _PLAN_UNITS.get(plan, _BASE_PACKAGE_CATALOGUE["starter"]["units"])
             used_units = int(row.get("used_units", 0))
             pct = _percent_used(used_units, plan_units)
             usage = [
@@ -412,9 +392,9 @@ def _static_fallback_packages() -> list[BillingPackageListItem]:
     Static demo packages using canonical plan IDs and correct pricing.
     Used only when Supabase is not configured.
     """
-    starter_units = BILLING_TIER_5K_UNITS
-    team_units = BILLING_TIER_25K_UNITS
-    enterprise_units = BILLING_TIER_60K_UNITS
+    starter_units = _PLAN_UNITS["starter"]
+    team_units = _PLAN_UNITS["team"]
+    enterprise_units = _PLAN_UNITS["enterprise"]
 
     packages: list[BillingPackageListItem] = []
 
@@ -664,7 +644,7 @@ def get_billing_packages(
             "overallusagestatus reflects the worst usage bucket status across all metrics for that package.",
             "percentused is pre-computed per usage bucket: (used / included) * 100, capped at 100.",
             f"Each protection unit covers up to {TOKENS_PER_UNIT:,} tokens. Partial token chunks consume a full additional unit (ceiling division).",
-            f"Canonical plans: starter ({BILLING_TIER_5K_UNITS:,} units / ${BILLING_TIER_5K_PRICE_USD}), team ({BILLING_TIER_25K_UNITS:,} units / ${BILLING_TIER_25K_PRICE_USD}), enterprise ({BILLING_TIER_60K_UNITS:,} units / ${BILLING_TIER_60K_PRICE_USD}).",
+            "Canonical plans: " + ", ".join(f"{plan} ({meta['units']:,} units / ${meta['price_usd']})" for plan, meta in _BASE_PACKAGE_CATALOGUE.items()) + ".",
             "Pagination is 1-indexed. Default pagesize is 25, maximum is 100.",
             stripe.note,
             "Dedicated billing overview available at /ui/billing/overview. Invoice list available at /ui/billing/invoices.",

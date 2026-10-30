@@ -8,6 +8,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.billing import FEATURED_PACKAGE_ID as _FEATURED_PACKAGE_ID
+from app.core.billing import UNIT_PACKAGE_IDS as _ORDERED_PACKAGE_IDS
+from app.core.billing import resolve_package_id
 from app.core.unit_wallet import TOKEN_CHUNK_SIZE, UNIT_PACKAGE_CATALOG
 from app.services.organization_store import OrganizationStore, get_store
 
@@ -33,59 +36,47 @@ except Exception:
 # of truth (app.core.unit_wallet.TOKEN_CHUNK_SIZE).
 # ---------------------------------------------------------------------------
 _TOKENS_PER_UNIT = TOKEN_CHUNK_SIZE
-_ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
-_FEATURED_PACKAGE_ID = "pkg_25000"
 
-_PRICING_FALLBACK: dict[str, tuple[int, float, str, str]] = {
-    "pkg_5000": (
-        5_000,
-        20.00,
-        "Starter",
-        "5,000 units — $20.00",
-    ),
-    "pkg_25000": (
-        25_000,
-        90.00,
-        "Team",
-        "25,000 units — $90.00",
-    ),
-    "pkg_60000": (
-        60_000,
-        180.00,
-        "Enterprise",
-        "60,000 units — $180.00",
-    ),
-}
+
+def _package_pricing_summary() -> str:
+    pricing: list[str] = []
+    for package_id in _ORDERED_PACKAGE_IDS:
+        package = UNIT_PACKAGE_CATALOG.get(package_id)
+        if package is None:
+            continue
+        pricing.append(
+            f"${float(package['price_usd']):.2f} for {int(package['unit_amount']):,} units ({package['name']})",
+        )
+    return ", ".join(pricing)
 
 
 def _get_package_metadata(package_id: str) -> dict[str, Any]:
-    package = UNIT_PACKAGE_CATALOG.get(package_id)
-    if package is not None:
-        price_usd = float(package["price_usd"])
-        included_units = int(package["unit_amount"])
-        name = str(package["name"])
-        display_label = str(package.get("display_label", ""))
-    else:
-        fallback = _PRICING_FALLBACK.get(package_id)
-        if fallback is None:
-            return {}
-        included_units, price_usd, name, display_label = fallback
+    canonical_package_id = resolve_package_id(package_id)
+    if canonical_package_id is None:
+        return {}
+    package = UNIT_PACKAGE_CATALOG[canonical_package_id]
+    price_usd = float(package["price_usd"])
+    included_units = int(package["unit_amount"])
+    name = str(package["name"])
+    display_label = str(package["display_label"])
 
     price_per_1k = round((price_usd / included_units) * 1_000, 4) if included_units > 0 else 0.0
     return {
-        "package_id": package_id,
+        "package_id": canonical_package_id,
+        "aliases": list(package["aliases"]),
         "name": name,
         "display_label": display_label,
         "price_usd": price_usd,
         "price_display": f"${price_usd:.2f}",
         "included_units": included_units,
         "units_display": f"{included_units:,} units",
-        "tokens_per_unit": _TOKENS_PER_UNIT,
+        "tokens_per_unit": int(package["tokens_per_unit"]),
+        "token_coverage": int(package["token_coverage"]),
         # Renamed from max_tokens_covered: communicates tokens paid for in this
         # package, not a scan ceiling. Scans are unlimited; units auto-deduct.
-        "tokens_in_wallet": included_units * _TOKENS_PER_UNIT,
+        "tokens_in_wallet": int(package["token_coverage"]),
         "effective_price_per_1k_units": price_per_1k,
-        "featured": package_id == _FEATURED_PACKAGE_ID,
+        "featured": bool(package["featured"]),
     }
 
 
@@ -93,7 +84,7 @@ def _billing_catalog() -> dict[str, Any]:
     return {
         "tokens_per_unit": _TOKENS_PER_UNIT,
         "featured_package_id": _FEATURED_PACKAGE_ID,
-        "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in 25,000-token chunks."),
+        "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in {_TOKENS_PER_UNIT:,}-token chunks."),
         "packages": {pkg_id: _get_package_metadata(pkg_id) for pkg_id in _ORDERED_PACKAGE_IDS},
     }
 
@@ -114,9 +105,7 @@ def _fetch_owner_wallet(owner_email: str) -> dict[str, Any]:
         wallet_units: int = int(row.get("wallet_units") or 0)
         has_paid: bool = bool(row.get("has_paid", False))
         last_payment: dict[str, Any] = row.get("last_payment") or {}
-        active_package_id: str = last_payment.get("package_id", _FEATURED_PACKAGE_ID)
-        if active_package_id not in _ORDERED_PACKAGE_IDS:
-            active_package_id = _FEATURED_PACKAGE_ID
+        active_package_id = resolve_package_id(str(last_payment.get("package_id") or "")) or _FEATURED_PACKAGE_ID
         return {
             "user_id": str(row.get("id", "")),
             "wallet_units": wallet_units,
@@ -207,7 +196,7 @@ def _empty_response(timestamp: str) -> dict[str, Any]:
         },
         "notes": [
             "No organizations found.",
-            "Billing is sold as prepaid protection-unit bundles: $20 for 5,000 units (Starter), $90 for 25,000 units (Team), $180 for 60,000 units (Enterprise).",
+            f"Billing is sold as prepaid protection-unit bundles: {_package_pricing_summary()}.",
             f"Each unit covers up to {_TOKENS_PER_UNIT:,} tokens; larger token volumes consume additional units in {_TOKENS_PER_UNIT:,}-token chunks.",
         ],
     }
@@ -278,7 +267,7 @@ def get_ui_organizations(
             "create_route": "/organizations",
         },
         "notes": [
-            "Billing is sold as prepaid protection-unit bundles: $20 for 5,000 units (Starter), $90 for 25,000 units (Team), $180 for 60,000 units (Enterprise).",
+            f"Billing is sold as prepaid protection-unit bundles: {_package_pricing_summary()}.",
             f"Each unit covers up to {_TOKENS_PER_UNIT:,} tokens; larger token volumes consume additional units in {_TOKENS_PER_UNIT:,}-token chunks.",
             "Owner wallet data is enriched from Supabase users table where available; billing block is empty if owner email has no matching user record.",
         ],

@@ -20,6 +20,7 @@ os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
 from app.core.auth import AuthContext, require_auth_context
+from app.core.billing import PLAN_DEFINITIONS
 from app.core.settings import get_settings
 from app.main import app
 from app.supabaseclient import TOKENS_PER_UNIT
@@ -159,6 +160,23 @@ def test_package_catalogue_present_with_three_plans(client: TestClient) -> None:
     assert "starter" in catalogue
     assert "team" in catalogue
     assert "enterprise" in catalogue
+
+
+def test_package_catalogue_matches_canonical_plan_definitions(client: TestClient) -> None:
+    response = client.get(_ROUTE)
+    assert response.status_code == 200
+    catalogue = response.json()["package_catalogue"]
+
+    for plan in PLAN_DEFINITIONS.values():
+        entry = catalogue[plan["name"].casefold()]
+        assert entry["code"] == plan["code"]
+        assert entry["package_id"] == plan["package_id"]
+        assert entry["aliases"] == list(plan["aliases"])
+        assert entry["units"] == plan["unit_limit"]
+        assert entry["price_usd"] == plan["price_usd"]
+        assert entry["tokens_per_unit"] == plan["tokens_per_unit"]
+        assert entry["token_coverage"] == plan["unit_limit"] * plan["tokens_per_unit"]
+        assert entry["featured"] is plan["featured"]
 
 
 def test_packages_list_is_list(client: TestClient) -> None:

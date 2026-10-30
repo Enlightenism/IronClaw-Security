@@ -285,7 +285,9 @@ class TestDefaultRouterAllOperations:
         for action_type in ("shell_command", "system_change", "file_delete"):
             envelope = router.route(_action_policy_request(action_type=action_type))
             _assert_envelope_invariants(envelope, expected_operation="action_policy", expect_ok=True)
-            assert envelope.payload.metadata.risk_score >= RISK_THRESHOLD_BLOCK_MIN
+            risk_score = envelope.payload.metadata.risk_score
+            assert risk_score is not None
+            assert risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
     def test_default_action_decision_low_risk_blocks_without_policy(self):
         router = IronClawSkillRouter()

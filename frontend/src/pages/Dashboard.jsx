@@ -10,7 +10,6 @@ import { useAuth } from "@/context/AuthContext";
 import api from "@/lib/api";
 
 const ATTACKS_PAGE_SIZE = 25;
-const VALID_PACKAGES = ["pkg5000", "pkg25000", "pkg60000"];
 const DASHBOARD_LOGO_SRC = "/images/logo128pxl.svg";
 const DASHBOARD_KNIGHT_SRC = "/images/Golden%20Knight%204k%202gb.png";
 const INSTALL_KEY_PROGRAMS = [
@@ -101,32 +100,7 @@ const hasEmbeddedInstallCommand = (value) => {
 };
 
 const normalizePackageId = (packageId) => {
-  switch (packageId) {
-    case "pkg_5000":
-    case "pkg5000":
-      return "pkg5000";
-    case "pkg_25000":
-    case "pkg25000":
-      return "pkg25000";
-    case "pkg_60000":
-    case "pkg60000":
-      return "pkg60000";
-    default:
-      return "";
-  }
-};
-
-const getPackageUnits = (packageId) => {
-  switch (normalizePackageId(packageId)) {
-    case "pkg5000":
-      return 5000;
-    case "pkg25000":
-      return 25000;
-    case "pkg60000":
-      return 60000;
-    default:
-      return 0;
-  }
+  return typeof packageId === "string" ? packageId.trim() : "";
 };
 
 const getErrorMessage = (error) => {
@@ -525,7 +499,7 @@ const Dashboard = () => {
   }, [fetchDashboard, isAuthenticated, simulateEvent]);
 
   const pollPayment = useCallback(
-    async (sessionId, packageId, attempts = 0) => {
+    async (sessionId, attempts = 0) => {
       const maxAttempts = 6;
 
       if (!sessionId) {
@@ -547,10 +521,16 @@ const Dashboard = () => {
 
         if (status?.payment_status === "paid") {
           setPaymentState("paid");
-          const units =
-            Number(status?.unit_credits ?? status?.units ?? 0) ||
-            getPackageUnits(packageId);
           toast.dismiss("pay");
+          const units = Number(status?.unit_credits ?? status?.units);
+          if (!Number.isSafeInteger(units) || units <= 0) {
+            toast.error(
+              "Payment is confirmed, but the credited unit amount could not be verified.",
+            );
+            await fetchDashboard();
+            setPurchasingId(null);
+            return;
+          }
           toast.success(
             `Payment confirmed — ${units.toLocaleString()} units added!`,
           );
@@ -569,9 +549,9 @@ const Dashboard = () => {
 
         setPaymentState("pending");
 
-        setTimeout(() => pollPayment(sessionId, packageId, attempts + 1), 2000);
+        setTimeout(() => pollPayment(sessionId, attempts + 1), 2000);
       } catch {
-        setTimeout(() => pollPayment(sessionId, packageId, attempts + 1), 2000);
+        setTimeout(() => pollPayment(sessionId, attempts + 1), 2000);
       }
     },
     [fetchDashboard],
@@ -581,7 +561,6 @@ const Dashboard = () => {
     const params = new URLSearchParams(location.search);
     const sessionId = params.get("session_id");
     const checkoutState = params.get("checkout");
-    const packageId = normalizePackageId(params.get("package_id") || "");
 
     if (checkoutState === "cancel") {
       setPaymentState("expired");
@@ -604,7 +583,7 @@ const Dashboard = () => {
       setPaymentState("pending");
       polledRef.current = true;
       toast.loading("Verifying your payment...", { id: "pay" });
-      pollPayment(sessionId, packageId);
+      pollPayment(sessionId);
       navigate("/dashboard", { replace: true });
     }
   }, [fetchDashboard, location.search, navigate, pollPayment]);
@@ -613,7 +592,7 @@ const Dashboard = () => {
     async (rawPackageId) => {
       const packageId = normalizePackageId(rawPackageId);
 
-      if (!VALID_PACKAGES.includes(packageId)) {
+      if (!packageId) {
         toast.error("Invalid package selected.");
         return;
       }

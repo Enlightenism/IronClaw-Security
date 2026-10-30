@@ -14,7 +14,7 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
-
+from app.core.billing import UNIT_PACKAGE_CATALOG as BILLING_UNIT_PACKAGE_CATALOG
 from app.core.unit_wallet import (
     TOKEN_CHUNK_SIZE,
     UNIT_PACKAGE_CATALOG,
@@ -73,6 +73,20 @@ def test_catalog_package_id_field_matches_key() -> None:
     for pkg_id in _EXPECTED_CATALOG:
         entry = UNIT_PACKAGE_CATALOG[pkg_id]
         assert entry["package_id"] == pkg_id
+
+
+def test_wallet_catalog_is_a_view_of_the_canonical_billing_catalog() -> None:
+    assert tuple(UNIT_PACKAGE_CATALOG) == tuple(entry["package_id"] for entry in BILLING_UNIT_PACKAGE_CATALOG)
+
+    for package in BILLING_UNIT_PACKAGE_CATALOG:
+        wallet_package = UNIT_PACKAGE_CATALOG[package["package_id"]]
+        assert wallet_package["code"] == package["code"]
+        assert wallet_package["aliases"] == package["aliases"]
+        assert wallet_package["unit_amount"] == package["units"]
+        assert wallet_package["price_usd"] == package["price_usd"]
+        assert wallet_package["tokens_per_unit"] == package["tokens_per_unit"]
+        assert wallet_package["token_coverage"] == package["token_coverage"]
+        assert wallet_package["featured"] == package["featured"]
 
 
 def test_install_key_debit_rejects_generic_platform_owner_key() -> None:
@@ -196,176 +210,6 @@ def test_install_key_usage_summary_tracks_today_and_week_window() -> None:
     assert summary["install_key_usage"]["ik_install_real_001"]["units_used_today"] >= 7
     assert summary["install_key_usage"]["ik_install_real_001"]["units_used_this_week"] >= 7
     assert summary["total_quarantined_actions"] == 1
-
-
-# ---------------------------------------------------------------------------
-# Catalog validation guard — RuntimeError (not AssertionError)
-# ---------------------------------------------------------------------------
-
-
-def _run_catalog_validation(catalog: dict) -> None:
-    """Mirror the exact module-level validation loop from unit_wallet.py."""
-    _EXPECTED = {
-        "pkg_5000": (5_000, 20.00),
-        "pkg_25000": (25_000, 90.00),
-        "pkg_60000": (60_000, 180.00),
-    }
-    for pkg_id, (expected_units, expected_price) in _EXPECTED.items():
-        entry = catalog.get(pkg_id)
-        if entry is None:
-            raise RuntimeError(f"unit_wallet: UNIT_PACKAGE_CATALOG is missing required package {pkg_id!r}")
-        if entry["unit_amount"] != expected_units:
-            raise RuntimeError(f"unit_wallet: {pkg_id} unit_amount mismatch: got {entry['unit_amount']}, expected {expected_units}")
-        if entry["price_usd"] != expected_price:
-            raise RuntimeError(f"unit_wallet: {pkg_id} price_usd mismatch: got {entry['price_usd']}, expected {expected_price}")
-        if entry["tokens_per_unit"] != TOKEN_CHUNK_SIZE:
-            raise RuntimeError(f"unit_wallet: {pkg_id} tokens_per_unit mismatch: got {entry['tokens_per_unit']}, expected {TOKEN_CHUNK_SIZE}")
-
-
-def _good_catalog() -> dict:
-    import copy
-
-    return copy.deepcopy(UNIT_PACKAGE_CATALOG)
-
-
-# --- valid catalog passes ---------------------------------------------------
-
-
-def test_catalog_validation_passes_for_valid_catalog() -> None:
-    _run_catalog_validation(_good_catalog())
-
-
-# --- missing package --------------------------------------------------------
-
-
-def test_catalog_validation_missing_package_raises_runtime_error() -> None:
-    bad = _good_catalog()
-    del bad["pkg_5000"]
-    with pytest.raises(RuntimeError, match="missing required package"):
-        _run_catalog_validation(bad)
-
-
-def test_catalog_validation_missing_package_error_is_not_assertion_error() -> None:
-    bad = _good_catalog()
-    del bad["pkg_25000"]
-    try:
-        _run_catalog_validation(bad)
-    except RuntimeError:
-        pass
-    except AssertionError:
-        pytest.fail("catalog validation raised AssertionError instead of RuntimeError")
-
-
-def test_catalog_validation_missing_package_message_contains_pkg_id() -> None:
-    bad = _good_catalog()
-    del bad["pkg_60000"]
-    with pytest.raises(RuntimeError, match="pkg_60000"):
-        _run_catalog_validation(bad)
-
-
-# --- wrong unit_amount ------------------------------------------------------
-
-
-def test_catalog_validation_wrong_unit_amount_raises_runtime_error() -> None:
-    bad = _good_catalog()
-    bad["pkg_5000"]["unit_amount"] = 9999
-    with pytest.raises(RuntimeError, match="unit_amount mismatch"):
-        _run_catalog_validation(bad)
-
-
-def test_catalog_validation_wrong_unit_amount_message_contains_pkg_id() -> None:
-    bad = _good_catalog()
-    bad["pkg_25000"]["unit_amount"] = 1
-    with pytest.raises(RuntimeError, match="pkg_25000"):
-        _run_catalog_validation(bad)
-
-
-def test_catalog_validation_wrong_unit_amount_message_contains_got_value() -> None:
-    bad = _good_catalog()
-    bad["pkg_5000"]["unit_amount"] = 42
-    with pytest.raises(RuntimeError, match="42"):
-        _run_catalog_validation(bad)
-
-
-def test_catalog_validation_wrong_unit_amount_is_not_assertion_error() -> None:
-    bad = _good_catalog()
-    bad["pkg_60000"]["unit_amount"] = 0
-    try:
-        _run_catalog_validation(bad)
-    except RuntimeError:
-        pass
-    except AssertionError:
-        pytest.fail("catalog validation raised AssertionError instead of RuntimeError")
-
-
-# --- wrong price_usd --------------------------------------------------------
-
-
-def test_catalog_validation_wrong_price_usd_raises_runtime_error() -> None:
-    bad = _good_catalog()
-    bad["pkg_5000"]["price_usd"] = 0.01
-    with pytest.raises(RuntimeError, match="price_usd mismatch"):
-        _run_catalog_validation(bad)
-
-
-def test_catalog_validation_wrong_price_usd_message_contains_pkg_id() -> None:
-    bad = _good_catalog()
-    bad["pkg_25000"]["price_usd"] = 999.99
-    with pytest.raises(RuntimeError, match="pkg_25000"):
-        _run_catalog_validation(bad)
-
-
-def test_catalog_validation_wrong_price_usd_message_contains_got_value() -> None:
-    bad = _good_catalog()
-    bad["pkg_5000"]["price_usd"] = 1.23
-    with pytest.raises(RuntimeError, match="1.23"):
-        _run_catalog_validation(bad)
-
-
-def test_catalog_validation_wrong_price_usd_is_not_assertion_error() -> None:
-    bad = _good_catalog()
-    bad["pkg_60000"]["price_usd"] = 0.0
-    try:
-        _run_catalog_validation(bad)
-    except RuntimeError:
-        pass
-    except AssertionError:
-        pytest.fail("catalog validation raised AssertionError instead of RuntimeError")
-
-
-# --- wrong tokens_per_unit --------------------------------------------------
-
-
-def test_catalog_validation_wrong_tokens_per_unit_raises_runtime_error() -> None:
-    bad = _good_catalog()
-    bad["pkg_5000"]["tokens_per_unit"] = TOKEN_CHUNK_SIZE + 1
-    with pytest.raises(RuntimeError, match="tokens_per_unit mismatch"):
-        _run_catalog_validation(bad)
-
-
-def test_catalog_validation_wrong_tokens_per_unit_message_contains_pkg_id() -> None:
-    bad = _good_catalog()
-    bad["pkg_25000"]["tokens_per_unit"] = 0
-    with pytest.raises(RuntimeError, match="pkg_25000"):
-        _run_catalog_validation(bad)
-
-
-def test_catalog_validation_wrong_tokens_per_unit_message_contains_got_value() -> None:
-    bad = _good_catalog()
-    bad["pkg_5000"]["tokens_per_unit"] = 1
-    with pytest.raises(RuntimeError, match="1"):
-        _run_catalog_validation(bad)
-
-
-def test_catalog_validation_wrong_tokens_per_unit_is_not_assertion_error() -> None:
-    bad = _good_catalog()
-    bad["pkg_60000"]["tokens_per_unit"] = 99999
-    try:
-        _run_catalog_validation(bad)
-    except RuntimeError:
-        pass
-    except AssertionError:
-        pytest.fail("catalog validation raised AssertionError instead of RuntimeError")
 
 
 # ---------------------------------------------------------------------------

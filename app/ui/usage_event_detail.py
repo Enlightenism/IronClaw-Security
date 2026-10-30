@@ -7,6 +7,9 @@ from typing import Any
 from fastapi import APIRouter, Path
 from pydantic import BaseModel, Field
 
+from app.core.billing import FEATURED_PACKAGE_ID as _FEATURED_PACKAGE_ID
+from app.core.billing import UNIT_PACKAGE_IDS as _ORDERED_PACKAGE_IDS
+from app.core.billing import resolve_package_id
 from app.core.unit_wallet import TOKEN_CHUNK_SIZE, UNIT_PACKAGE_CATALOG, units_required_for_tokens
 
 router = APIRouter(prefix="/usage-events/detail", tags=["usage-event-detail"])
@@ -25,32 +28,10 @@ except Exception:
 
 # Single source of truth — TOKEN_CHUNK_SIZE from app.core.unit_wallet
 _TOKENS_PER_UNIT = TOKEN_CHUNK_SIZE
-_ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
-_FEATURED_PACKAGE_ID = "pkg_25000"
 
-_PRICING_FALLBACK: dict[str, tuple[int, float, str, str, str]] = {
-    "pkg_5000": (
-        5_000,
-        20.00,
-        "Starter",
-        "5,000 units — $20.00",
-        "Prepaid protection units for individual builders and small guarded workloads.",
-    ),
-    "pkg_25000": (
-        25_000,
-        90.00,
-        "Team",
-        "25,000 units — $90.00",
-        "Prepaid protection units for teams running higher-volume guarded AI activity.",
-    ),
-    "pkg_60000": (
-        60_000,
-        180.00,
-        "Enterprise",
-        "60,000 units — $180.00",
-        "Prepaid protection units for large-scale protected agent and workflow operations.",
-    ),
-}
+
+def _package_pricing_summary() -> str:
+    return ", ".join(f"{UNIT_PACKAGE_CATALOG[package_id]['name']} at ${float(UNIT_PACKAGE_CATALOG[package_id]['price_usd']):.2f} for {int(UNIT_PACKAGE_CATALOG[package_id]['unit_amount']):,} units" for package_id in _ORDERED_PACKAGE_IDS if package_id in UNIT_PACKAGE_CATALOG)
 
 
 def _utc_now_iso() -> str:
@@ -58,33 +39,31 @@ def _utc_now_iso() -> str:
 
 
 def _package_snapshot(package_id: str | None) -> dict[str, Any]:
-    resolved_package_id = package_id if package_id in _ORDERED_PACKAGE_IDS else _FEATURED_PACKAGE_ID
-    package = UNIT_PACKAGE_CATALOG.get(resolved_package_id)
-
-    if package is not None:
-        included_units = int(package["unit_amount"])
-        price_usd = float(package["price_usd"])
-        name = str(package["name"])
-        display_label = str(package.get("display_label", ""))
-        description = str(package.get("description", ""))
-    else:
-        included_units, price_usd, name, display_label, description = _PRICING_FALLBACK[resolved_package_id]
+    resolved_package_id = resolve_package_id(package_id or "") or _FEATURED_PACKAGE_ID
+    package = UNIT_PACKAGE_CATALOG[resolved_package_id]
+    included_units = int(package["unit_amount"])
+    price_usd = float(package["price_usd"])
+    name = str(package["name"])
+    display_label = str(package["display_label"])
+    description = str(package["description"])
 
     price_per_1k = round((price_usd / included_units) * 1_000, 4) if included_units > 0 else 0.0
 
     return {
         "package_id": resolved_package_id,
+        "aliases": list(package["aliases"]),
         "name": name,
         "description": description,
         "display_label": display_label,
         "price_usd": price_usd,
         "included_units": included_units,
-        "featured": resolved_package_id == _FEATURED_PACKAGE_ID,
+        "featured": bool(package["featured"]),
         "metadata": {
             "price_display": f"${price_usd:.2f}",
             "units_display": f"{included_units:,} units",
             "effective_price_per_1k_units": price_per_1k,
-            "tokens_per_unit": _TOKENS_PER_UNIT,
+            "tokens_per_unit": int(package["tokens_per_unit"]),
+            "token_coverage": int(package["token_coverage"]),
         },
     }
 
@@ -411,7 +390,7 @@ def get_usage_event_detail(
         ),
         notes=[
             "Usage event detail provides a focused view of a single metered security event.",
-            "Billing package catalog uses Starter at $20 for 5,000 units, Team at $90 for 25,000 units, and Enterprise at $180 for 60,000 units.",
+            f"Billing package catalog uses {_package_pricing_summary()}.",
             f"Each protection unit covers up to {_TOKENS_PER_UNIT:,} tokens, and token volumes above that consume additional units in {_TOKENS_PER_UNIT:,}-token chunks.",
             "Package metadata now surfaces tokens_per_unit for every package and the event billing block includes token-based unit calculation details.",
             "When a matching Supabase security event exists, this view hydrates from security_events and users data; otherwise it returns a safe default detail view.",

@@ -652,11 +652,11 @@ describe("handlePurchase — valid package", () => {
     });
 
     expect(mockApiPost).toHaveBeenCalledWith("/billing/checkout/sessions", {
-      packageId: "pkg5000",
+      packageId: "pkg_5000",
       successUrl:
-        "http://localhost/dashboard?checkout=success&package_id=pkg5000",
+        "http://localhost/dashboard?checkout=success&package_id=pkg_5000",
       cancelUrl:
-        "http://localhost/dashboard?checkout=cancel&package_id=pkg5000",
+        "http://localhost/dashboard?checkout=cancel&package_id=pkg_5000",
       organizationId: "org-abc",
       mode: "payment",
       quantity: 1,

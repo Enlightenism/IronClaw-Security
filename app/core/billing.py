@@ -21,6 +21,9 @@ from app.supabaseclient import (
     BILLING_TIER_60K_PRICE_USD,
     BILLING_TIER_60K_UNITS,
 )
+from app.supabaseclient import (
+    TOKENS_PER_UNIT as BILLING_TOKENS_PER_UNIT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +37,13 @@ __all__ = [
     "PlanDefinition",
     "UnitPackageEntry",
     "PLAN_DEFINITIONS",
+    "PACKAGE_ALIASES",
+    "FEATURED_PACKAGE_ID",
+    "UNIT_PACKAGE_IDS",
     "TOKENS_PER_UNIT",
     "UNIT_PACKAGE_CATALOG",
+    "resolve_plan_code",
+    "resolve_package_id",
     "units_required_for_tokens",
     "get_billing_registry",
     "get_active_subscription_for_customer",
@@ -44,7 +52,7 @@ __all__ = [
 ]
 
 
-TOKENS_PER_UNIT: Final[int] = 25_000
+TOKENS_PER_UNIT: Final[int] = BILLING_TOKENS_PER_UNIT
 # Units do not expire in IronClaw. Period end is stored for DB completeness only
 # and is not used to gate consumption. Set to 100 years as a non-expiring sentinel.
 _DEFAULT_PERIOD_DAYS: Final[int] = 36500
@@ -197,87 +205,136 @@ PlanCode = Literal["starter-5k", "team-25k", "enterprise-60k"]
 
 class PlanDefinition(TypedDict):
     code: PlanCode
+    package_id: str
+    aliases: tuple[str, ...]
     name: str
     unit_limit: int
     price_usd: int
     tokens_per_unit: int
+    description: str
+    featured: bool
 
 
 PLAN_DEFINITIONS: Final[dict[PlanCode, PlanDefinition]] = {
     "starter-5k": {
         "code": "starter-5k",
+        "package_id": "pkg_5000",
+        "aliases": ("pkg5000", "starter"),
         "name": "Starter",
         "unit_limit": BILLING_TIER_5K_UNITS,
         "price_usd": BILLING_TIER_5K_PRICE_USD,
         "tokens_per_unit": TOKENS_PER_UNIT,
+        "description": "Prepaid protection units for individual builders who want guarded prompt handling, tool-call review, source inspection, and safe response release.",
+        "featured": False,
     },
     "team-25k": {
         "code": "team-25k",
+        "package_id": "pkg_25000",
+        "aliases": ("pkg25000", "team"),
         "name": "Team",
         "unit_limit": BILLING_TIER_25K_UNITS,
         "price_usd": BILLING_TIER_25K_PRICE_USD,
         "tokens_per_unit": TOKENS_PER_UNIT,
+        "description": "Prepaid protection units for teams running higher volumes of AI-assisted development, research, and guarded agent workflows.",
+        "featured": True,
     },
     "enterprise-60k": {
         "code": "enterprise-60k",
+        "package_id": "pkg_60000",
+        "aliases": ("pkg60000", "enterprise"),
         "name": "Enterprise",
         "unit_limit": BILLING_TIER_60K_UNITS,
         "price_usd": BILLING_TIER_60K_PRICE_USD,
         "tokens_per_unit": TOKENS_PER_UNIT,
+        "description": "Prepaid protection units for organizations protecting large-scale agent operations, sensitive workflows, and high-frequency prompt activity.",
+        "featured": False,
     },
 }
 
 
+def _build_plan_code_by_alias() -> dict[str, PlanCode]:
+    aliases: dict[str, PlanCode] = {}
+    for code, plan in PLAN_DEFINITIONS.items():
+        for alias in (code, plan["package_id"], *plan["aliases"]):
+            normalized = alias.strip().casefold()
+            if normalized in aliases:
+                raise ValueError(f"Duplicate billing package alias: {alias!r}")
+            aliases[normalized] = code
+    return aliases
+
+
+_PLAN_CODE_BY_ALIAS: Final[dict[str, PlanCode]] = _build_plan_code_by_alias()
+PACKAGE_ALIASES: Final[frozenset[str]] = frozenset(_PLAN_CODE_BY_ALIAS)
+
+
+def resolve_plan_code(package_id: str) -> PlanCode | None:
+    return _PLAN_CODE_BY_ALIAS.get(package_id.strip().casefold())
+
+
+def resolve_package_id(package_id: str) -> str | None:
+    plan_code = resolve_plan_code(package_id)
+    if plan_code is None:
+        return None
+    return PLAN_DEFINITIONS[plan_code]["package_id"]
+
+
 # ---------------------------------------------------------------------------
 # Unit package catalog — ordered list used by purchase and UI surfaces.
-# Each entry mirrors the corresponding PLAN_DEFINITIONS entry and is the
-# single source of truth for the purchasable package list exposed by
-# app/api/billing.py and consumed by the billing test suite.
+# Entries are derived from PLAN_DEFINITIONS to keep package identifiers,
+# pricing, unit amounts, and token coverage in one place.
 # ---------------------------------------------------------------------------
 
 
 class UnitPackageEntry(TypedDict):
     code: PlanCode
+    package_id: str
+    aliases: tuple[str, ...]
     name: str
     units: int
     price_usd: int
     tokens_per_unit: int
+    token_coverage: int
+    display_label: str
+    description: str
+    featured: bool
 
 
 # Keep private alias for backward compat with any internal reference.
 _UnitPackageEntry = UnitPackageEntry
 
 
-UNIT_PACKAGE_CATALOG: Final[list[UnitPackageEntry]] = [
-    {
-        "code": "starter-5k",
-        "name": "Starter",
-        "units": BILLING_TIER_5K_UNITS,
-        "price_usd": BILLING_TIER_5K_PRICE_USD,
-        "tokens_per_unit": TOKENS_PER_UNIT,
-    },
-    {
-        "code": "team-25k",
-        "name": "Team",
-        "units": BILLING_TIER_25K_UNITS,
-        "price_usd": BILLING_TIER_25K_PRICE_USD,
-        "tokens_per_unit": TOKENS_PER_UNIT,
-    },
-    {
-        "code": "enterprise-60k",
-        "name": "Enterprise",
-        "units": BILLING_TIER_60K_UNITS,
-        "price_usd": BILLING_TIER_60K_PRICE_USD,
-        "tokens_per_unit": TOKENS_PER_UNIT,
-    },
-]
+def _build_unit_package_catalog() -> list[UnitPackageEntry]:
+    catalog: list[UnitPackageEntry] = []
+    for plan in PLAN_DEFINITIONS.values():
+        units = plan["unit_limit"]
+        price_usd = plan["price_usd"]
+        tokens_per_unit = plan["tokens_per_unit"]
+        catalog.append(
+            {
+                "code": plan["code"],
+                "package_id": plan["package_id"],
+                "aliases": plan["aliases"],
+                "name": plan["name"],
+                "units": units,
+                "price_usd": price_usd,
+                "tokens_per_unit": tokens_per_unit,
+                "token_coverage": units * tokens_per_unit,
+                "display_label": f"{units:,} units — ${price_usd:.2f}",
+                "description": plan["description"],
+                "featured": plan["featured"],
+            },
+        )
+    return catalog
 
-# Integrity check: catalog must stay in sync with PLAN_DEFINITIONS.
-for _entry in UNIT_PACKAGE_CATALOG:
-    _plan = PLAN_DEFINITIONS[_entry["code"]]
-    assert _entry["units"] == _plan["unit_limit"], f"UNIT_PACKAGE_CATALOG units mismatch for {_entry['code']!r}"
-    assert _entry["price_usd"] == _plan["price_usd"], f"UNIT_PACKAGE_CATALOG price_usd mismatch for {_entry['code']!r}"
-del _entry, _plan
+
+UNIT_PACKAGE_CATALOG: Final[list[UnitPackageEntry]] = _build_unit_package_catalog()
+UNIT_PACKAGE_IDS: Final[tuple[str, ...]] = tuple(entry["package_id"] for entry in UNIT_PACKAGE_CATALOG)
+
+_featured_package_ids = [entry["package_id"] for entry in UNIT_PACKAGE_CATALOG if entry["featured"]]
+if len(_featured_package_ids) != 1:
+    raise ValueError("Exactly one billing package must be featured")
+FEATURED_PACKAGE_ID: Final[str] = _featured_package_ids[0]
+del _featured_package_ids
 
 
 _CUSTOMERS_TABLE = "billing_customers"

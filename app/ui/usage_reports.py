@@ -7,19 +7,10 @@ from typing import Any
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
-try:
-    from app.core.unit_wallet import TOKEN_CHUNK_SIZE, UNIT_PACKAGE_CATALOG, units_required_for_tokens
-except Exception:
-    UNIT_PACKAGE_CATALOG: dict[str, Any] = {}
-    TOKEN_CHUNK_SIZE: int = 25_000
-
-    def units_required_for_tokens(token_count: int) -> int:
-        if token_count <= 0:
-            return 0
-        import math
-
-        return math.ceil(token_count / TOKEN_CHUNK_SIZE)
-
+from app.core.billing import FEATURED_PACKAGE_ID as _FEATURED_PACKAGE_ID
+from app.core.billing import UNIT_PACKAGE_IDS as _ORDERED_PACKAGE_IDS
+from app.core.billing import resolve_package_id
+from app.core.unit_wallet import TOKEN_CHUNK_SIZE, UNIT_PACKAGE_CATALOG
 
 router = APIRouter(prefix="/ui/usage-reports", tags=["usage-reports"])
 
@@ -44,42 +35,37 @@ except Exception:
 # Canonical package/pricing constants
 # ---------------------------------------------------------------------------
 _TOKENS_PER_UNIT = TOKEN_CHUNK_SIZE
-_ORDERED_PACKAGE_IDS = ["pkg_5000", "pkg_25000", "pkg_60000"]
-_FEATURED_PACKAGE_ID = "pkg_25000"
 
-_PRICING_FALLBACK: dict[str, tuple[int, float, str, str]] = {
-    "pkg_5000": (5_000, 20.00, "Starter", "5,000 units — $20.00"),
-    "pkg_25000": (25_000, 90.00, "Team", "25,000 units — $90.00"),
-    "pkg_60000": (60_000, 180.00, "Enterprise", "60,000 units — $180.00"),
-}
+
+def _package_pricing_summary() -> str:
+    return " · ".join(f"{UNIT_PACKAGE_CATALOG[package_id]['name']} ${float(UNIT_PACKAGE_CATALOG[package_id]['price_usd']):.2f} / {int(UNIT_PACKAGE_CATALOG[package_id]['unit_amount']):,} units" for package_id in _ORDERED_PACKAGE_IDS if package_id in UNIT_PACKAGE_CATALOG)
 
 
 def _get_package_metadata(package_id: str) -> dict[str, Any]:
-    package = UNIT_PACKAGE_CATALOG.get(package_id)
-    if package is not None:
-        price_usd = float(package["price_usd"])
-        included_units = int(package["unit_amount"])
-        name = str(package["name"])
-        display_label = str(package.get("display_label", ""))
-    else:
-        fallback = _PRICING_FALLBACK.get(package_id)
-        if fallback is None:
-            return {}
-        included_units, price_usd, name, display_label = fallback
+    canonical_package_id = resolve_package_id(package_id)
+    if canonical_package_id is None:
+        return {}
+    package = UNIT_PACKAGE_CATALOG[canonical_package_id]
+    price_usd = float(package["price_usd"])
+    included_units = int(package["unit_amount"])
+    name = str(package["name"])
+    display_label = str(package["display_label"])
 
     price_per_1k = round((price_usd / included_units) * 1_000, 4) if included_units > 0 else 0.0
     return {
-        "package_id": package_id,
+        "package_id": canonical_package_id,
+        "aliases": list(package["aliases"]),
         "name": name,
         "display_label": display_label,
         "price_usd": price_usd,
         "price_display": f"${price_usd:.2f}",
         "included_units": included_units,
         "units_display": f"{included_units:,} units",
-        "tokens_per_unit": _TOKENS_PER_UNIT,
-        "tokens_in_wallet": included_units * _TOKENS_PER_UNIT,
+        "tokens_per_unit": int(package["tokens_per_unit"]),
+        "token_coverage": int(package["token_coverage"]),
+        "tokens_in_wallet": int(package["token_coverage"]),
         "effective_price_per_1k_units": price_per_1k,
-        "featured": package_id == _FEATURED_PACKAGE_ID,
+        "featured": bool(package["featured"]),
     }
 
 
@@ -88,7 +74,7 @@ def _billing_catalog() -> dict[str, Any]:
         "featured_package_id": _FEATURED_PACKAGE_ID,
         "ordered_package_ids": list(_ORDERED_PACKAGE_IDS),
         "tokens_per_unit": _TOKENS_PER_UNIT,
-        "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in 25,000-token chunks."),
+        "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in {_TOKENS_PER_UNIT:,}-token chunks."),
         "packages": {pkg_id: _get_package_metadata(pkg_id) for pkg_id in _ORDERED_PACKAGE_IDS},
     }
 
@@ -142,7 +128,7 @@ def _fetch_usage_summary(rows: list[dict[str, Any]], period: str, limit: int) ->
             "total_units_consumed": total_units,
             "tokens_in_wallet": total_units * _TOKENS_PER_UNIT,
             "tokens_per_unit": _TOKENS_PER_UNIT,
-            "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in 25,000-token chunks."),
+            "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in {_TOKENS_PER_UNIT:,}-token chunks."),
             "billing_catalog": _billing_catalog(),
         },
     )
@@ -157,7 +143,7 @@ def _fetch_usage_summary(rows: list[dict[str, Any]], period: str, limit: int) ->
         notes=[
             "Usage summaries are aggregated live from Supabase security_events.",
             f"Each unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in {_TOKENS_PER_UNIT:,}-token chunks.",
-            "Billing packages: Starter $20 / 5,000 units · Team $90 / 25,000 units · Enterprise $180 / 60,000 units.",
+            f"Billing packages: {_package_pricing_summary()}.",
         ],
     )
 
@@ -180,7 +166,7 @@ def _build_events_from_rows(rows: list[dict[str, Any]], limit: int) -> UsageEven
                     "source": "supabase",
                     "tokens_in_wallet": tokens_in_wallet,
                     "tokens_per_unit": _TOKENS_PER_UNIT,
-                    "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in 25,000-token chunks."),
+                    "unit_consumption_model": (f"1 unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in {_TOKENS_PER_UNIT:,}-token chunks."),
                 },
             )
         )
@@ -236,7 +222,7 @@ def _build_empty_summaries(period: str, limit: int) -> UsageSummaryListView:
             "Usage summaries are aggregated from the underlying usage-reports API.",
             "This UI view provides a safe default zeroed snapshot when no data is available.",
             f"Each unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in {_TOKENS_PER_UNIT:,}-token chunks.",
-            "Billing packages: Starter $20 / 5,000 units · Team $90 / 25,000 units · Enterprise $180 / 60,000 units.",
+            f"Billing packages: {_package_pricing_summary()}.",
         ],
     )
 
@@ -344,7 +330,7 @@ def get_usage_reports(
         billing_catalog=_billing_catalog(),
         notes=[
             "Usage reports UI provides a consolidated snapshot of recent security usage sourced from Supabase security_events.",
-            "Billing packages: Starter $20 / 5,000 units · Team $90 / 25,000 units · Enterprise $180 / 60,000 units.",
+            f"Billing packages: {_package_pricing_summary()}.",
             f"Each unit covers up to {_TOKENS_PER_UNIT:,} tokens; additional units consumed in {_TOKENS_PER_UNIT:,}-token chunks.",
             "For full historical exports, use the usage-reports API endpoints directly.",
         ],

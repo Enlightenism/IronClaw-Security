@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.auth import require_api_key
+from app.core.billing import TOKENS_PER_UNIT, UNIT_PACKAGE_CATALOG
 from app.core.supabase import SupabaseAPIError, get_supabase_client
 
 logger = logging.getLogger(__name__)
@@ -27,9 +28,9 @@ LedgerEntryType = Literal["purchase", "debit", "credit", "adjustment", "refund"]
 
 
 # ---------------------------------------------------------------------------
-# Canonical package pricing — single source of truth for this module.
+# Package pricing is rendered from the canonical billing catalog.
 # ---------------------------------------------------------------------------
-_PACKAGE_PRICING_NOTE = "Package pricing: 5,000 units for $20.00 USD | 25,000 units for $90.00 USD | 60,000 units for $180.00 USD."
+_PACKAGE_PRICING_NOTE = "Package pricing: " + " | ".join(f"{package['units']:,} units for ${package['price_usd']:.2f} USD" for package in UNIT_PACKAGE_CATALOG) + "."
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +100,7 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
         amount_usd=None,
         description="Usage debit for guarded execution, telemetry, and prompt protection traffic.",
         reference_id="usage_evt_006",
-        metadata={"request_count": 22, "route_group": "guard", "tokens_per_unit": 25_000},
+        metadata={"request_count": 22, "route_group": "guard", "tokens_per_unit": TOKENS_PER_UNIT},
     ),
     UnitLedgerItem(
         entry_id="ledger_005",
@@ -114,7 +115,7 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
             "package_id": "pkg_60000",
             "package_name": "Enterprise",
             "quantity": 1,
-            "tokens_per_unit": 25_000,
+            "tokens_per_unit": TOKENS_PER_UNIT,
         },
     ),
     UnitLedgerItem(
@@ -126,7 +127,7 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
         amount_usd=None,
         description="Manual unit adjustment applied for account reconciliation.",
         reference_id="adj_004",
-        metadata={"reason": "reconciliation", "approved_by": "system", "tokens_per_unit": 25_000},
+        metadata={"reason": "reconciliation", "approved_by": "system", "tokens_per_unit": TOKENS_PER_UNIT},
     ),
     UnitLedgerItem(
         entry_id="ledger_003",
@@ -137,7 +138,7 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
         amount_usd=None,
         description="Usage debit for scan, policy evaluation, and execution traffic.",
         reference_id="usage_evt_003",
-        metadata={"request_count": 16, "route_group": "scan", "tokens_per_unit": 25_000},
+        metadata={"request_count": 16, "route_group": "scan", "tokens_per_unit": TOKENS_PER_UNIT},
     ),
     UnitLedgerItem(
         entry_id="ledger_002",
@@ -152,7 +153,7 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
             "package_id": "pkg_25000",
             "package_name": "Team",
             "quantity": 1,
-            "tokens_per_unit": 25_000,
+            "tokens_per_unit": TOKENS_PER_UNIT,
         },
     ),
     UnitLedgerItem(
@@ -164,7 +165,7 @@ _SAMPLE_LEDGER: list[UnitLedgerItem] = [
         amount_usd=None,
         description="Usage debit for prior execution, audit, and review activity.",
         reference_id="usage_evt_001",
-        metadata={"request_count": 125, "route_group": "ui", "tokens_per_unit": 25_000},
+        metadata={"request_count": 125, "route_group": "ui", "tokens_per_unit": TOKENS_PER_UNIT},
     ),
 ]
 
