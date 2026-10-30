@@ -193,7 +193,7 @@ class InstallKeyUsageSource:
 
         week_key = self._bucket_week(event_time)
         self.usage_by_week[week_key] = self.usage_by_week.get(week_key, 0) + int(units)
-        self.units_used_this_week = sum(self.usage_by_week.values())
+        self.units_used_this_week = self.usage_by_week[week_key]
 
     def as_summary(self) -> dict[str, Any]:
         return {
@@ -210,6 +210,8 @@ class InstallKeyUsageSource:
             "usage_event_count": self.usage_event_count,
             "last_action_at": self.last_action_at.isoformat() if self.last_action_at else None,
             "metadata": dict(self.metadata),
+            "usage_by_day": dict(self.usage_by_day),
+            "usage_by_week": dict(self.usage_by_week),
         }
 
 
@@ -621,8 +623,14 @@ class SupabaseUnitWalletRepository:
                 balance_units=int(value.get("balance_units", 0)),
                 total_consumed_units=int(value.get("total_consumed_units", 0)),
                 total_blocked_attacks=int(value.get("total_blocked_attacks", 0)),
+                total_quarantined_actions=int(value.get("total_quarantined_actions", 0)),
+                units_used_today=int(value.get("units_used_today", 0)),
+                units_used_this_week=int(value.get("units_used_this_week", 0)),
+                usage_event_count=int(value.get("usage_event_count", 0)),
                 last_action_at=datetime.fromisoformat(value["last_action_at"]) if value.get("last_action_at") else None,
                 metadata=dict(value.get("metadata") or {}),
+                usage_by_day={str(day): int(units) for day, units in (value.get("usage_by_day") or {}).items()},
+                usage_by_week={str(week): int(units) for week, units in (value.get("usage_by_week") or {}).items()},
             )
         return RegistryUnitWallet(
             wallet_id=row["wallet_id"],
@@ -686,6 +694,28 @@ class SupabaseUnitWalletRepository:
             )
         return list(reversed(entries))
 
+    def fetch_ledger_entry_by_event_id(self, event_id: str) -> RegistryUnitLedgerEntry | None:
+        result = self._client.table(self._LEDGER_TABLE).select("*").eq("event_id", event_id).limit(1).execute()
+        if not result.data:
+            return None
+        row = result.data[0]
+        metadata = row.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        return RegistryUnitLedgerEntry(
+            entry_id=row["entry_id"],
+            wallet_id=row["wallet_id"],
+            owner_key=row["owner_key"],
+            entry_type=row["entry_type"],
+            units=row["units"],
+            balance_after=row["balance_after"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            purchase_id=row.get("purchase_id") or metadata.get("purchase_id"),
+            checkout_session_id=row.get("checkout_session_id") or metadata.get("checkout_session_id"),
+            event_id=row.get("event_id") or metadata.get("event_id"),
+            metadata=metadata,
+        )
+
 
 class MemoryUnitWalletRepository:
     def __init__(self) -> None:
@@ -721,6 +751,10 @@ class MemoryUnitWalletRepository:
         with self._lock:
             entries = self._ledger if owner_key is None else [e for e in self._ledger if e.owner_key == owner_key]
             return list(entries[-safe_limit:])
+
+    def fetch_ledger_entry_by_event_id(self, event_id: str) -> RegistryUnitLedgerEntry | None:
+        with self._lock:
+            return next((entry for entry in self._ledger if entry.event_id == event_id), None)
 
 
 def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
@@ -885,6 +919,31 @@ class UnitWalletRegistry:
             payload.setdefault("event_id", event_id)
         return payload, purchase_id, checkout_session_id, event_id
 
+    def _find_existing_event(
+        self,
+        *,
+        event_id: str | None,
+        owner_key: str,
+        entry_type: str,
+        key_id: str | None = None,
+        event_name: str | None = None,
+    ) -> RegistryUnitLedgerEntry | None:
+        if not event_id:
+            return None
+        fetch_entry = getattr(self._repo, "fetch_ledger_entry_by_event_id", None)
+        if not callable(fetch_entry):
+            return None
+        entry = fetch_entry(event_id)
+        if entry is None:
+            return None
+        if entry.owner_key != _normalize_owner_key(owner_key) or entry.entry_type != entry_type:
+            raise ValueError("event_id is already associated with a different wallet operation")
+        if key_id is not None and str(entry.metadata.get("key_id") or "") != key_id:
+            raise ValueError("event_id is already associated with a different install key")
+        if event_name is not None and str(entry.metadata.get("event_type") or "") != event_name:
+            raise ValueError("event_id is already associated with a different install-key event")
+        return entry
+
     def credit_units(
         self,
         owner_key: str,
@@ -896,6 +955,14 @@ class UnitWalletRegistry:
         normalized_metadata, purchase_id, checkout_session_id, event_id = self._normalize_ledger_metadata(metadata)
 
         with self._lock:
+            existing_entry = self._find_existing_event(
+                event_id=event_id,
+                owner_key=wallet.owner_key,
+                entry_type="credit",
+            )
+            if existing_entry is not None:
+                return wallet
+
             wallet.balance_units += safe_units
             wallet.total_purchased_units += safe_units
             wallet.updated_at = datetime.now(UTC)
@@ -939,6 +1006,14 @@ class UnitWalletRegistry:
         entry: RegistryUnitLedgerEntry | None = None
 
         with self._lock:
+            existing_entry = self._find_existing_event(
+                event_id=event_id,
+                owner_key=wallet.owner_key,
+                entry_type="debit",
+            )
+            if existing_entry is not None:
+                return wallet
+
             if safe_units > wallet.balance_units:
                 insufficient = InsufficientUnitsError(
                     "Insufficient protection units",
@@ -1020,10 +1095,40 @@ class UnitWalletRegistry:
         explicit_key = str(payload.get("key_id") or "").strip()
         if explicit_key and explicit_key != str(key_id):
             raise ValueError("metadata key_id does not match the install key being debited")
+        event_id = str(payload.get("event_id") or payload.get("ledger_event_id") or "").strip() or None
 
         wallet = self.get_or_create_wallet(owner_key=owner_key)
 
         with self._lock:
+            existing_entry = self._find_existing_event(
+                event_id=event_id,
+                owner_key=wallet.owner_key,
+                entry_type="install_key_debit",
+                key_id=key_id,
+                event_name=str(payload.get("event_type") or "").strip() or None,
+            )
+            if existing_entry is not None:
+                usage = wallet.install_key_usage.get(key_id)
+                if usage is None:
+                    raise RuntimeError("install-key debit ledger exists without its wallet usage summary")
+                return (
+                    wallet,
+                    usage,
+                    InstallKeyUsageLedgerEntry(
+                        entry_id=existing_entry.entry_id,
+                        owner_key=existing_entry.owner_key,
+                        key_id=key_id,
+                        program=program,
+                        action_type=str(existing_entry.metadata.get("action_type") or action_type),
+                        units=existing_entry.units,
+                        balance_after=existing_entry.balance_after,
+                        payment_id=existing_entry.purchase_id,
+                        blocked_attack_count=int(existing_entry.metadata.get("blocked_attack_count") or 0),
+                        created_at=existing_entry.created_at,
+                        metadata=dict(existing_entry.metadata),
+                    ),
+                )
+
             if safe_units > wallet.balance_units:
                 raise InsufficientUnitsError(
                     "Insufficient protection units",
@@ -1105,7 +1210,7 @@ class UnitWalletRegistry:
                 created_at=wallet.updated_at,
                 purchase_id=payment_id or payload.get("purchase_id"),
                 checkout_session_id=payload.get("checkout_session_id") or payload.get("session_id"),
-                event_id=payload.get("event_id") or f"install_key_debit:{key_id}:{wallet.updated_at.isoformat()}",
+                event_id=event_id or f"install_key_debit:{key_id}:{wallet.updated_at.isoformat()}",
                 metadata=entry.as_dict(),
             )
 
@@ -1128,6 +1233,8 @@ class UnitWalletRegistry:
     ) -> bool:
         wallet = self.get_or_create_wallet(owner_key)
         effective_program = (program or "openclaw").strip() or "openclaw"
+        event_metadata = dict(metadata or {})
+        event_id = str(event_metadata.get("event_id") or event_metadata.get("ledger_event_id") or "").strip() or None
 
         if isinstance(occurred_at, datetime):
             timestamp = occurred_at.astimezone(UTC) if occurred_at.tzinfo is not None else occurred_at.replace(tzinfo=UTC)
@@ -1144,6 +1251,16 @@ class UnitWalletRegistry:
 
         entry: RegistryUnitLedgerEntry | None = None
         with self._lock:
+            existing_entry = self._find_existing_event(
+                event_id=event_id,
+                owner_key=wallet.owner_key,
+                entry_type="install_key_event",
+                key_id=key_id,
+                event_name=event_type,
+            )
+            if existing_entry is not None:
+                return False
+
             if key_id:
                 usage = wallet.install_key_usage.setdefault(
                     key_id,
@@ -1184,7 +1301,8 @@ class UnitWalletRegistry:
                 "program": effective_program,
                 "units": int(units),
                 "blocked_attack_count": int(blocked_attack_count),
-                "metadata": dict(metadata or {}),
+                "event_id": event_id,
+                "metadata": event_metadata,
             }
 
             if key_id:
@@ -1195,7 +1313,7 @@ class UnitWalletRegistry:
                     "owner_key": wallet.owner_key,
                     "action_type": action_type,
                     "blocked_attack_count": int(blocked_attack_count),
-                    **dict(metadata or {}),
+                    **event_metadata,
                 }
                 purchase_id = str(event_metadata.get("purchase_id") or event_metadata.get("purchase_reference") or "").strip() or None
                 checkout_session_id = str(event_metadata.get("checkout_session_id") or event_metadata.get("session_id") or "").strip() or None

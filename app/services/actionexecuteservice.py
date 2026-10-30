@@ -23,6 +23,9 @@ class ActionExecutionRequest:
     requested_units: int = 1
     payload: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    install_key_id: str | None = None
+    program: str | None = None
+    event_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -73,14 +76,26 @@ class ActionExecuteService:
         if not normalized_action_name:
             raise ValueError("action_name must not be empty")
 
-        authorization = self._usage_metering_service.authorize_usage(
-            owner_key=request.owner_key,
-            units=request.requested_units,
-            metadata={
-                "action_name": normalized_action_name,
-                **request.metadata,
-            },
-        )
+        authorization_metadata = {
+            "action_name": normalized_action_name,
+            **request.metadata,
+        }
+        if request.install_key_id is None:
+            authorization = self._usage_metering_service.authorize_usage(
+                owner_key=request.owner_key,
+                units=request.requested_units,
+                metadata=authorization_metadata,
+            )
+        else:
+            if request.program is None:
+                raise ValueError("program is required for install-key usage authorization")
+            authorization = self._usage_metering_service.authorize_usage(
+                owner_key=request.owner_key,
+                units=request.requested_units,
+                install_key_id=request.install_key_id,
+                program=request.program,
+                metadata=authorization_metadata,
+            )
 
         if not authorization.allowed:
             return ActionExecutionDecision(
@@ -136,14 +151,27 @@ class ActionExecuteService:
                 metadata=request.metadata,
             )
 
-        consumption = self._usage_metering_service.consume_usage(
-            owner_key=decision.owner_key,
-            units=decision.requested_units,
-            metadata={
-                "action_name": decision.action_name,
-                **request.metadata,
-            },
-        )
+        consumption_metadata = {
+            "action_name": decision.action_name,
+            **request.metadata,
+        }
+        if request.install_key_id is None:
+            consumption = self._usage_metering_service.consume_usage(
+                owner_key=decision.owner_key,
+                units=decision.requested_units,
+                metadata=consumption_metadata,
+            )
+        else:
+            if request.program is None:
+                raise ValueError("program is required for install-key usage consumption")
+            consumption = self._usage_metering_service.consume_usage(
+                owner_key=decision.owner_key,
+                units=decision.requested_units,
+                install_key_id=request.install_key_id,
+                program=request.program,
+                event_id=request.event_id,
+                metadata=consumption_metadata,
+            )
 
         return ActionExecutionReceipt(
             execution_id=execution_id,

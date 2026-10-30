@@ -92,21 +92,33 @@ jest.mock("@/components/dashboard/SecurityAnalysis", () => ({
 }));
 
 // ── IntegrationCard stub ────────────────────────────────────────────────
+let capturedIntegrationProps = {};
+
 jest.mock("@/components/dashboard/IntegrationCard", () => ({
   __esModule: true,
-  default: ({ title, command, testid }) => (
-    <div data-testid={testid || `integration-card-${title}`}>
-      <div>{title}</div>
-      {command ? (
-        <>
-          <div data-testid={`${testid}-value`}>{command}</div>
-          <button type="button" data-testid={`${testid}-copy`}>
-            Copy
-          </button>
-        </>
-      ) : null}
-    </div>
-  ),
+  default: (props) => {
+    capturedIntegrationProps[props.program] = props;
+    return (
+      <div data-testid={props.testid || `integration-card-${props.title}`}>
+        <div>{props.title}</div>
+        <button
+          type="button"
+          data-testid={`${props.testid}-generate`}
+          disabled={props.available !== true}
+          onClick={() => props.onCreateClaim?.(props.integrationId)}
+        >
+          Generate
+        </button>
+        <button
+          type="button"
+          data-testid={`${props.testid}-copy`}
+          disabled
+        >
+          Copy
+        </button>
+      </div>
+    );
+  },
 }));
 
 // ── Module under test ───────────────────────────────────────────────────
@@ -118,29 +130,44 @@ const DEFAULT_DASH = {
   organization_id: "org-abc",
   last_payment: null,
   has_paid: false,
-  units_today: 0,
-  units_week: 0,
-  daily_usage: [],
-  attacks: [],
+  metadata: {
+    install_key_dashboard: {
+      units_today: 0,
+      units_week: 0,
+      daily_usage: [],
+      attacks: [],
+      blocked_activity_total: 0,
+      install_key_slots: [],
+    },
+  },
 };
 
 const DEFAULT_TOKENS = {
-  status: "ok",
-  claude_code_command:
-    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...abcd",
-  openclaw_command:
-    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key ic_install_openclaw_...abcd",
-  cursor_command:
-    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key ic_install_cursor_...ijkl",
-  goose_command:
-    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key ic_install_goose_...mnop",
-  gemini_cli_command:
-    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key ic_install_gemini_cli_...qrst",
-  copilot_command:
-    "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key ic_install_copilot_...uvwx",
-  hermes_command:
-    "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd",
+  status: "locked",
+  install_metadata: {},
 };
+
+const makeInstallMetadata = (programs) =>
+  Object.fromEntries(
+    programs.map((program) => {
+      const slug = program.replace(/_/g, "-");
+      return [
+        slug,
+        { available: true, key_id: `key-${program}`, program, slug },
+      ];
+    }),
+  );
+
+const withInstallKeyDashboard = (dashboard, summary) => ({
+  ...dashboard,
+  metadata: {
+    ...(dashboard.metadata ?? {}),
+    install_key_dashboard: {
+      ...(dashboard.metadata?.install_key_dashboard ?? {}),
+      ...summary,
+    },
+  },
+});
 
 function makeAttack(index) {
   return {
@@ -198,6 +225,7 @@ beforeEach(() => {
   cleanup();
   capturedWalletProps = null;
   capturedSecurityProps = null;
+  capturedIntegrationProps = {};
   mockLocation.search = "";
   mockAuthState = {
     user: { email: "test@ironclaw.io" },
@@ -959,48 +987,36 @@ describe("dashboard structure", () => {
     expect(capturedWalletProps.balance).toBe(9999);
   });
 
-  it("always renders all seven platform cards in placeholder state when no install key or token is unlocked yet", async () => {
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({
-          data: {
-            ...DEFAULT_DASH,
-            install_keys: [],
-          },
-        });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({ data: { status: "locked" } });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
+  it("renders all seven runtimes in canonical order and keeps unissued runtimes locked", async () => {
+    const cardIds = [
+      "openclaw-card",
+      "claude-code-card",
+      "cursor-card",
+      "goose-card",
+      "gemini_cli-card",
+      "copilot-card",
+      "hermes-card",
+    ];
 
     await renderDashboard();
 
     await waitFor(() => {
-      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
-      expect(screen.getByTestId("openclaw-card")).toBeInTheDocument();
-      expect(screen.getByTestId("cursor-card")).toBeInTheDocument();
-      expect(screen.getByTestId("goose-card")).toBeInTheDocument();
-      expect(screen.getByTestId("gemini_cli-card")).toBeInTheDocument();
-      expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
-      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
+      for (const cardId of cardIds) {
+        expect(screen.getByTestId(cardId)).toBeInTheDocument();
+        expect(screen.getByTestId(`${cardId}-generate`)).toBeDisabled();
+      }
     });
 
-    expect(
-      screen.queryByTestId("security_guardian-card"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByTestId("claude-code-card-value"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByTestId("claude-code-card-copy"),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByTestId("hermes-card-value")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("hermes-card-copy")).not.toBeInTheDocument();
+    const renderedCardIds = Array.from(
+      document.querySelectorAll('[data-testid$="-card"]'),
+    )
+      .map((card) => card.getAttribute("data-testid"))
+      .filter((cardId) => cardIds.includes(cardId));
+    expect(renderedCardIds).toEqual(cardIds);
+    expect(screen.queryByTestId("security_guardian-card")).not.toBeInTheDocument();
   });
 
-  it("hides the runtime command value for a keyless install_keys slot instead of hiding the card", async () => {
+  it("ignores masked dashboard keys and legacy command fields", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
@@ -1010,8 +1026,7 @@ describe("dashboard structure", () => {
               {
                 program: "claude_code",
                 status: "active",
-                masked_key: "",
-                metadata: {},
+                masked_key: "ic_install_claude_code_...masked",
               },
             ],
           },
@@ -1022,7 +1037,8 @@ describe("dashboard structure", () => {
           data: {
             status: "ok",
             claude_code_command:
-              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user",
+              "gh skill install --agent claude-code --key ic_install_claude_code_...masked",
+            install_metadata: {},
           },
         });
       }
@@ -1031,22 +1047,17 @@ describe("dashboard structure", () => {
 
     await renderDashboard();
 
-    await waitFor(() => {
-      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
-    });
-
-    expect(
-      screen.queryByTestId("claude-code-card-value"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByTestId("claude-code-card-copy"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("ic_install_claude_code_...abcd"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
+    expect(screen.getByTestId("claude-code-card-generate")).toBeDisabled();
+    expect(screen.getByTestId("claude-code-card-copy")).toBeDisabled();
+    expect(screen.queryByText(/ic_install_/)).not.toBeInTheDocument();
+    expect(mockApiPost).not.toHaveBeenCalledWith(
+      "/integrations/installers/claude-code/claim",
+    );
   });
 
-  it("rejects placeholder and generic token payloads instead of rendering a command value", async () => {
+  it("requests an install claim only after an eligible runtime is selected", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({ data: DEFAULT_DASH });
@@ -1055,10 +1066,7 @@ describe("dashboard structure", () => {
         return Promise.resolve({
           data: {
             status: "ok",
-            claude_code_command: "gh auth login --token placeholder",
-            goose_command: "export IRONCLAW_API_KEY=demo-token",
-            hermes_command:
-              "hermes skills install https://example.com --name ironclaw-security --key placeholder",
+            install_metadata: makeInstallMetadata(["claude_code"]),
           },
         });
       }
@@ -1067,216 +1075,44 @@ describe("dashboard structure", () => {
 
     await renderDashboard();
 
-    await waitFor(() => {
-      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
-      expect(screen.getByTestId("goose-card")).toBeInTheDocument();
-      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
-    });
+    expect(screen.getByTestId("claude-code-card-generate")).toBeEnabled();
+    expect(screen.getByTestId("openclaw-card-generate")).toBeDisabled();
+    expect(mockApiPost).not.toHaveBeenCalledWith(
+      "/integrations/installers/claude-code/claim",
+    );
 
-    expect(
-      screen.queryByTestId("claude-code-card-value"),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByTestId("goose-card-value")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("hermes-card-value")).not.toBeInTheDocument();
-    expect(screen.queryByText("placeholder")).not.toBeInTheDocument();
-    expect(screen.queryByText("demo-token")).not.toBeInTheDocument();
-  });
-
-  it("uses the current owner-scoped install_keys to map runtime cards and commands", async () => {
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({
-          data: {
-            ...DEFAULT_DASH,
-            owner_key: "org-abc",
-            metadata: { owner_key: "org-abc" },
-            install_keys: [
-              {
-                program: "hermes",
-                owner_key: "org-abc",
-                status: "active",
-                masked_key: "ic_install_hermes_...abcd",
-                metadata: {},
-              },
-              {
-                program: "security_guardian",
-                owner_key: "org-abc",
-                status: "active",
-                masked_key: "ic_install_security_guardian_...shared",
-                metadata: {},
-              },
-              {
-                program: "claude_code",
-                owner_key: "other-owner",
-                status: "active",
-                masked_key: "ic_install_claude_code_...foreign",
-                metadata: {},
-              },
-            ],
-          },
-        });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({
-          data: {
-            status: "ok",
-            hermes_command:
-              "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd",
-            claude_code_command:
-              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...foreign",
-          },
-        });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-
-    await renderDashboard();
+    await user.click(screen.getByTestId("claude-code-card-generate"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
-      expect(screen.getAllByText("Hermes").length).toBeGreaterThan(0);
-      expect(
-        screen.queryByTestId("security_guardian-card"),
-      ).not.toBeInTheDocument();
-      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
-      expect(screen.getByTestId("openclaw-card")).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId("hermes-card")).toHaveTextContent("Hermes");
-    expect(
-      screen.queryByTestId("claude-code-card-value"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByTestId("claude-code-card-copy"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("ic_install_claude_code_...foreign"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("prefers the current owner's active runtime key over stale duplicate entries", async () => {
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({
-          data: {
-            ...DEFAULT_DASH,
-            owner_key: "org-abc",
-            metadata: { owner_key: "org-abc" },
-            install_keys: [
-              {
-                program: "claude_code",
-                owner_key: "other-owner",
-                status: "active",
-                masked_key: "ic_install_claude_code_...foreign",
-                metadata: {},
-              },
-              {
-                program: "claude_code",
-                owner_key: "org-abc",
-                status: "locked",
-                masked_key: "",
-                metadata: {
-                  placeholder: "Keys will be generated after purchase",
-                },
-              },
-              {
-                program: "claude_code",
-                owner_key: "org-abc",
-                status: "active",
-                masked_key: "ic_install_claude_code_...current",
-                metadata: {},
-              },
-            ],
-          },
-        });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({
-          data: {
-            status: "ok",
-            claude_code_command:
-              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...current",
-          },
-        });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
-      expect(screen.getByTestId("claude-code-card")).toHaveTextContent(
-        "gh skill install",
-      );
-      expect(screen.getByTestId("claude-code-card-copy")).toBeInTheDocument();
-    });
-  });
-
-  it("renders a copyable command card for a generated Hermes install key", async () => {
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({
-          data: {
-            ...DEFAULT_DASH,
-            install_keys: [
-              {
-                program: "hermes",
-                status: "active",
-                masked_key: "ic_install_hermes_...abcd",
-                metadata: {},
-              },
-            ],
-          },
-        });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({
-          data: {
-            status: "ok",
-            hermes_command:
-              "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd",
-          },
-        });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
-      expect(screen.getByTestId("hermes-card")).toHaveTextContent(
-        "hermes skills install",
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/integrations/installers/claude-code/claim",
       );
     });
-
-    expect(screen.getByTestId("hermes-card-copy")).toBeInTheDocument();
   });
 
-  it("renders the command card without exposing the embedded install key value", async () => {
+  it("keeps metadata unavailable when the canonical program, slug, or key ID is inconsistent", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
-        return Promise.resolve({
-          data: {
-            ...DEFAULT_DASH,
-            install_keys: [
-              {
-                program: "claude_code",
-                status: "active",
-                masked_key: "ic_install_claude_code_...abcd",
-                metadata: {},
-              },
-            ],
-          },
-        });
+        return Promise.resolve({ data: DEFAULT_DASH });
       }
       if (url === "/integrations/token") {
         return Promise.resolve({
           data: {
             status: "ok",
-            claude_code_command:
-              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...abcd",
+            install_metadata: {
+              "claude-code": {
+                available: true,
+                program: "openclaw",
+                slug: "claude-code",
+                key_id: "key-claude-code",
+              },
+              "openclaw": {
+                available: true,
+                program: "openclaw",
+                slug: "openclaw",
+                key_id: "",
+              },
+            },
           },
         });
       }
@@ -1285,73 +1121,11 @@ describe("dashboard structure", () => {
 
     await renderDashboard();
 
-    await waitFor(() => {
-      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
-      expect(screen.getByTestId("claude-code-card")).toHaveTextContent(
-        "gh skill install",
-      );
-      expect(
-        screen.queryByText("ic_install_claude_code_...abcd"),
-      ).not.toBeInTheDocument();
-    });
-
-    expect(
-      screen.queryByText("REACT_APP_IRONCLAW_API_KEY"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("claude-code-card-generate")).toBeDisabled();
+    expect(screen.getByTestId("openclaw-card-generate")).toBeDisabled();
   });
 
-  it("renders the full paid runtime card set whenever valid paid commands are available", async () => {
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({
-          data: {
-            ...DEFAULT_DASH,
-            owner_key: "org-abc",
-            metadata: { owner_key: "org-abc" },
-            install_keys: [
-              {
-                program: "claude_code",
-                owner_key: "org-abc",
-                status: "active",
-                masked_key: "ic_install_claude_code_...abcd",
-                metadata: {},
-              },
-              {
-                program: "goose",
-                owner_key: "org-abc",
-                status: "locked",
-                masked_key: "",
-                metadata: {
-                  placeholder: "Keys will be generated after purchase",
-                },
-              },
-            ],
-          },
-        });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({ data: DEFAULT_TOKENS });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("openclaw-card")).toBeInTheDocument();
-      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
-      expect(screen.getByTestId("cursor-card")).toBeInTheDocument();
-      expect(screen.getByTestId("goose-card")).toBeInTheDocument();
-      expect(screen.getByTestId("gemini_cli-card")).toBeInTheDocument();
-      expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
-      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
-    });
-
-    expect(screen.queryByTestId("goose-card-value")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("goose-card-copy")).not.toBeInTheDocument();
-  });
-
-  it("renders canonical runtime labels and excludes Security Guardian as a platform", async () => {
+  it("renders canonical runtime labels and excludes Security Guardian as a standalone platform", async () => {
     await renderDashboard();
 
     await waitFor(() => {
@@ -1362,171 +1136,13 @@ describe("dashboard structure", () => {
       expect(screen.getByTestId("gemini_cli-card")).toBeInTheDocument();
       expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
       expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
-      expect(
-        screen.queryByTestId("security_guardian-card"),
-      ).not.toBeInTheDocument();
     });
 
     expect(screen.getAllByText("GitHub Copilot").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Hermes").length).toBeGreaterThan(0);
-    expect(screen.queryAllByText("Hermes Agent").length).toBe(0);
-    expect(screen.queryAllByText("Copilot").length).toBe(0);
-  });
-
-  it("renders the canonical runtime order with Hermes in the final card slot", async () => {
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({ data: { ...DEFAULT_DASH, install_keys: [] } });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({ data: DEFAULT_TOKENS });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("openclaw-card")).toBeInTheDocument();
-      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
-      expect(screen.getByTestId("cursor-card")).toBeInTheDocument();
-      expect(screen.getByTestId("goose-card")).toBeInTheDocument();
-      expect(screen.getByTestId("gemini_cli-card")).toBeInTheDocument();
-      expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
-      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
-    });
-
-    expect(
-      screen.queryByTestId("security_guardian-card"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("shows masked-key-backed commands only for active runtime slots and keeps locked slots visible in placeholder state", async () => {
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({
-          data: {
-            ...DEFAULT_DASH,
-            install_keys: [
-              {
-                program: "claude_code",
-                status: "active",
-                masked_key: "ic_install_claude_code_...abcd",
-                metadata: {
-                  placeholder: "Keys will be generated after purchase",
-                },
-              },
-              {
-                program: "goose",
-                status: "locked",
-                masked_key: "",
-                metadata: {
-                  placeholder: "Keys will be generated after purchase",
-                },
-              },
-              {
-                program: "hermes",
-                status: "active",
-                masked_key: "ic_install_hermes_...efgh",
-                metadata: {
-                  placeholder: "Keys will be generated after purchase",
-                },
-              },
-            ],
-          },
-        });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({
-          data: {
-            status: "ok",
-            claude_code_command:
-              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...abcd",
-            goose_command:
-              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key ic_install_goose_...mnop",
-            hermes_command:
-              "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...efgh",
-          },
-        });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("claude-code-card")).toBeInTheDocument();
-      expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
-      expect(screen.getByTestId("goose-card")).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId("claude-code-card-copy")).toBeInTheDocument();
-    expect(screen.getByTestId("hermes-card-copy")).toBeInTheDocument();
-    expect(screen.queryByTestId("goose-card-value")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("goose-card-copy")).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("ic_install_goose_...mnop"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("keeps the UI consistent across issued, locked, and reactivated runtime states", async () => {
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({
-          data: {
-            ...DEFAULT_DASH,
-            install_keys: [
-              {
-                program: "cursor",
-                status: "locked",
-                masked_key: "",
-                metadata: {
-                  placeholder: "Keys will be generated after purchase",
-                },
-              },
-              {
-                program: "copilot",
-                status: "active",
-                masked_key: "ic_install_copilot_...wxyz",
-                metadata: { placeholder: "" },
-              },
-            ],
-          },
-        });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({
-          data: {
-            status: "ok",
-            cursor_command:
-              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key ic_install_cursor_...ijkl",
-            copilot_command:
-              "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key ic_install_copilot_...uvwx",
-          },
-        });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("cursor-card")).toBeInTheDocument();
-      expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
-      expect(screen.getByTestId("copilot-card")).toHaveTextContent(
-        "gh skill install",
-      );
-    });
-
-    expect(screen.queryByTestId("cursor-card-value")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("cursor-card-copy")).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("ic_install_cursor_...ijkl"),
-    ).not.toBeInTheDocument();
-    expect(screen.getByTestId("copilot-card-copy")).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("security_guardian-card"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryAllByText("Hermes Agent")).toHaveLength(0);
+    expect(screen.queryAllByText("Copilot")).toHaveLength(0);
+    expect(screen.queryByTestId("security_guardian-card")).not.toBeInTheDocument();
   });
 
   it("passes attack and usage data to SecurityAnalysis", async () => {
@@ -1539,13 +1155,20 @@ describe("dashboard structure", () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
-          data: {
-            ...DEFAULT_DASH,
+          data: withInstallKeyDashboard(DEFAULT_DASH, {
             units_today: 11,
             units_week: 77,
             daily_usage: dailyUsage,
             attacks,
-          },
+            blocked_activity_total: 5,
+            install_key_slots: [
+              {
+                program: "claude_code",
+                units_consumed: 42,
+                metadata: { usage_summary: { total_blocked_attacks: 3 } },
+              },
+            ],
+          }),
         });
       }
       if (url === "/integrations/token") {
@@ -1564,6 +1187,15 @@ describe("dashboard structure", () => {
     expect(capturedSecurityProps.unitsWeek).toBe(77);
     expect(capturedSecurityProps.dailyUsage).toEqual(dailyUsage);
     expect(capturedSecurityProps.attacks).toEqual(attacks);
+    expect(screen.getByTestId("claude-code-card-units-consumed")).toHaveTextContent(
+      "42",
+    );
+    expect(screen.getByTestId("claude-code-card-blocked-attacks")).toHaveTextContent(
+      "3",
+    );
+    expect(screen.getByTestId("attack-feed-blocked-total")).toHaveTextContent(
+      "5",
+    );
   });
 });
 
@@ -1594,7 +1226,7 @@ describe("attack feed pagination", () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
-          data: { ...DEFAULT_DASH, attacks },
+          data: withInstallKeyDashboard(DEFAULT_DASH, { attacks }),
         });
       }
       if (url === "/integrations/token") {
@@ -1629,7 +1261,7 @@ describe("attack feed pagination", () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
-          data: { ...DEFAULT_DASH, attacks },
+          data: withInstallKeyDashboard(DEFAULT_DASH, { attacks }),
         });
       }
       if (url === "/integrations/token") {
@@ -1670,7 +1302,7 @@ describe("attack feed pagination", () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
-          data: { ...DEFAULT_DASH, attacks },
+          data: withInstallKeyDashboard(DEFAULT_DASH, { attacks }),
         });
       }
       if (url === "/integrations/token") {
@@ -1705,11 +1337,13 @@ describe("attack feed pagination", () => {
 
     mockApiGet
       .mockResolvedValueOnce({
-        data: { ...DEFAULT_DASH, attacks: firstAttackSet },
+        data: withInstallKeyDashboard(DEFAULT_DASH, { attacks: firstAttackSet }),
       })
       .mockResolvedValueOnce({ data: DEFAULT_TOKENS })
       .mockResolvedValueOnce({
-        data: { ...DEFAULT_DASH, attacks: refreshedAttackSet },
+        data: withInstallKeyDashboard(DEFAULT_DASH, {
+          attacks: refreshedAttackSet,
+        }),
       })
       .mockResolvedValueOnce({ data: DEFAULT_TOKENS });
 

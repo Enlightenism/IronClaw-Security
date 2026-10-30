@@ -11,6 +11,7 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
+from fastapi import HTTPException
 import pytest
 
 import app.api.routes.billing as billing_routes
@@ -462,7 +463,10 @@ def test_durable_purchase_transitions_from_pending_to_fulfilled_on_checkout_comp
     assert stored.metadata["units_credited"] is True
 
 
-def test_durable_purchase_failure_rolls_back_stale_paid_state(durable_purchase_fixture, monkeypatch) -> None:
+def test_durable_purchase_failure_remains_retryable_after_confirmed_payment(
+    durable_purchase_fixture,
+    monkeypatch,
+) -> None:
     owner_key = "rollback-owner@ironclaw.test"
     purchase_id = "purch_rollback_001"
     session_id = "cs_rollback_001"
@@ -476,7 +480,7 @@ def test_durable_purchase_failure_rolls_back_stale_paid_state(durable_purchase_f
 
     monkeypatch.setattr(registry, "credit_units", _explode_credit_units)
 
-    with pytest.raises(RuntimeError, match="wallet credit failed"):
+    with pytest.raises(HTTPException) as exc_info:
         billing_routes.handle_checkout_session_completed_webhook(
             {
                 "id": "evt_rollback_001",
@@ -502,9 +506,10 @@ def test_durable_purchase_failure_rolls_back_stale_paid_state(durable_purchase_f
             }
         )
 
+    assert exc_info.value.status_code == 503
     stored = billing_routes._find_matching_purchase(purchase_id=purchase_id)
     assert stored is not None
-    assert stored.metadata["payment_status"] == "pending"
+    assert stored.metadata["payment_status"] == "paid"
     assert stored.metadata["fulfillment_status"] == "pending"
     assert stored.metadata.get("checkout_session_id") == session_id
     assert stored.metadata.get("units_credited") is False

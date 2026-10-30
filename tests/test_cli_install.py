@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 from app.cli.main import run_cli
 from cli.install import build_operator_install_result
@@ -49,11 +48,10 @@ def test_cli_install_blocks_known_integration_when_paid_key_is_missing(capsys):
     assert "step_count" in payload
 
 
-def test_cli_install_requires_valid_paid_key_before_building_command() -> None:
+def test_cli_install_requires_a_valid_claim_before_building_command() -> None:
     blocked = build_operator_install_result(
         platform="openclaw",
-        install_key=None,
-        owner_key="owner@example.com",
+        claim_token=None,
     )
 
     assert blocked.status == "blocked"
@@ -62,72 +60,39 @@ def test_cli_install_requires_valid_paid_key_before_building_command() -> None:
 
     blocked_generic = build_operator_install_result(
         platform="openclaw",
-        install_key="sk_live_abc123",
-        owner_key="owner@example.com",
+        claim_token="ic_install_openclaw_abc123",
     )
 
     assert blocked_generic.status == "blocked"
     assert blocked_generic.install_command is None
 
 
-def test_cli_install_builds_canonical_command_only_for_active_paid_key(monkeypatch) -> None:
-    from cli import install as cli_install
-
-    fake_registry = SimpleNamespace(
-        authenticate_install_key=lambda candidate: SimpleNamespace(
-            active=True,
-            payment_status="paid",
-            entitlements_status="active",
-            issued_after_payment=True,
-            owner_key="owner@example.com",
-            program="openclaw",
-            key_id="ik_openclaw_1",
-        )
-    )
-    monkeypatch.setattr(cli_install, "get_install_key_registry", lambda: fake_registry)
-
+def test_cli_install_builds_canonical_command_from_one_time_claim() -> None:
+    claim_token = "ic_claim_0123456789abcdefghij"
     result = build_operator_install_result(
         platform="openclaw",
-        install_key="ic_install_openclaw_abc123",
-        owner_key="owner@example.com",
+        claim_token=claim_token,
     )
 
     assert result.status == "ready"
     assert result.retry_after_purchase is False
     assert result.install_command is not None
-    assert "ic_install_openclaw_abc123" in result.install_command
+    assert claim_token in result.install_command
     assert "--agent openclaw" in result.install_command
     assert "--scope user" in result.install_command
 
 
-def test_cli_install_rejects_generic_owner_identity_and_platform_auth(monkeypatch) -> None:
-    from cli import install as cli_install
-
-    fake_registry = SimpleNamespace(
-        authenticate_install_key=lambda candidate: SimpleNamespace(
-            active=True,
-            payment_status="paid",
-            entitlements_status="active",
-            issued_after_payment=True,
-            owner_key="owner@example.com",
-            program="claude_code",
-            key_id="ik_claude_1",
-        )
-    )
-    monkeypatch.setattr(cli_install, "get_install_key_registry", lambda: fake_registry)
-
-    blocked_owner = build_operator_install_result(
+def test_cli_install_rejects_raw_keys_and_malformed_claims() -> None:
+    blocked_raw_key = build_operator_install_result(
         platform="claude-code",
-        install_key="ic_install_claude_code_abc123",
-        owner_key="ghp_example_token",
+        claim_token="ic_install_claude_code_abc123",
     )
-    blocked_generic = build_operator_install_result(
+    blocked_malformed = build_operator_install_result(
         platform="claude-code",
-        install_key="sk_live_abc123",
-        owner_key="owner@example.com",
+        claim_token="ic_claim_...",
     )
 
-    assert blocked_owner.status == "blocked"
-    assert blocked_owner.install_command is None
-    assert blocked_generic.status == "blocked"
-    assert blocked_generic.install_command is None
+    assert blocked_raw_key.status == "blocked"
+    assert blocked_raw_key.install_command is None
+    assert blocked_malformed.status == "blocked"
+    assert blocked_malformed.install_command is None

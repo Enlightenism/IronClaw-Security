@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from fastapi import HTTPException
 import pytest
 
-from app.routes.integrations.installer import _platform_install_command
+from app.routes.integrations import installer as installer_route
 from app.services.integration_installer import (
     build_install_plan,
     install_integration,
@@ -30,9 +32,81 @@ def _fake_paid_install_key(owner_key: str = "owner-123", program: str = "opencla
     return _FakeKeyRecord()
 
 
-def test_platform_install_command_embeds_install_key() -> None:
-    assert _platform_install_command("claude_code", "ic_install_claude_code_abc123") == ("gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_abc123")
-    assert _platform_install_command("hermes", "ic_install_hermes_abc123") == ("hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_abc123")
+def test_authenticated_install_route_redeems_claim_for_authenticated_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim_token = "ic_claim_0123456789abcdefghij"
+    install_key = "ic_install_claude_code_abc123"
+    redemption = SimpleNamespace(
+        key_id="ik_claude_123",
+        owner_key="owner-123",
+        program="claude_code",
+        install_key=install_key,
+    )
+    validated: list[tuple[str, str, dict[str, str]]] = []
+
+    monkeypatch.setattr(installer_route, "resolve_authenticated_billing_owner", lambda auth: "owner-123")
+    monkeypatch.setattr(
+        installer_route,
+        "get_install_key_handoff_service",
+        lambda: SimpleNamespace(redeem_claim=lambda token: redemption),
+    )
+
+    def validate_paid_key(key: str, owner: str, **kwargs: str) -> None:
+        validated.append((key, owner, kwargs))
+
+    monkeypatch.setattr(installer_route, "_require_paid_install_key", validate_paid_key)
+    monkeypatch.setattr(
+        installer_route,
+        "get_integration_installer",
+        lambda: SimpleNamespace(
+            install_integration=lambda integration_id, requested_by: {
+                "installed": True,
+                "status": "completed",
+                "steps": [],
+                "metadata": {"requested_by": requested_by},
+            },
+        ),
+    )
+
+    result = installer_route.install_integration(
+        integration_id="integration-claude-code",
+        request=installer_route.IntegrationInstallRequest(claim_token=claim_token),
+        auth=SimpleNamespace(authenticated=True),
+    )
+
+    assert validated == [
+        (
+            install_key,
+            "owner-123",
+            {"integration_id": "integration-claude-code", "platform": "claude_code"},
+        ),
+    ]
+    assert result.installation.installed is True
+    assert result.installation.metadata["requested_by"] == "owner-123"
+    assert install_key not in str(result.model_dump())
+    assert claim_token not in str(result.model_dump())
+
+
+def test_authenticated_install_route_rejects_missing_auth_before_claim_redemption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        installer_route,
+        "get_install_key_handoff_service",
+        lambda: pytest.fail("claim redemption must not be attempted without authentication"),
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        installer_route.install_integration(
+            integration_id="integration-claude-code",
+            request=installer_route.IntegrationInstallRequest(
+                claim_token="ic_claim_0123456789abcdefghij",
+            ),
+            auth=SimpleNamespace(authenticated=False),
+        )
+
+    assert raised.value.status_code == 401
 
 
 def test_install_integration_dry_run_does_not_change_status():

@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from dataclasses import asdict, dataclass, field
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import subprocess
 import sys
 from typing import Any, Final
+from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from app.core.install_key_formats import InstallKeyFormatRegistry, normalize_install_key_program
 
@@ -23,6 +28,8 @@ DEFAULT_RESTORE_TARGET: Final[str] = "primary"
 DEFAULT_RETENTION_DAYS: Final[int] = 30
 DEFAULT_PROVIDER_TARGETS: Final[tuple[str, ...]] = tuple(InstallKeyFormatRegistry.list_programs())
 _CANONICAL_RUNTIME_TARGETS: Final[tuple[str, ...]] = DEFAULT_PROVIDER_TARGETS
+_INSTALL_CLAIM_PATTERN: Final[re.Pattern[str]] = re.compile(r"ic_claim_[A-Za-z0-9_-]{20,128}\Z")
+_MAX_CLAIM_RESPONSE_BYTES: Final[int] = 16_384
 _GENERIC_INSTALL_KEY_PREFIXES: Final[tuple[str, ...]] = (
     "sk_",
     "ghp_",
@@ -42,24 +49,6 @@ _GENERIC_INSTALL_KEY_PREFIXES: Final[tuple[str, ...]] = (
     "bearer ",
     "x-api-key",
 )
-
-
-def _runtime_platform_slug(program: str) -> str:
-    normalized = InstallKeyFormatRegistry.normalize_program(program)
-    if normalized is None:
-        return str(program).strip().replace("_", "-")
-    return normalized.replace("_", "-")
-
-
-def _runtime_command_template(program: str) -> str:
-    normalized = InstallKeyFormatRegistry.normalize_program(program)
-    if normalized == "hermes":
-        return "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}"
-    agent_slug = _runtime_platform_slug(normalized or program)
-    return f"gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {agent_slug} --scope user --key {{key}}"
-
-
-_CANONICAL_INSTALL_COMMANDS: Final[dict[str, str]] = {program: _runtime_command_template(program) for program in _CANONICAL_RUNTIME_TARGETS}
 _SUBPROCESS_TIMEOUT: Final[int] = 300
 
 
@@ -82,7 +71,7 @@ class InstallConfig:
     write_env_file: bool
     overwrite: bool
     provider_targets: tuple[str, ...]
-    install_keys: dict[str, str] = field(default_factory=dict)
+    install_claims: dict[str, str] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -91,7 +80,7 @@ class InstallConfig:
         payload["config_file"] = str(self.config_file)
         payload["env_file"] = str(self.env_file)
         payload["provider_targets"] = list(self.provider_targets)
-        payload["install_keys"] = dict(self.install_keys)
+        payload["install_claims"] = {program: "[REDACTED]" for program in self.install_claims}
         return payload
 
 
@@ -135,12 +124,144 @@ def _ensure_directory(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
+def _restrict_private_file_permissions(path: Path) -> None:
+    if path.is_symlink():
+        raise IronClawInstallerError(f"Refusing to write a credential file through a symbolic link: {path}")
+
+    if os.name != "nt":
+        try:
+            path.chmod(0o600)
+        except OSError as exc:
+            raise IronClawInstallerError(f"Could not restrict permissions for credential file: {path}") from exc
+        return
+
+    system_root = os.environ.get("SystemRoot")
+    if not system_root:
+        raise IronClawInstallerError("Could not restrict permissions for a credential file on Windows.")
+
+    system_directory = Path(system_root) / "System32"
+    whoami = system_directory / "whoami.exe"
+    icacls = system_directory / "icacls.exe"
+    try:
+        identity = subprocess.run(
+            [str(whoami), "/user", "/fo", "csv", "/nh"],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=DEFAULT_TIMEOUT_SECONDS,
+        )
+        user_sid = next(
+            (row[1].strip() for row in csv.reader(identity.stdout.splitlines()) if len(row) > 1 and row[1].strip().startswith("S-1-")),
+            None,
+        )
+        if user_sid is None:
+            raise IronClawInstallerError("Could not determine the current Windows user for credential protection.")
+        subprocess.run(
+            [
+                str(icacls),
+                str(path),
+                "/reset",
+                "/inheritance:r",
+                "/grant:r",
+                f"*{user_sid}:(F)",
+                "/grant",
+                "*S-1-5-18:(F)",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=DEFAULT_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError, csv.Error) as exc:
+        raise IronClawInstallerError(f"Could not restrict permissions for credential file: {path}") from exc
+
+
+class _RejectRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        request: Request,
+        file: Any,
+        code: int,
+        message: str,
+        headers: Any,
+        new_url: str,
+    ) -> None:
+        return None
+
+
+def _open_install_claim_request(request: Request, *, timeout: float) -> Any:
+    return build_opener(_RejectRedirectHandler()).open(request, timeout=timeout)
+
+
+def _write_file(
+    path: Path,
+    contents: str,
+    *,
+    overwrite: bool,
+    private: bool,
+) -> tuple[bool, bool]:
+    if path.is_symlink():
+        raise IronClawInstallerError(f"Refusing to write through a symbolic link: {path}")
+
+    existed_before = path.exists()
+    if existed_before and not overwrite:
+        if private:
+            _restrict_private_file_permissions(path)
+        return False, True
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT
+    flags |= os.O_TRUNC if overwrite else os.O_EXCL
+    if private:
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+
+    try:
+        descriptor = os.open(path, flags, 0o600 if private else 0o666)
+    except FileExistsError:
+        if not overwrite:
+            if private:
+                _restrict_private_file_permissions(path)
+            return False, True
+        raise
+    except OSError as exc:
+        raise IronClawInstallerError(f"Unable to write file: {path}") from exc
+
+    try:
+        if private:
+            _restrict_private_file_permissions(path)
+        stream = os.fdopen(descriptor, "w", encoding="utf-8")
+        descriptor = -1
+        with stream:
+            stream.write(contents)
+    except OSError as exc:
+        raise IronClawInstallerError(f"Unable to write file: {path}") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+    return True, existed_before
+
+
 def _normalize_base_url(value: str) -> str:
     normalized = str(value).strip().rstrip("/")
     if not normalized:
         raise IronClawInstallerError("--base-url must not be empty")
-    if not (normalized.startswith("http://") or normalized.startswith("https://")):
-        raise IronClawInstallerError("--base-url must start with http:// or https://")
+    try:
+        parsed = urlsplit(normalized)
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError as exc:
+        raise IronClawInstallerError("--base-url must be a valid HTTP or HTTPS URL") from exc
+    if parsed.scheme not in {"http", "https"} or not hostname or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
+        raise IronClawInstallerError(
+            "--base-url must be a valid HTTP or HTTPS URL without user info, query, or fragment.",
+        )
+    if parsed.scheme == "http" and hostname.lower() not in {"localhost", "127.0.0.1", "::1"}:
+        raise IronClawInstallerError("--base-url must use HTTPS except for localhost.")
     return normalized
 
 
@@ -195,24 +316,29 @@ def _classify_write(
         created.append(path_text)
 
 
-def _write_json_file(path: Path, payload: dict[str, Any], *, overwrite: bool) -> tuple[bool, bool]:
-    existed_before = path.exists()
-    if existed_before and not overwrite:
-        return False, True
+def _write_json_file(
+    path: Path,
+    payload: dict[str, Any],
+    *,
+    overwrite: bool,
+    private: bool = False,
+) -> tuple[bool, bool]:
+    return _write_file(
+        path,
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        overwrite=overwrite,
+        private=private,
+    )
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return True, existed_before
 
-
-def _write_text_file(path: Path, content: str, *, overwrite: bool) -> tuple[bool, bool]:
-    existed_before = path.exists()
-    if existed_before and not overwrite:
-        return False, True
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-    return True, existed_before
+def _write_text_file(
+    path: Path,
+    content: str,
+    *,
+    overwrite: bool,
+    private: bool = False,
+) -> tuple[bool, bool]:
+    return _write_file(path, content, overwrite=overwrite, private=private)
 
 
 def _canonical_program_name(value: str | None) -> str | None:
@@ -284,30 +410,41 @@ def _validate_install_key_for_runtime(program: str | None, install_key: str | No
     return candidate
 
 
-def _build_platform_install_command(program: str | None, install_key: str | None) -> str:
+def _validate_install_claim_for_runtime(program: str | None, claim_token: str | None) -> str:
     runtime_program = _canonical_program_name(program)
     if runtime_program is None or runtime_program not in _CANONICAL_RUNTIME_TARGETS:
-        raise IronClawInstallerError(f"Unsupported runtime target for install-key injection: {program!r}")
+        raise IronClawInstallerError(f"Unsupported runtime target for install-claim redemption: {program!r}")
 
-    validated_key = _validate_install_key_for_runtime(runtime_program, install_key)
-    template = _CANONICAL_INSTALL_COMMANDS[runtime_program]
-    return template.format(key=validated_key)
-
-
-def build_install_key_commands(install_keys: dict[str, str] | None) -> dict[str, str]:
-    payload: dict[str, str] = {}
-    for program in _CANONICAL_RUNTIME_TARGETS:
-        if not install_keys:
-            break
-        raw_value = install_keys.get(program)
-        if raw_value is None:
-            continue
-        validated = _validate_install_key_for_runtime(program, raw_value)
-        payload[program] = _CANONICAL_INSTALL_COMMANDS[program].format(key=validated)
-    return payload
+    candidate = str(claim_token).strip() if claim_token is not None else ""
+    if not _INSTALL_CLAIM_PATTERN.fullmatch(candidate):
+        raise IronClawInstallerError(f"A valid one-time install claim is required for {runtime_program}.")
+    return candidate
 
 
-def _normalize_install_key_map(values: list[str] | tuple[str, ...] | None) -> dict[str, str]:
+def _build_platform_install_claim_command(program: str | None, claim_token: str | None) -> str:
+    runtime_program = _canonical_program_name(program)
+    if runtime_program is None or runtime_program not in _CANONICAL_RUNTIME_TARGETS:
+        raise IronClawInstallerError(f"Unsupported runtime target for install-claim redemption: {program!r}")
+    validated_claim = _validate_install_claim_for_runtime(runtime_program, claim_token)
+    return InstallKeyFormatRegistry.get_spec(runtime_program).format_command(validated_claim)
+
+
+def build_install_claim_commands(install_claims: dict[str, str] | None) -> dict[str, str]:
+    if not install_claims:
+        return {}
+
+    commands: dict[str, str] = {}
+    for program, claim_token in install_claims.items():
+        runtime_program = _canonical_program_name(program)
+        if runtime_program is None or runtime_program not in _CANONICAL_RUNTIME_TARGETS:
+            raise IronClawInstallerError(f"Unsupported runtime target for install-claim redemption: {program!r}")
+        if runtime_program in commands:
+            raise IronClawInstallerError(f"Only one install claim may be provided for {runtime_program}.")
+        commands[runtime_program] = _build_platform_install_claim_command(runtime_program, claim_token)
+    return dict(sorted(commands.items(), key=lambda pair: _CANONICAL_RUNTIME_TARGETS.index(pair[0])))
+
+
+def _normalize_install_claim_map(values: list[str] | tuple[str, ...] | None) -> dict[str, str]:
     if not values:
         return {}
 
@@ -317,17 +454,61 @@ def _normalize_install_key_map(values: list[str] | tuple[str, ...] | None) -> di
         if not text:
             continue
         if "=" not in text:
-            raise IronClawInstallerError("Install keys must be provided as PROGRAM=VALUE entries; blank or malformed values are rejected.")
-        program_text, key_text = text.split("=", 1)
+            raise IronClawInstallerError(
+                "Install claims must be provided as PROGRAM=VALUE entries; blank or malformed values are rejected.",
+            )
+        program_text, claim_text = text.split("=", 1)
         runtime_program = _canonical_program_name(program_text)
         if runtime_program is None or runtime_program not in _CANONICAL_RUNTIME_TARGETS:
-            raise IronClawInstallerError(f"Unsupported runtime target for install-key injection: {program_text!r}")
-        normalized[runtime_program] = _validate_install_key_for_runtime(runtime_program, key_text)
+            raise IronClawInstallerError(f"Unsupported runtime target for install-claim redemption: {program_text!r}")
+        if runtime_program in normalized:
+            raise IronClawInstallerError(f"Only one install claim may be provided for {runtime_program}.")
+        validated_claim = _validate_install_claim_for_runtime(runtime_program, claim_text)
+        if validated_claim in normalized.values():
+            raise IronClawInstallerError("An install claim may only be assigned to one runtime.")
+        normalized[runtime_program] = validated_claim
     return dict(sorted(normalized.items(), key=lambda pair: _CANONICAL_RUNTIME_TARGETS.index(pair[0])))
 
 
-def _build_runtime_config(config: InstallConfig) -> dict[str, Any]:
+def _redeem_install_claim(base_url: str, program: str, claim_token: str) -> str:
+    validated_claim = _validate_install_claim_for_runtime(program, claim_token)
+    endpoint = urljoin(f"{base_url.rstrip('/')}/", "integrations/install-claims/redeem")
+    request = Request(
+        endpoint,
+        data=json.dumps({"claim_token": validated_claim}).encode("utf-8"),
+        headers={"Accept": "application/json", "Cache-Control": "no-store", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with _open_install_claim_request(request, timeout=DEFAULT_TIMEOUT_SECONDS) as response:
+            response_body = response.read(_MAX_CLAIM_RESPONSE_BYTES + 1)
+    except HTTPError as exc:
+        exc.close()
+        raise IronClawInstallerError(
+            f"Install claim redemption failed for {program} (HTTP {exc.code}).",
+        ) from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise IronClawInstallerError(f"Unable to reach the install-claim service for {program}.") from exc
+
+    if len(response_body) > _MAX_CLAIM_RESPONSE_BYTES:
+        raise IronClawInstallerError(f"Install-claim response for {program} exceeded the size limit.")
+    try:
+        payload = json.loads(response_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise IronClawInstallerError(f"Install-claim response for {program} was not valid JSON.") from exc
+    if not isinstance(payload, dict):
+        raise IronClawInstallerError(f"Install-claim response for {program} was not an object.")
+
+    response_program = InstallKeyFormatRegistry.normalize_program(str(payload.get("program", "")))
+    key_id = str(payload.get("key_id", "")).strip()
+    if response_program != program or not key_id:
+        raise IronClawInstallerError(f"Install-claim response did not match the requested runtime {program}.")
+    return _validate_install_key_for_runtime(program, str(payload.get("install_key", "")))
+
+
+def _build_runtime_config(config: InstallConfig, install_keys: dict[str, str] | None = None) -> dict[str, Any]:
     provider_set = set(config.provider_targets)
+    redeemed_install_keys = install_keys or {}
     features = {
         "health": True,
         "ui": True,
@@ -343,9 +524,9 @@ def _build_runtime_config(config: InstallConfig) -> dict[str, Any]:
         "gemini_cli_integration": "gemini_cli" in provider_set,
         "copilot_integration": "copilot" in provider_set,
         "hermes_integration": "hermes" in provider_set,
-        "embedded_install_keys": bool(config.install_keys),
+        "embedded_install_keys": bool(redeemed_install_keys),
     }
-    runtime_commands = build_install_key_commands(config.install_keys)
+    runtime_commands = {program: InstallKeyFormatRegistry.get_spec(program).command_template for program in redeemed_install_keys}
     return {
         "schema_version": 1,
         "product": "IronClaw-Security",
@@ -356,7 +537,7 @@ def _build_runtime_config(config: InstallConfig) -> dict[str, Any]:
         "restore_target": config.restore_target,
         "retention_days": config.retention_days,
         "provider_targets": list(config.provider_targets),
-        "install_keys": dict(config.install_keys),
+        "install_keys": dict(redeemed_install_keys),
         "runtime_commands": runtime_commands,
         "paths": {
             "project_root": str(config.project_root),
@@ -505,11 +686,13 @@ def run_install(config: InstallConfig) -> InstallResult:
     _validate_project_root(config.project_root)
     _ensure_directory(config.config_dir)
 
-    config_payload = _build_runtime_config(config)
+    install_keys = {program: _redeem_install_claim(config.base_url, program, claim_token) for program, claim_token in config.install_claims.items()}
+    config_payload = _build_runtime_config(config, install_keys)
     wrote_config, config_existed_before = _write_json_file(
         config.config_file,
         config_payload,
         overwrite=config.overwrite,
+        private=True,
     )
     _classify_write(
         config.config_file,
@@ -527,6 +710,7 @@ def run_install(config: InstallConfig) -> InstallResult:
             config.env_file,
             env_contents,
             overwrite=config.overwrite,
+            private=True,
         )
         env_path = config.env_file
         _classify_write(
@@ -632,10 +816,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Provider target to enable, repeatable, e.g. --provider-target claude_code --provider-target openclaw --provider-target hermes",
     )
     parser.add_argument(
-        "--install-key",
+        "--install-claim",
         action="append",
         default=[],
-        help="Canonical install key to inject for a runtime target, e.g. --install-key openclaw=ic_install_openclaw_...",
+        help="One-time install claim to redeem for a runtime target, e.g. --install-claim openclaw=ic_claim_...",
     )
     parser.add_argument(
         "--no-vscode",
@@ -672,7 +856,7 @@ def build_install_config(args: argparse.Namespace) -> InstallConfig:
     if args.retention_days <= 0:
         raise IronClawInstallerError("--retention-days must be greater than 0")
 
-    install_keys = _normalize_install_key_map(getattr(args, "install_key", None) or [])
+    install_claims = _normalize_install_claim_map(getattr(args, "install_claim", None) or [])
 
     return InstallConfig(
         project_root=project_root,
@@ -696,7 +880,7 @@ def build_install_config(args: argparse.Namespace) -> InstallConfig:
         write_env_file=not args.no_env,
         overwrite=bool(args.overwrite),
         provider_targets=_normalize_provider_targets(args.provider_target),
-        install_keys=install_keys,
+        install_claims=install_claims,
     )
 
 

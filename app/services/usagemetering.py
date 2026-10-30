@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from threading import Lock
+from threading import RLock
 from typing import Any
 
 from app.core.billing import TOKENS_PER_UNIT, BillingRegistry, get_billing_registry, units_required_for_tokens
-from app.core.unit_wallet import get_unit_wallet_registry
+from app.core.unit_wallet import InsufficientUnitsError, get_unit_wallet_registry
 
 
 def _utc_now() -> datetime:
@@ -49,7 +49,7 @@ class UsageMeteringService:
     """
 
     def __init__(self, *, billing_registry: BillingRegistry | None = None) -> None:
-        self._lock = Lock()
+        self._lock = RLock()
         self._billing_registry = billing_registry or get_billing_registry()
         self._wallet_registry = get_unit_wallet_registry()
 
@@ -70,6 +70,8 @@ class UsageMeteringService:
         *,
         owner_key: str,
         units: int,
+        install_key_id: str | None = None,
+        program: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> UsageAuthorization:
         if units <= 0:
@@ -79,6 +81,23 @@ class UsageMeteringService:
         metadata = dict(metadata or {})
 
         with self._lock:
+            if install_key_id is not None:
+                if not program:
+                    raise ValueError("program is required for install-key usage authorization")
+                wallet_balance_before = self._get_wallet_balance(normalized_owner_key)
+                allowed = wallet_balance_before >= units
+                return UsageAuthorization(
+                    allowed=allowed,
+                    owner_key=normalized_owner_key,
+                    requested_units=units,
+                    remaining_units_before=wallet_balance_before,
+                    remaining_units_after=max(wallet_balance_before - units, 0),
+                    reason="authorized" if allowed else "insufficient_wallet_units",
+                    wallet_balance_before=wallet_balance_before,
+                    wallet_balance_after=max(wallet_balance_before - units, 0) if allowed else wallet_balance_before,
+                    metadata={**metadata, "install_key_id": install_key_id, "program": program},
+                )
+
             subscription = self._billing_registry.get_active_subscription_for_customer(
                 normalized_owner_key,
             )
@@ -160,6 +179,9 @@ class UsageMeteringService:
         *,
         owner_key: str,
         units: int,
+        install_key_id: str | None = None,
+        program: str | None = None,
+        event_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> UsageConsumptionResult:
         if units <= 0:
@@ -172,6 +194,8 @@ class UsageMeteringService:
             authorization = self.authorize_usage(
                 owner_key=normalized_owner_key,
                 units=units,
+                install_key_id=install_key_id,
+                program=program,
                 metadata=metadata,
             )
             if not authorization.allowed:
@@ -185,6 +209,41 @@ class UsageMeteringService:
                     package_id=authorization.package_id,
                     wallet_balance=authorization.wallet_balance_before,
                     metadata=metadata,
+                )
+
+            if install_key_id is not None:
+                if not program:
+                    raise ValueError("program is required for install-key usage consumption")
+                try:
+                    wallet, _, _ = self._wallet_registry.debit_units_for_install_key(
+                        owner_key=normalized_owner_key,
+                        key_id=install_key_id,
+                        program=program,
+                        units=units,
+                        action_type=str(metadata.get("action_name") or "action"),
+                        blocked_attack_count=0,
+                        metadata={**metadata, "event_id": event_id},
+                    )
+                except InsufficientUnitsError:
+                    current_balance = self._get_wallet_balance(normalized_owner_key)
+                    return UsageConsumptionResult(
+                        applied=False,
+                        owner_key=normalized_owner_key,
+                        consumed_units=0,
+                        remaining_units=current_balance,
+                        reason="insufficient_wallet_units",
+                        wallet_balance=current_balance,
+                        metadata=metadata,
+                    )
+
+                return UsageConsumptionResult(
+                    applied=True,
+                    owner_key=normalized_owner_key,
+                    consumed_units=units,
+                    remaining_units=wallet.balance_units,
+                    reason="consumed",
+                    wallet_balance=wallet.balance_units,
+                    metadata={**metadata, "install_key_id": install_key_id, "program": program, "event_id": event_id},
                 )
 
             subscription = self._billing_registry.record_usage(

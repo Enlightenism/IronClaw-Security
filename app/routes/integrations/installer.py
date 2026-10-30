@@ -3,11 +3,18 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel, Field
 
-from app.core.install_key_formats import get_install_key_format_registry
+from app.core.auth import get_auth_context
+from app.core.billing import resolve_authenticated_billing_owner
+from app.core.install_key_formats import RUNTIME_INSTALL_KEY_PROGRAMS, get_install_key_format_registry
 from app.core.install_keys import get_install_key_registry
+from app.services.install_key_handoff import (
+    InstallKeyHandoffError,
+    InvalidInstallKeyClaimError,
+    get_install_key_handoff_service,
+)
 from app.services.integrationinstaller import get_integration_installer
 from app.services.platform_install_key_router import get_platform_install_key_router
 
@@ -104,9 +111,7 @@ class InstallationSummaryView(BaseModel):
 class IntegrationInstallRequest(BaseModel):
     platform: str | None = Field(default=None, min_length=1, max_length=120)
     adapter_version: str | None = Field(default=None, min_length=1, max_length=120)
-    initiated_by: str | None = Field(default=None, min_length=1, max_length=120)
-    install_key: str | None = Field(default=None, min_length=1, max_length=1024)
-    owner_key: str | None = Field(default=None, min_length=1, max_length=512)
+    claim_token: str | None = Field(default=None, min_length=10, max_length=256, repr=False)
     dry_run: bool = False
     force: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -184,32 +189,6 @@ def _infer_expected_program(integration_id: str | None, *, platform: str | None 
             if canonical is not None:
                 return canonical
     return None
-
-
-def _platform_install_command(program: str | None, install_key: str) -> str:
-    registry = get_install_key_format_registry()
-    program_name = (program or "").strip()
-    if not program_name:
-        return ""
-
-    try:
-        spec = registry.get_spec(program_name)
-    except ValueError:
-        return ""
-
-    command_map = {
-        "claude_code": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key {key}",
-        "openclaw": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key {key}",
-        "cursor": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key {key}",
-        "goose": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key {key}",
-        "gemini_cli": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key {key}",
-        "copilot": "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key {key}",
-        "hermes": "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}",
-    }
-    command = command_map.get(spec.program)
-    if command is not None:
-        return command.format(key=install_key) if install_key else ""
-    return f"npx ironclaw-install --key {install_key} --platform {spec.program}"
 
 
 def _reject_non_production_install_key(candidate: str, *, expected_program: str | None = None) -> bool:
@@ -394,20 +373,74 @@ def _build_install_response(integration_id: str, result: Any) -> IntegrationInst
 def install_integration(
     integration_id: str = Path(..., min_length=1, max_length=255),
     request: IntegrationInstallRequest | None = None,
+    auth: Any = Depends(get_auth_context),
 ) -> IntegrationInstallResponse:
     normalized_id = integration_id.strip()
     effective_request = request or IntegrationInstallRequest()
+    if auth is None or getattr(auth, "authenticated", False) is not True:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication is required.",
+        )
+
+    owner_key = resolve_authenticated_billing_owner(auth)
+    if not owner_key:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A verified customer identity is required.",
+        )
+
+    expected_program = _infer_expected_program(normalized_id)
+    if expected_program is None or expected_program not in RUNTIME_INSTALL_KEY_PROGRAMS:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Unsupported integration runtime.",
+        )
+
+    if effective_request.platform is not None:
+        requested_program = _infer_expected_program(effective_request.platform)
+        if requested_program != expected_program:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Requested platform does not match the integration runtime.",
+            )
+
+    if not effective_request.claim_token:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A one-time install claim is required.",
+        )
+
+    try:
+        redemption = get_install_key_handoff_service().redeem_claim(effective_request.claim_token)
+    except InvalidInstallKeyClaimError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Install claim is invalid, expired, or already redeemed.",
+        ) from exc
+    except InstallKeyHandoffError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Secure install handoff is temporarily unavailable.",
+        ) from exc
+
+    if redemption.owner_key != owner_key or redemption.program != expected_program:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Install claim does not match the authenticated customer and runtime.",
+        )
+
     _require_paid_install_key(
-        effective_request.install_key,
-        effective_request.owner_key,
+        redemption.install_key,
+        owner_key,
         integration_id=normalized_id,
-        platform=effective_request.platform,
+        platform=expected_program,
     )
 
     service = get_integration_installer()
     result = service.install_integration(
         normalized_id,
-        requested_by=effective_request.initiated_by or "system",
+        requested_by=owner_key,
     )
 
     if result is None:

@@ -25,6 +25,7 @@ from types import SimpleNamespace
 
 from app.api.billing import _attach_install_key_delivery
 from app.core.auth import AuthContext, get_auth_context, require_api_key
+from app.core.install_key_formats import InstallKeyFormatRegistry
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import (
     ORG_KEY_PREFIX,
@@ -152,6 +153,16 @@ def _fund_org_wallet(org_id: str, package_id: str = "pkg_5000") -> str:
         },
     )
     return owner_key
+
+
+def _make_install_key_records() -> dict[str, SimpleNamespace]:
+    return {
+        program: SimpleNamespace(
+            key_id=f"ik_{program}_001",
+            masked_key=f"ic_install_{program}_...1234",
+        )
+        for program in InstallKeyFormatRegistry.list_programs()
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +379,14 @@ def _signed_stripe_payload(payload: dict[str, object], *, secret: str) -> tuple[
     return raw, f"t={timestamp},v1={signed}"
 
 
-def test_checkout_session_completed_webhook_fulfills_pending_purchase_and_credits_wallet(client: TestClient) -> None:
+def test_checkout_session_completed_webhook_fulfills_pending_purchase_and_credits_wallet(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.api.routes.billing._provision_paid_install_keys",
+        lambda **_kwargs: _make_install_key_records(),
+    )
     owner = "webhook-buyer@ironclaw.test"
     create_resp = client.post(
         _PURCHASE_PATH,
@@ -421,13 +439,24 @@ def test_checkout_session_completed_webhook_fulfills_pending_purchase_and_credit
     assert body["wallet"]["balance_units"] == 5_000
     assert body["metadata"]["payment_status"] == "paid"
     assert body["metadata"]["fulfillment_status"] == "fulfilled"
+    assert body["metadata"]["install_keys_provisioned"] is True
+    assert body["purchase"]["install_key_id"] == "ik_openclaw_001"
+    assert body["purchase"]["masked_key"] == "ic_install_openclaw_...1234"
+    assert body["purchase"]["install_key_id"] != body["purchase"]["masked_key"]
 
     wallet_resp = client.get(f"/billing/wallet/{owner}")
     assert wallet_resp.status_code == 200
     assert wallet_resp.json()["wallet"]["balance_units"] == 5_000
 
 
-def test_checkout_session_completed_webhook_rejects_missing_signature_and_replays_are_duplicate(client: TestClient) -> None:
+def test_checkout_session_completed_webhook_rejects_missing_signature_and_replays_are_duplicate(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.api.routes.billing._provision_paid_install_keys",
+        lambda **_kwargs: _make_install_key_records(),
+    )
     owner = "webhook-idempotent@ironclaw.test"
     create_resp = client.post(
         _PURCHASE_PATH,
@@ -490,6 +519,129 @@ def test_checkout_session_completed_webhook_rejects_missing_signature_and_replay
     assert second.status_code == 200
     assert second.json()["status"] == "duplicate"
     assert second.json()["reason"] == "purchase_already_credited"
+
+
+def test_checkout_session_completed_pending_payment_does_not_credit_or_provision(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "pending-webhook-buyer@ironclaw.test"
+    create_resp = client.post(
+        _PURCHASE_PATH,
+        json={
+            "package_id": "pkg_5000",
+            "buyer_name": "Pending Buyer",
+            "buyer_email": owner,
+            "metadata": {},
+        },
+    )
+    purchase_id = create_resp.json()["purchase"]["purchase_id"]
+    checkout_session_id = "cs_webhook_pending_456"
+    payload = {
+        "id": "evt_webhook_pending_001",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": checkout_session_id,
+                "payment_status": "unpaid",
+                "customer_details": {"email": owner},
+                "metadata": {
+                    "owner_key": owner,
+                    "purchase_id": purchase_id,
+                    "buyer_email": owner,
+                    "package_id": "pkg_5000",
+                    "checkout_session_id": checkout_session_id,
+                },
+            }
+        },
+    }
+    provision = MagicMock(return_value=_make_install_key_records())
+    monkeypatch.setattr(
+        "app.api.routes.billing._provision_paid_install_keys",
+        provision,
+    )
+    os.environ["STRIPE_WEBHOOK_SECRET"] = "whsec_test_secret_value_123"
+    raw, signature = _signed_stripe_payload(payload, secret="whsec_test_secret_value_123")
+
+    response = client.post(
+        "/billing/webhook",
+        content=raw,
+        headers={"stripe-signature": signature, "content-type": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reason"] == "payment_not_confirmed"
+    assert client.get(f"/billing/wallet/{owner}").json()["wallet"]["balance_units"] == 0
+    provision.assert_not_called()
+
+
+def test_checkout_session_completed_retries_key_provisioning_without_double_credit(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "retry-webhook-buyer@ironclaw.test"
+    create_resp = client.post(
+        _PURCHASE_PATH,
+        json={
+            "package_id": "pkg_5000",
+            "buyer_name": "Retry Buyer",
+            "buyer_email": owner,
+            "metadata": {},
+        },
+    )
+    purchase_id = create_resp.json()["purchase"]["purchase_id"]
+    checkout_session_id = "cs_webhook_retry_789"
+    payload = {
+        "id": "evt_webhook_retry_001",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": checkout_session_id,
+                "customer": "cus_webhook_retry",
+                "payment_status": "paid",
+                "amount_total": 2000,
+                "currency": "usd",
+                "mode": "payment",
+                "customer_details": {"email": owner},
+                "metadata": {
+                    "owner_key": owner,
+                    "purchase_id": purchase_id,
+                    "buyer_email": owner,
+                    "package_id": "pkg_5000",
+                    "checkout_session_id": checkout_session_id,
+                },
+            }
+        },
+    }
+    calls = 0
+
+    def provision_once_fails(**_kwargs: object) -> dict[str, SimpleNamespace]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("temporary secure persistence failure")
+        return _make_install_key_records()
+
+    monkeypatch.setattr(
+        "app.api.routes.billing._provision_paid_install_keys",
+        provision_once_fails,
+    )
+    os.environ["STRIPE_WEBHOOK_SECRET"] = "whsec_test_secret_value_123"
+    raw, signature = _signed_stripe_payload(payload, secret="whsec_test_secret_value_123")
+    headers = {"stripe-signature": signature, "content-type": "application/json"}
+
+    first = client.post("/billing/webhook", content=raw, headers=headers)
+    assert first.status_code == 503
+    assert first.json()["detail"]["reason"] == "paid_purchase_fulfillment_retryable"
+
+    second = client.post("/billing/webhook", content=raw, headers=headers)
+
+    assert second.status_code == 200
+    assert second.json()["status"] == "fulfilled"
+    assert second.json()["purchase"]["install_key_id"] == "ik_openclaw_001"
+    assert second.json()["wallet"]["balance_units"] == 5_000
+    assert calls == 2
+    assert client.get(f"/billing/wallet/{owner}").json()["wallet"]["balance_units"] == 5_000
 
 
 # ---------------------------------------------------------------------------

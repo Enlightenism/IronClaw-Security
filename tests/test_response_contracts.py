@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 import os
 from unittest.mock import MagicMock
 
@@ -15,8 +16,9 @@ os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 os.environ["SUPABASE_KEY"] = ""
 os.environ["SUPABASE_ANON_KEY"] = ""
 
+from app.core.auth import AuthContext, get_auth_context
 from app.core.billing import get_billing_registry
-from app.core.install_keys import InstallKeyNotFoundError, get_install_key_registry
+from app.core.install_keys import get_install_key_registry
 from app.core.settings import get_settings
 from app.core.unit_wallet import get_unit_wallet_registry
 from app.main import app
@@ -24,6 +26,7 @@ from app.services.audit_log_service import reset_audit_log
 
 _VALID_API_KEY = os.environ["IRONCLAW_API_KEY"]
 _AUTH_HEADERS = {"X-API-Key": _VALID_API_KEY}
+_DASHBOARD_OWNER_KEY = "demo@ironclaw.local"
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +54,37 @@ def client() -> TestClient:
     c = TestClient(app, raise_server_exceptions=True)
     c.headers.update(_AUTH_HEADERS)
     return c
+
+
+def _dashboard_auth_context() -> AuthContext:
+    return AuthContext(
+        api_key=_VALID_API_KEY,
+        principal_type="customer",
+        principal_id=_DASHBOARD_OWNER_KEY,
+        session_id=None,
+        org_id=None,
+        permissions=("customer:read", "customer:write"),
+        roles=("customer_admin",),
+        authenticated=True,
+        auth_source="test",
+        auth_method="test",
+        metadata={"owner_key": _DASHBOARD_OWNER_KEY},
+    )
+
+
+@pytest.fixture()
+def dashboard_client() -> Iterator[TestClient]:
+    previous_auth_context = app.dependency_overrides.get(get_auth_context)
+    app.dependency_overrides[get_auth_context] = _dashboard_auth_context
+    try:
+        with TestClient(app, raise_server_exceptions=True) as c:
+            c.headers.update(_AUTH_HEADERS)
+            yield c
+    finally:
+        if previous_auth_context is None:
+            app.dependency_overrides.pop(get_auth_context, None)
+        else:
+            app.dependency_overrides[get_auth_context] = previous_auth_context
 
 
 # ---------------------------------------------------------------------------
@@ -280,11 +314,11 @@ def test_guard_bundle_contract(client: TestClient) -> None:
 # ===========================================================================
 
 
-def test_dashboard_overview_response_contract(client: TestClient) -> None:
+def test_dashboard_overview_response_contract(dashboard_client: TestClient) -> None:
     app.dependency_overrides[get_unit_wallet_registry] = _make_mock_wallet_registry
     app.dependency_overrides[get_billing_registry] = _make_mock_billing_registry
     try:
-        response = client.get("/dashboard/overview")
+        response = dashboard_client.get("/dashboard/overview")
     finally:
         app.dependency_overrides.pop(get_unit_wallet_registry, None)
         app.dependency_overrides.pop(get_billing_registry, None)
@@ -308,12 +342,12 @@ def test_dashboard_overview_response_contract(client: TestClient) -> None:
     )
 
 
-def test_dashboard_overview_wallet_registry_overridable(client: TestClient) -> None:
+def test_dashboard_overview_wallet_registry_overridable(dashboard_client: TestClient) -> None:
     mock_wallet_registry = _make_mock_wallet_registry()
     app.dependency_overrides[get_unit_wallet_registry] = lambda: mock_wallet_registry
     app.dependency_overrides[get_billing_registry] = _make_mock_billing_registry
     try:
-        response = client.get("/dashboard/overview")
+        response = dashboard_client.get("/dashboard/overview")
     finally:
         app.dependency_overrides.pop(get_unit_wallet_registry, None)
         app.dependency_overrides.pop(get_billing_registry, None)
@@ -339,7 +373,7 @@ def test_dashboard_overview_wallet_registry_overridable(client: TestClient) -> N
     mock_wallet_registry.get_wallet.assert_called_once_with("demo@ironclaw.local")
 
 
-def test_dashboard_overview_billing_registry_overridable(client: TestClient) -> None:
+def test_dashboard_overview_billing_registry_overridable(dashboard_client: TestClient) -> None:
     mock_subscription = MagicMock()
     mock_subscription.plan = "pro"
     mock_subscription.status = "active"
@@ -353,7 +387,7 @@ def test_dashboard_overview_billing_registry_overridable(client: TestClient) -> 
     app.dependency_overrides[get_unit_wallet_registry] = _make_mock_wallet_registry
     app.dependency_overrides[get_billing_registry] = lambda: mock_billing_registry
     try:
-        response = client.get("/dashboard/overview")
+        response = dashboard_client.get("/dashboard/overview")
     finally:
         app.dependency_overrides.pop(get_unit_wallet_registry, None)
         app.dependency_overrides.pop(get_billing_registry, None)
@@ -384,8 +418,8 @@ def test_dashboard_overview_billing_registry_overridable(client: TestClient) -> 
     mock_billing_registry.get_active_subscription_for_customer.assert_called_once_with("demo@ironclaw.local")
 
 
-def test_dashboard_overview_filters_current_owner_paid_install_keys(client: TestClient) -> None:
-    owner_key = "owner@example.com"
+def test_dashboard_overview_filters_current_owner_paid_install_keys(dashboard_client: TestClient) -> None:
+    owner_key = _DASHBOARD_OWNER_KEY
 
     current_key = MagicMock()
     current_key.key_id = "ik_current_001"
@@ -445,7 +479,7 @@ def test_dashboard_overview_filters_current_owner_paid_install_keys(client: Test
     app.dependency_overrides[get_billing_registry] = _make_mock_billing_registry
     app.dependency_overrides[get_install_key_registry] = lambda: mock_registry
     try:
-        response = client.get(f"/dashboard/overview?owner_key={owner_key}")
+        response = dashboard_client.get(f"/dashboard/overview?owner_key={owner_key}")
     finally:
         app.dependency_overrides.pop(get_unit_wallet_registry, None)
         app.dependency_overrides.pop(get_billing_registry, None)
@@ -536,12 +570,12 @@ def test_ui_manifest_response_contract(client: TestClient) -> None:
 # ===========================================================================
 
 
-def test_dashboard_units_response_contract_valid_owner_key(client: TestClient) -> None:
+def test_dashboard_units_response_contract_valid_owner_key(dashboard_client: TestClient) -> None:
     mock_registry = MagicMock()
     mock_registry.get_keys_for_owner.return_value = [_make_mock_key_entry()]
     app.dependency_overrides[get_install_key_registry] = lambda: mock_registry
     try:
-        response = client.get("/dashboard/units", params={"owner_key": "owner-test-001"})
+        response = dashboard_client.get("/dashboard/units", params={"owner_key": _DASHBOARD_OWNER_KEY})
     finally:
         app.dependency_overrides.pop(get_install_key_registry, None)
 
@@ -553,7 +587,7 @@ def test_dashboard_units_response_contract_valid_owner_key(client: TestClient) -
         data,
         {"owner_key", "total_keys", "total_units_consumed", "keys", "timestamp"},
     )
-    assert data["owner_key"] == "owner-test-001"
+    assert data["owner_key"] == _DASHBOARD_OWNER_KEY
     assert isinstance(data["total_keys"], int)
     assert isinstance(data["total_units_consumed"], int)
     assert isinstance(data["keys"], list)
@@ -561,12 +595,12 @@ def test_dashboard_units_response_contract_valid_owner_key(client: TestClient) -
     assert len(data["timestamp"]) > 0
 
 
-def test_dashboard_units_keys_entry_shape(client: TestClient) -> None:
+def test_dashboard_units_keys_entry_shape(dashboard_client: TestClient) -> None:
     mock_registry = MagicMock()
     mock_registry.get_keys_for_owner.return_value = [_make_mock_key_entry()]
     app.dependency_overrides[get_install_key_registry] = lambda: mock_registry
     try:
-        response = client.get("/dashboard/units", params={"owner_key": "owner-test-001"})
+        response = dashboard_client.get("/dashboard/units", params={"owner_key": _DASHBOARD_OWNER_KEY})
     finally:
         app.dependency_overrides.pop(get_install_key_registry, None)
 
@@ -583,12 +617,12 @@ def test_dashboard_units_keys_entry_shape(client: TestClient) -> None:
     assert isinstance(entry["active"], bool)
 
 
-def test_dashboard_units_empty_owner_returns_zero_totals(client: TestClient) -> None:
+def test_dashboard_units_empty_owner_returns_zero_totals(dashboard_client: TestClient) -> None:
     mock_registry = MagicMock()
     mock_registry.get_keys_for_owner.return_value = []
     app.dependency_overrides[get_install_key_registry] = lambda: mock_registry
     try:
-        response = client.get("/dashboard/units", params={"owner_key": "owner-nobody"})
+        response = dashboard_client.get("/dashboard/units", params={"owner_key": _DASHBOARD_OWNER_KEY})
     finally:
         app.dependency_overrides.pop(get_install_key_registry, None)
 
@@ -604,12 +638,15 @@ def test_dashboard_units_empty_owner_returns_zero_totals(client: TestClient) -> 
 # ===========================================================================
 
 
-def test_record_key_usage_response_contract_valid_body(client: TestClient) -> None:
+def test_record_key_usage_response_contract_valid_body(dashboard_client: TestClient) -> None:
     mock_registry = MagicMock()
+    key_record = MagicMock()
+    key_record.owner_key = _DASHBOARD_OWNER_KEY
+    mock_registry.get_key_by_id.return_value = key_record
     mock_registry.record_key_usage.return_value = _make_mock_updated_key()
     app.dependency_overrides[get_install_key_registry] = lambda: mock_registry
     try:
-        response = client.post(
+        response = dashboard_client.post(
             "/dashboard/units/record",
             json={"key_id": "key-abc-123", "units": 10},
         )
@@ -627,12 +664,12 @@ def test_record_key_usage_response_contract_valid_body(client: TestClient) -> No
     assert len(data["timestamp"]) > 0
 
 
-def test_record_key_usage_unknown_key_id_returns_404(client: TestClient) -> None:
+def test_record_key_usage_unknown_key_id_returns_404(dashboard_client: TestClient) -> None:
     mock_registry = MagicMock()
-    mock_registry.record_key_usage.side_effect = InstallKeyNotFoundError("key-unknown not found")
+    mock_registry.get_key_by_id.return_value = None
     app.dependency_overrides[get_install_key_registry] = lambda: mock_registry
     try:
-        response = client.post(
+        response = dashboard_client.post(
             "/dashboard/units/record",
             json={"key_id": "key-unknown", "units": 5},
         )

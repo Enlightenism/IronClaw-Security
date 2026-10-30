@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -38,7 +39,6 @@ def app() -> FastAPI:
 @pytest.fixture()
 def client(app: FastAPI) -> Generator[TestClient, None, None]:
     with TestClient(app, raise_server_exceptions=True) as test_client:
-        test_client.headers.update({"X-API-Key": "test-api-key"})
         yield test_client
 
 
@@ -60,6 +60,18 @@ def _make_paid_key(
         checkout_session_id="cs_evt_001",
         label="production",
         metadata={"source": "test"},
+    )
+
+
+def _post_event(
+    client: TestClient,
+    record: InstallKeyRecord,
+    payload: dict[str, object],
+) -> Any:
+    return client.post(
+        "/install-key-events/ingest",
+        json=payload,
+        headers={"X-Install-Key": record.raw_key},
     )
 
 
@@ -94,9 +106,10 @@ def test_usage_units_debited_updates_wallet_and_install_key_usage(client: TestCl
     wallet_registry.credit_units(owner_key, 100, metadata={"seeded": True})
     record = _make_paid_key(owner_key=owner_key)
 
-    response = client.post(
-        "/install-key-events/ingest",
-        json={
+    response = _post_event(
+        client,
+        record,
+        {
             "event_id": "evt_usage_001",
             "event_type": "usage_units_debited",
             "key_id": record.key_id,
@@ -115,10 +128,6 @@ def test_usage_units_debited_updates_wallet_and_install_key_usage(client: TestCl
     assert body["wallet_updated"] is True
     assert body["metadata"]["status"] == "applied"
 
-    updated_record = get_install_key_registry().get_key_by_id(record.key_id)
-    assert updated_record is not None
-    assert updated_record.units_consumed == 7
-
     wallet = wallet_registry.get_wallet(owner_key)
     assert wallet is not None
     assert wallet.balance_units == 93
@@ -135,9 +144,10 @@ def test_blocked_event_increments_blocked_attack_totals(client: TestClient) -> N
     wallet_registry.credit_units(owner_key, 100, metadata={"seeded": True})
     record = _make_paid_key(owner_key=owner_key, program="claude_code")
 
-    response = client.post(
-        "/install-key-events/ingest",
-        json={
+    response = _post_event(
+        client,
+        record,
+        {
             "event_id": "evt_block_001",
             "event_type": "action_blocked",
             "key_id": record.key_id,
@@ -168,9 +178,10 @@ def test_event_requires_matching_owner_key_for_usage_event(client: TestClient) -
     wallet_registry.credit_units("owner_evt_003", 100, metadata={"seeded": True})
     record = _make_paid_key(owner_key="owner_evt_003")
 
-    response = client.post(
-        "/install-key-events/ingest",
-        json={
+    response = _post_event(
+        client,
+        record,
+        {
             "event_id": "evt_usage_mismatch_001",
             "event_type": "usage_units_debited",
             "key_id": record.key_id,
@@ -182,7 +193,7 @@ def test_event_requires_matching_owner_key_for_usage_event(client: TestClient) -
     )
 
     assert response.status_code == 403, response.text
-    assert "does not belong" in response.json()["detail"]
+    assert "does not match the authenticated install key owner" in response.json()["detail"]
 
 
 def test_canonical_usage_and_reporting_events_bind_to_install_key_owner(client: TestClient) -> None:
@@ -191,9 +202,10 @@ def test_canonical_usage_and_reporting_events_bind_to_install_key_owner(client: 
     wallet_registry.credit_units(owner_key, 100, metadata={"seeded": True})
     record = _make_paid_key(owner_key=owner_key)
 
-    usage_response = client.post(
-        "/install-key-events/ingest",
-        json={
+    usage_response = _post_event(
+        client,
+        record,
+        {
             "event_id": "evt_usage_canonical_001",
             "event_type": "install_key_usage_recorded",
             "key_id": record.key_id,
@@ -205,13 +217,10 @@ def test_canonical_usage_and_reporting_events_bind_to_install_key_owner(client: 
         },
     )
     assert usage_response.status_code == 200, usage_response.text
-    updated_record = get_install_key_registry().get_key_by_id(record.key_id)
-    assert updated_record is not None
-    assert updated_record.units_consumed == 4
-
-    report_response = client.post(
-        "/install-key-events/ingest",
-        json={
+    report_response = _post_event(
+        client,
+        record,
+        {
             "event_id": "evt_report_canonical_001",
             "event_type": "install_key_reported",
             "key_id": record.key_id,
@@ -226,10 +235,12 @@ def test_canonical_usage_and_reporting_events_bind_to_install_key_owner(client: 
     assert wallet is not None
     assert wallet.metadata["dashboard_sync"]["install_key_reported"]["key_id"] == record.key_id
     assert wallet.install_key_usage[record.key_id].metadata["last_event_type"] == "install_key_reported"
+    assert wallet.install_key_usage[record.key_id].total_consumed_units == 4
 
-    generic_response = client.post(
-        "/install-key-events/ingest",
-        json={
+    generic_response = _post_event(
+        client,
+        record,
+        {
             "event_id": "evt_generic_owner_rejected_001",
             "event_type": "install_key_usage_recorded",
             "key_id": record.key_id,
@@ -240,13 +251,15 @@ def test_canonical_usage_and_reporting_events_bind_to_install_key_owner(client: 
         },
     )
     assert generic_response.status_code == 403, generic_response.text
-    assert "generic platform auth credential" in generic_response.json()["detail"]
+    assert "does not match the authenticated install key owner" in generic_response.json()["detail"]
 
 
-def test_missing_key_id_for_blocked_event_is_rejected(client: TestClient) -> None:
-    response = client.post(
-        "/install-key-events/ingest",
-        json={
+def test_missing_body_key_id_uses_authenticated_install_key(client: TestClient) -> None:
+    record = _make_paid_key(owner_key="owner_evt_004")
+    response = _post_event(
+        client,
+        record,
+        {
             "event_id": "evt_missing_key_001",
             "event_type": "prompt_injection_detected",
             "owner_key": "owner_evt_004",
@@ -255,14 +268,16 @@ def test_missing_key_id_for_blocked_event_is_rejected(client: TestClient) -> Non
         },
     )
 
-    assert response.status_code == 422, response.text
-    assert "requires key_id" in response.json()["detail"]
+    assert response.status_code == 200, response.text
+    assert response.json()["key_id"] == record.key_id
 
 
 def test_generation_event_is_rejected_for_telemetry_only_route(client: TestClient) -> None:
-    response = client.post(
-        "/install-key-events/ingest",
-        json={
+    record = _make_paid_key(owner_key="owner_evt_004")
+    response = _post_event(
+        client,
+        record,
+        {
             "event_id": "evt_generation_rejected_001",
             "event_type": "install_key_issued",
             "owner_key": "owner_evt_004",
@@ -294,8 +309,8 @@ def test_duplicate_event_id_is_idempotent(client: TestClient) -> None:
         "metadata": {"source": "guard"},
     }
 
-    first = client.post("/install-key-events/ingest", json=payload)
-    second = client.post("/install-key-events/ingest", json=payload)
+    first = _post_event(client, record, payload)
+    second = _post_event(client, record, payload)
 
     assert first.status_code == 200, first.text
     assert second.status_code == 200, second.text
@@ -313,9 +328,10 @@ def test_install_key_activation_event_syncs_dashboard_state(client: TestClient) 
     wallet_registry.credit_units(owner_key, 75, metadata={"seeded": True})
     record = _make_paid_key(owner_key=owner_key)
 
-    response = client.post(
-        "/install-key-events/ingest",
-        json={
+    response = _post_event(
+        client,
+        record,
+        {
             "event_id": "evt_activate_001",
             "event_type": "install_key_activated",
             "key_id": record.key_id,
@@ -344,9 +360,10 @@ def test_revoked_event_deactivates_key(client: TestClient) -> None:
     wallet_registry.credit_units(owner_key, 75, metadata={"seeded": True})
     record = _make_paid_key(owner_key=owner_key)
 
-    response = client.post(
-        "/install-key-events/ingest",
-        json={
+    response = _post_event(
+        client,
+        record,
+        {
             "event_id": "evt_revoke_001",
             "event_type": "install_key_revoked",
             "key_id": record.key_id,

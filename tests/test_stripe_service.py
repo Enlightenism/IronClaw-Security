@@ -1045,6 +1045,7 @@ class TestWebhookEventDispatch:
         obj = {
             "id": "cs_webhook_1",
             "mode": "payment",
+            "payment_status": "paid",
             "customer": _TEST_CUSTOMER_ID,
             "metadata": {"org_id": _TEST_ORG, "unit_credits": str(_PKG_STARTER_UNITS)},
         }
@@ -1290,6 +1291,7 @@ class TestWebhookEventDispatch:
         obj = {
             "id": "cs_idem",
             "mode": "payment",
+            "payment_status": "paid",
             "customer": _TEST_CUSTOMER_ID,
             "metadata": {"org_id": _TEST_ORG, "unit_credits": str(_PKG_STARTER_UNITS)},
         }
@@ -1363,20 +1365,20 @@ class TestServiceReset:
     # --- reset_processed_events ---
 
     def test_reset_processed_events_clears_event_set(self, svc: StripeService) -> None:
-        """After processing an event, reset_processed_events() must allow re-dispatch."""
+        """Re-dispatch after reset must not duplicate a ledger credit."""
         obj = {
             "id": "cs_re_process",
             "mode": "payment",
+            "payment_status": "paid",
             "customer": _TEST_CUSTOMER_ID,
             "metadata": {"org_id": _TEST_ORG, "unit_credits": str(_PKG_STARTER_UNITS)},
         }
         event = {"id": "evt_to_clear", "type": "checkout.session.completed", "data": {"object": obj}}
         svc.handle_webhook_event(event)
-        # Balance = PKG_STARTER_UNITS now
         svc.reset_processed_events()
-        # After clearing, re-dispatch same event must be re-processed
-        svc.handle_webhook_event(event)
-        assert svc.get_unit_balance(_TEST_ORG).balance == _PKG_STARTER_UNITS * 2
+        result = svc.handle_webhook_event(event)
+        assert result["action"] == "processed"
+        assert svc.get_unit_balance(_TEST_ORG).balance == _PKG_STARTER_UNITS
 
     def test_reset_processed_events_is_idempotent(self, svc: StripeService) -> None:
         """Calling reset_processed_events() on an already-empty set must not raise."""
@@ -1928,5 +1930,5 @@ class TestStripeWebhookEventType:
             assert isinstance(member.value, str)
 
     def test_all_event_types_count(self) -> None:
-        # 13 enum members — assert completeness
-        assert len(list(StripeWebhookEventType)) == 13
+        # 14 enum members — assert completeness
+        assert len(list(StripeWebhookEventType)) == 14

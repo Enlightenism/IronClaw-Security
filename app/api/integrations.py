@@ -6,17 +6,32 @@ import json
 import os
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
 from app.api.routes.integrations import (
     _CANONICAL_PLATFORM_ORDER,
 )
 from app.api.routes.integrations import (
+    InstallKeyClaimRedeemRequest as CanonicalInstallKeyClaimRedeemRequest,
+)
+from app.api.routes.integrations import (
+    create_integration_install_claim as _create_canonical_install_claim,
+)
+from app.api.routes.integrations import (
     get_integrations_token as _get_canonical_integrations_token,
 )
+from app.api.routes.integrations import (
+    redeem_install_key_claim as _redeem_canonical_install_key_claim,
+)
 from app.core.auth import get_auth_context
-from app.services.integration_installer import get_integration_installer
+from app.routes.integrations.installer import (
+    IntegrationInstallRequest,
+    IntegrationInstallResponse,
+)
+from app.routes.integrations.installer import (
+    install_integration as _install_canonical_integration,
+)
 from app.services.integration_registry import get_integration_registry
 from app.services.integration_verifier import get_integration_verifier
 
@@ -81,28 +96,6 @@ class IntegrationVerificationResponse(BaseModel):
     strict: bool
     checks: list[IntegrationVerificationCheckResponse]
     missing_capabilities: list[str]
-    summary: str
-
-
-class IntegrationInstallStepResponse(BaseModel):
-    step_id: str
-    label: str
-    completed: bool
-    detail: str
-
-
-class IntegrationInstallRequest(BaseModel):
-    requested_by: str | None = Field(default=None, min_length=1)
-
-
-class IntegrationInstallResponse(BaseModel):
-    integration_id: str
-    platform: str
-    status: str
-    installed: bool
-    installed_at: str | None = None
-    requested_by: str
-    steps: list[IntegrationInstallStepResponse]
     summary: str
 
 
@@ -494,6 +487,23 @@ async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> Integ
     )
 
 
+@router.post("/installers/{integration_id}/claim", status_code=status.HTTP_201_CREATED)
+def create_integration_install_claim(
+    integration_id: str,
+    response: Response,
+    auth: Any = Depends(get_auth_context),
+) -> dict[str, Any]:
+    return _create_canonical_install_claim(integration_id, response, auth)
+
+
+@router.post("/install-claims/redeem")
+def redeem_install_key_claim(
+    payload: CanonicalInstallKeyClaimRedeemRequest,
+    response: Response,
+) -> dict[str, str]:
+    return _redeem_canonical_install_key_claim(payload, response)
+
+
 # ---------------------------------------------------------------------------
 # Debug / token introspection endpoint
 # ---------------------------------------------------------------------------
@@ -735,37 +745,13 @@ def verify_integration_route(
 )
 def install_integration_route(
     integration_id: str,
-    payload: IntegrationInstallRequest,
+    payload: IntegrationInstallRequest | None = None,
+    auth: Any = Depends(get_auth_context),
 ) -> IntegrationInstallResponse:
-    record = _find_record(integration_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="integration not found")
-
-    installer = get_integration_installer()
-    result = installer.install_integration(
-        record.integration_id,
-        requested_by=payload.requested_by or "system",
-    )
-    if result is None:
-        raise HTTPException(status_code=404, detail="integration not found")
-
-    return IntegrationInstallResponse(
-        integration_id=result.integration_id,
-        platform=_record_slug(record),
-        status=result.status,
-        installed=result.installed,
-        installed_at=result.installed_at,
-        requested_by=result.requested_by,
-        steps=[
-            IntegrationInstallStepResponse(
-                step_id=step.step_id,
-                label=step.label,
-                completed=step.completed,
-                detail=step.detail,
-            )
-            for step in result.steps
-        ],
-        summary=result.summary,
+    return _install_canonical_integration(
+        integration_id=integration_id,
+        request=payload,
+        auth=auth,
     )
 
 

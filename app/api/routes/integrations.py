@@ -2,82 +2,46 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from pydantic import BaseModel, Field
 
 from app.core.auth import get_auth_context
-from app.core.install_key_formats import InstallKeyFormatRegistry
+from app.core.billing import resolve_authenticated_billing_owner
+from app.core.install_key_formats import RUNTIME_INSTALL_KEY_PROGRAMS, InstallKeyFormatRegistry
 from app.core.install_keys import get_install_key_registry
+from app.services.install_key_handoff import (
+    InstallKeyHandoffError,
+    InstallKeySecretUnavailableError,
+    InvalidInstallKeyClaimError,
+    get_install_key_handoff_service,
+)
 
 router = APIRouter(tags=["integration-routes"])
 
 _PAID_PAYMENT_STATUSES = {"paid", "success", "succeeded", "complete", "completed", "active", "authorized"}
 _ACTIVE_ENTITLEMENT_STATUSES = {"active", "paid", "enabled", "granted"}
-_CANONICAL_PLATFORM_ORDER: tuple[str, ...] = (
-    "claude-code",
-    "openclaw",
-    "cursor",
-    "goose",
-    "gemini-cli",
-    "copilot",
-    "hermes",
-)
-
-_RUNTIME_PROGRAMS: frozenset[str] = frozenset(InstallKeyFormatRegistry.list_programs())
-
-
-def _runtime_command_template(program: str) -> str:
-    normalized = InstallKeyFormatRegistry.normalize_program(program)
-    if normalized == "hermes":
-        return "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}"
-    platform_slug = (normalized or str(program)).replace("_", "-")
-    return f"gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform_slug} --scope user --key {{key}}"
-
-
-_SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {
-    key: {
-        "program": program,
-        "platform": key,
-        "slug": key,
+_RUNTIME_PROGRAMS: frozenset[str] = frozenset(RUNTIME_INSTALL_KEY_PROGRAMS)
+_SUPPORTED_PLATFORM_INSTALLS: dict[str, dict[str, Any]] = {}
+for _program in RUNTIME_INSTALL_KEY_PROGRAMS:
+    _spec = InstallKeyFormatRegistry.get_spec(_program)
+    _SUPPORTED_PLATFORM_INSTALLS[_spec.canonical_slug] = {
+        "program": _spec.program,
+        "platform": _spec.canonical_slug,
+        "slug": _spec.canonical_slug,
         "shared_package": False,
         "shared_install_key_family": False,
-        "command_template": _runtime_command_template(program),
+        "command_template": _spec.command_template,
     }
-    for program, key in (
-        ("claude_code", "claude-code"),
-        ("openclaw", "openclaw"),
-        ("cursor", "cursor"),
-        ("goose", "goose"),
-        ("gemini_cli", "gemini-cli"),
-        ("copilot", "copilot"),
-        ("hermes", "hermes"),
-    )
-}
+
+_CANONICAL_PLATFORM_ORDER: tuple[str, ...] = tuple(_SUPPORTED_PLATFORM_INSTALLS)
+
+
+class InstallKeyClaimRedeemRequest(BaseModel):
+    claim_token: str = Field(min_length=10, max_length=256, repr=False)
 
 
 def _resolve_install_owner(auth: Any) -> str | None:
-    if auth is None:
-        return None
-
-    org_id = str(getattr(auth, "org_id", "") or "").strip()
-    if org_id:
-        owner_key = f"ic_org_{org_id.lower()}"
-        if not owner_key.startswith("ic_"):
-            return None
-        return owner_key
-
-    principal_id = str(getattr(auth, "principal_id", "") or "").strip()
-    if principal_id:
-        if principal_id.startswith("ic_"):
-            return None
-        return principal_id.lower()
-
-    buyer_email = str(getattr(auth, "email", "") or "").strip()
-    if buyer_email:
-        if buyer_email.startswith("ic_"):
-            return None
-        return buyer_email.lower()
-
-    return None
+    return resolve_authenticated_billing_owner(auth)
 
 
 def _is_valid_install_key_record(record: Any, *, owner_key: str, program: str) -> bool:
@@ -110,6 +74,9 @@ def _is_valid_install_key_record(record: Any, *, owner_key: str, program: str) -
     if not bool(getattr(record, "issued_after_payment", False)):
         return False
 
+    if not str(getattr(record, "key_id", "") or "").strip():
+        return False
+
     masked_key = str(getattr(record, "masked_key", "") or "").strip()
     if not masked_key:
         return False
@@ -119,28 +86,34 @@ def _is_valid_install_key_record(record: Any, *, owner_key: str, program: str) -
     return True
 
 
-def _select_paid_install_key(owner_key: str | None, program: str) -> str:
-    if not owner_key:
-        return ""
-
-    normalized_program = InstallKeyFormatRegistry.normalize_program(program)
-    if normalized_program is None or normalized_program not in _RUNTIME_PROGRAMS:
-        return ""
-
+def _select_paid_install_key_records(owner_key: str) -> dict[str, Any]:
     registry = get_install_key_registry()
     try:
         records = registry.get_keys_for_owner(owner_key)
-    except Exception:
-        return ""
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Install-key records are temporarily unavailable.",
+        ) from exc
+    if not isinstance(records, (list, tuple)):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Install-key records returned an invalid response.",
+        )
 
+    selected: dict[str, Any] = {}
     for record in records:
-        if not _is_valid_install_key_record(record, owner_key=owner_key, program=program):
+        canonical_program = InstallKeyFormatRegistry.normalize_program(str(getattr(record, "program", "") or ""))
+        if canonical_program is None or canonical_program not in _RUNTIME_PROGRAMS:
             continue
-        value = str(getattr(record, "masked_key", "") or "").strip()
-        if value and value.startswith("ic_install_"):
-            return value
-
-    return ""
+        if canonical_program in selected or not _is_valid_install_key_record(
+            record,
+            owner_key=owner_key,
+            program=canonical_program,
+        ):
+            continue
+        selected[canonical_program] = record
+    return selected
 
 
 @router.get("/integrations/installers")
@@ -266,12 +239,7 @@ def get_integration_observability(integration_id: str) -> dict[str, object]:
 @router.get("/integrations/token")
 async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[str, Any]:
     owner_key = _resolve_install_owner(auth)
-    install_keys: dict[str, str] = {}
-    if owner_key:
-        for program in ("claude_code", "openclaw", "cursor", "goose", "gemini_cli", "copilot", "hermes"):
-            masked_key = _select_paid_install_key(owner_key, program)
-            if masked_key:
-                install_keys[program] = masked_key
+    install_keys = _select_paid_install_key_records(owner_key) if owner_key else {}
 
     payload: dict[str, Any] = {
         "status": "locked",
@@ -291,30 +259,96 @@ async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[
 
     for platform_slug, metadata in _SUPPORTED_PLATFORM_INSTALLS.items():
         program = metadata["program"]
-        key = install_keys.get(program, "")
-        command = metadata["command_template"].format(key=key) if key else ""
-        payload["command_metadata"][platform_slug] = command
+        record = install_keys.get(program)
         payload["install_metadata"][platform_slug] = {
             "platform": metadata["platform"],
             "slug": metadata["slug"],
             "program": program,
-            "install_key": key,
-            "command": command,
+            "key_id": str(getattr(record, "key_id", "") or ""),
+            "available": record is not None,
             "shared_package": metadata.get("shared_package", False),
             "shared_install_key_family": metadata.get("shared_install_key_family", False),
             "package_type": metadata.get("package_type", "runtime-install"),
         }
-        if key:
+        payload["command_metadata"][platform_slug] = ""
+        if record is not None:
             payload["status"] = "ok"
-            payload[f"{platform_slug.replace('-', '_')}_command"] = command
-    if payload["status"] == "ok":
-        payload["claude_code_command"] = payload["command_metadata"].get("claude-code", "")
-        payload["openclaw_command"] = payload["command_metadata"].get("openclaw", "")
-        payload["cursor_command"] = payload["command_metadata"].get("cursor", "")
-        payload["goose_command"] = payload["command_metadata"].get("goose", "")
-        payload["gemini_cli_command"] = payload["command_metadata"].get("gemini-cli", "")
-        payload["copilot_command"] = payload["command_metadata"].get("copilot", "")
-        payload["hermes_command"] = payload["command_metadata"].get("hermes", "")
-        payload["security_guardian_command"] = ""
 
     return payload
+
+
+@router.post("/integrations/installers/{integration_id}/claim", status_code=status.HTTP_201_CREATED)
+def create_integration_install_claim(
+    integration_id: str,
+    response: Response,
+    auth: Any = Depends(get_auth_context),
+) -> dict[str, Any]:
+    if auth is None or getattr(auth, "authenticated", False) is not True:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication is required.")
+
+    owner_key = _resolve_install_owner(auth)
+    if not owner_key:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="A verified customer identity is required.")
+
+    try:
+        spec = InstallKeyFormatRegistry.get_spec(integration_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unsupported integration runtime.") from exc
+    if spec.program not in _RUNTIME_PROGRAMS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unsupported integration runtime.")
+
+    record = _select_paid_install_key_records(owner_key).get(spec.program)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No active paid install key is available.")
+
+    try:
+        claim = get_install_key_handoff_service().issue_claim(
+            key_id=record.key_id,
+            owner_key=owner_key,
+            program=spec.program,
+        )
+    except InstallKeySecretUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except InstallKeyHandoffError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Secure install handoff is temporarily unavailable.",
+        ) from exc
+
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["Pragma"] = "no-cache"
+    return {
+        "integration_id": spec.canonical_slug,
+        "program": spec.program,
+        "key_id": record.key_id,
+        "claim_token": claim.claim_token,
+        "expires_at": claim.expires_at.isoformat(),
+        "command": spec.format_command(claim.claim_token),
+    }
+
+
+@router.post("/integrations/install-claims/redeem")
+def redeem_install_key_claim(
+    payload: InstallKeyClaimRedeemRequest,
+    response: Response,
+) -> dict[str, str]:
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["Pragma"] = "no-cache"
+    try:
+        redemption = get_install_key_handoff_service().redeem_claim(payload.claim_token)
+    except InvalidInstallKeyClaimError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Install claim is invalid, expired, or already redeemed.",
+        ) from exc
+    except InstallKeyHandoffError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Secure install handoff is temporarily unavailable.",
+        ) from exc
+
+    return {
+        "key_id": redemption.key_id,
+        "program": redemption.program,
+        "install_key": redemption.install_key,
+    }

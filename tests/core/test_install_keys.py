@@ -698,6 +698,29 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
         self._generate_paid_key(reg, "openclaw")
         self._stub.table.assert_called()
 
+    def test_secure_record_persistor_replaces_direct_record_insert(self):
+        reg = self._registry()
+        secure_record_persistor = MagicMock()
+        records_table = MagicMock()
+        records_table.select.return_value.execute.return_value.data = []
+        history_table = self._stub.table.return_value
+        self._stub.table.side_effect = lambda table_name: records_table if table_name == "install_key_records" else history_table
+
+        record = reg.generate_for_paid_customer(
+            owner_key=_OWNER,
+            subscription_id=_SUB_ID,
+            program="openclaw",
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+            secure_record_persistor=secure_record_persistor,
+        )
+
+        secure_record_persistor.assert_called_once_with(record)
+        records_table.insert.assert_not_called()
+
     def test_label_stored_on_record(self):
         reg = self._registry()
         record = reg.generate_for_paid_customer(

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Literal
+from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.audit import createauditevent
@@ -12,6 +13,7 @@ from app.config import (
     RISK_THRESHOLD_BLOCK_MIN,
     RISK_THRESHOLD_QUARANTINE_MIN,
 )
+from app.core.auth import AuthContext, InstallKeyAuthContext, get_runtime_auth_context
 from app.services.action_guard import ActionGuardDecision, analyze_action, normalize_action_type
 from app.services.actionexecuteservice import (
     ActionExecutionRequest,
@@ -61,6 +63,7 @@ class ActionExecuteRequestModel(BaseModel):
         ge=1,
         description="Prepaid usage units required to execute the action.",
     )
+    eventid: str | None = Field(default=None, min_length=1, max_length=128)
     riskscore: int = Field(
         default=0,
         ge=0,
@@ -96,6 +99,14 @@ def _map_audit_event_to_status(
     if eventtype == "execution_quarantined":
         return "quarantined"
     return "denied"
+
+
+def _mark_usage_denial(audit: dict[str, Any], reason: str) -> dict[str, Any]:
+    denied_audit = dict(audit)
+    denied_audit["eventtype"] = "execution_denied"
+    denied_audit["severity"] = "high"
+    denied_audit["summary"] = reason
+    return denied_audit
 
 
 def _empty_usage(reason: str) -> dict[str, Any]:
@@ -258,10 +269,17 @@ def _detection_to_promptinjection(detection: ActionGuardDecision | None) -> dict
 
 
 @router.post("/execute", response_model=ActionExecuteResponse)
-def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse:
+def executeaction(
+    request: ActionExecuteRequestModel,
+    auth_context: AuthContext | InstallKeyAuthContext = Depends(get_runtime_auth_context),
+) -> ActionExecuteResponse:
     normalized_target = request.target.strip()
     if not normalized_target:
         raise HTTPException(status_code=400, detail="target must not be empty")
+
+    install_key_id = auth_context.key_id if isinstance(auth_context, InstallKeyAuthContext) else None
+    install_program = auth_context.program if isinstance(auth_context, InstallKeyAuthContext) else None
+    owner_key = auth_context.owner_key if isinstance(auth_context, InstallKeyAuthContext) else auth_context.metadata.get("owner_key") or request.ownerkey
 
     # 1. Live detection screen — metadata forwarded so documenttext/tooloutput reach scanner
     detection = _run_detection(request)
@@ -272,8 +290,11 @@ def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse:
 
     mergedmetadata = dict(request.metadata)
     mergedmetadata["promptinjection"] = promptinjection
-    mergedmetadata["ownerkey"] = request.ownerkey
+    mergedmetadata["ownerkey"] = owner_key
     mergedmetadata["requestedunits"] = request.requestedunits
+    if install_key_id is not None:
+        mergedmetadata["install_key_id"] = install_key_id
+        mergedmetadata["program"] = install_program
 
     # 2. Security audit decides status
     audit = createauditevent(
@@ -301,7 +322,7 @@ def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse:
             status=status,
             actiontype=request.actiontype,
             target=normalized_target,
-            ownerkey=request.ownerkey,
+            ownerkey=owner_key,
             requestedunits=request.requestedunits,
             finalriskscore=finalriskscore,
             promptinjection=promptinjection,
@@ -311,13 +332,16 @@ def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse:
             message=message,
         )
 
-    # 3. Security says allowed; attempt usage metering (non-fatal)
+    # 3. Security says allowed; usage metering is required before execution.
     service = get_action_execute_service()
 
     try:
+        event_id = None
+        if install_key_id is not None:
+            event_id = f"{install_key_id}:{request.eventid or uuid4().hex}"
         receipt = service.execute(
             ActionExecutionRequest(
-                owner_key=request.ownerkey,
+                owner_key=owner_key,
                 action_name=f"{request.actiontype}:{normalized_target}",
                 requested_units=request.requestedunits,
                 payload={
@@ -325,29 +349,51 @@ def executeaction(request: ActionExecuteRequestModel) -> ActionExecuteResponse:
                     "filepath": request.filepath,
                 },
                 metadata=mergedmetadata,
+                install_key_id=install_key_id,
+                program=install_program,
+                event_id=event_id,
             ),
         )
         usage = _usage_to_dict(receipt)
     except Exception:  # noqa: BLE001
+        logger.exception("actionexecute: usage metering failed; blocking action")
         return ActionExecuteResponse(
-            status="allowed",
+            status="denied",
             actiontype=request.actiontype,
             target=normalized_target,
-            ownerkey=request.ownerkey,
+            ownerkey=owner_key,
             requestedunits=request.requestedunits,
             finalriskscore=finalriskscore,
             promptinjection=promptinjection,
-            audit=audit,
-            executionallowed=True,
+            audit=_mark_usage_denial(audit, "Action denied because usage could not be recorded."),
+            executionallowed=False,
             usage=_empty_usage(reason="usage_metering_unavailable"),
-            message="Action approved for execution.",
+            message="Action denied because usage could not be recorded.",
+        )
+
+    if not receipt.executed:
+        return ActionExecuteResponse(
+            status="denied",
+            actiontype=request.actiontype,
+            target=normalized_target,
+            ownerkey=owner_key,
+            requestedunits=request.requestedunits,
+            finalriskscore=finalriskscore,
+            promptinjection=promptinjection,
+            audit=_mark_usage_denial(
+                audit,
+                "Action denied because the required protection units could not be consumed.",
+            ),
+            executionallowed=False,
+            usage=usage,
+            message="Action denied because the required protection units could not be consumed.",
         )
 
     return ActionExecuteResponse(
         status="allowed",
         actiontype=request.actiontype,
         target=normalized_target,
-        ownerkey=request.ownerkey,
+        ownerkey=owner_key,
         requestedunits=request.requestedunits,
         finalriskscore=finalriskscore,
         promptinjection=promptinjection,

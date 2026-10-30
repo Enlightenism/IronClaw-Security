@@ -592,6 +592,16 @@ async def stripe_webhook(
             detail={"error": "webhook_dispatch_error", "detail": str(exc)},
         ) from exc
 
+    if result.get("action") == "error":
+        logger.error(
+            "stripe.webhook.handler_failed event_type=%s",
+            verify_result.event_type,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "webhook_dispatch_error"},
+        )
+
     return JSONResponse(status_code=status.HTTP_200_OK, content=result)
 
 

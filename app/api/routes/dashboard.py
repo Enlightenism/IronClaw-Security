@@ -6,7 +6,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.core.billing import BillingRegistry, BillingSubscription, get_billing_registry
+from app.core.auth import AuthContext
+from app.core.billing import (
+    BillingRegistry,
+    BillingSubscription,
+    get_billing_registry,
+    resolve_authenticated_billing_owner,
+)
 from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import InstallKeyNotFoundError, InstallKeyRegistry, get_install_key_registry
 from app.core.settings import Settings, get_settings
@@ -14,6 +20,7 @@ from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
 from app.dependencies.customer_auth import require_customer_read, require_customer_write
 from app.services.audit_store import get_audit_store
 from app.services.incident_store import get_incident_store
+from app.services.install_key_dashboard_sync import InstallKeyDashboardSyncService
 from app.services.quarantine_store import get_quarantine_store
 
 router = APIRouter(
@@ -191,48 +198,58 @@ def _coerce_string(value: Any, *, default: str = "") -> str:
     return str(value)
 
 
-def _looks_like_generic_platform_auth_value(value: Any) -> bool:
-    if value is None:
-        return False
-    normalized = str(value).strip().lower()
-    if not normalized:
-        return False
-    if normalized.startswith("ic_org_") or normalized.startswith("ic_install_"):
-        return False
-    if normalized.startswith("ic_"):
-        return True
+def _resolve_dashboard_owner(auth_ctx: AuthContext, requested_owner_key: str | None = None) -> str:
+    resolved_owner = resolve_authenticated_billing_owner(auth_ctx)
+    if not resolved_owner:
+        raise HTTPException(status_code=403, detail="Dashboard owner could not be resolved from authenticated identity.")
+    if requested_owner_key is not None and requested_owner_key.strip().lower() != resolved_owner:
+        raise HTTPException(status_code=403, detail="Requested dashboard owner does not match authenticated identity.")
+    return resolved_owner
 
-    generic_prefixes = (
-        "sk_",
-        "ghp_",
-        "gho_",
-        "github_pat_",
-        "token_",
-        "secret_",
-        "api_",
-        "api-key",
-        "api_key",
-        "platform-api-key",
-        "platform_api_key",
-        "system-api-key",
-        "system_api_key",
-        "internal-platform-api-key",
-        "internal_platform_api_key",
-        "bearer ",
-        "x-api-key",
+
+def _record_matches_dashboard_identity(
+    record: Any,
+    *,
+    owner_key: str,
+    principal_id: str | None,
+    organization_id: str | None,
+) -> bool:
+    metadata = record.get("metadata") if isinstance(record, dict) else getattr(record, "metadata", None)
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    owner_candidates = (
+        record.get("owner_key") if isinstance(record, dict) else getattr(record, "owner_key", None),
+        metadata.get("owner_key"),
+        metadata.get("billing_owner_key"),
     )
-    if normalized.startswith(generic_prefixes):
+    if any(_coerce_string(value).strip().lower() == owner_key for value in owner_candidates if value is not None):
         return True
 
-    return ("platform" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("system" in normalized and ("key" in normalized or "token" in normalized or "secret" in normalized)) or ("api" in normalized and "key" in normalized)
+    if principal_id:
+        principal_candidates = (
+            record.get("principal_id") if isinstance(record, dict) else getattr(record, "principal_id", None),
+            record.get("actor_id") if isinstance(record, dict) else getattr(record, "actor_id", None),
+            metadata.get("principal_id"),
+            metadata.get("actor_id"),
+            metadata.get("user_id"),
+            metadata.get("subject_id"),
+        )
+        if any(_coerce_string(value).strip().lower() == principal_id.lower() for value in principal_candidates if value is not None):
+            return True
 
+    if organization_id:
+        organization_candidates = (
+            record.get("organization_id") if isinstance(record, dict) else getattr(record, "organization_id", None),
+            record.get("org_id") if isinstance(record, dict) else getattr(record, "org_id", None),
+            metadata.get("organization_id"),
+            metadata.get("org_id"),
+            metadata.get("tenant_id"),
+        )
+        if any(_coerce_string(value).strip().lower() == organization_id.lower() for value in organization_candidates if value is not None):
+            return True
 
-def _resolve_dashboard_owner(owner_key: str | None) -> str:
-    if owner_key is not None:
-        candidate = str(owner_key).strip()
-        if candidate and not _looks_like_generic_platform_auth_value(candidate):
-            return candidate.lower()
-    return "demo@ironclaw.local"
+    return False
 
 
 def _record_is_paid_entitled(r: Any) -> bool:
@@ -268,14 +285,9 @@ def _record_is_paid_entitled(r: Any) -> bool:
 
 
 def _build_install_key_views(
-    registry: InstallKeyRegistry,
+    records: list[Any],
     owner_key: str,
 ) -> list[DashboardInstallKeyView]:
-    try:
-        records = registry.get_keys_for_owner(owner_key)
-    except Exception:
-        records = []
-
     normalized_owner = str(owner_key).strip().lower()
     supported_programs = tuple(InstallKeyFormatRegistry.list_programs())
     canonical_prefixes = tuple(spec.prefix for spec in InstallKeyFormatRegistry.list_specs())
@@ -422,40 +434,32 @@ def _build_install_key_views(
 
 
 def _build_wallet_kpi(
-    wallet_registry: UnitWalletRegistry,
-    owner_key: str,
+    wallet: Any | None,
 ) -> DashboardWalletKPI | None:
-    try:
-        wallet = wallet_registry.get_wallet(owner_key)
-        if wallet is None:
-            return None
-        return DashboardWalletKPI(
-            unit_balance=wallet.balance_units,
-            units_consumed=wallet.total_consumed_units,
-            total_purchased_units=wallet.total_purchased_units,
-            updated_at=_iso(wallet.updated_at),
-        )
-    except Exception:
+    if wallet is None:
         return None
+    return DashboardWalletKPI(
+        unit_balance=wallet.balance_units,
+        units_consumed=wallet.total_consumed_units,
+        total_purchased_units=wallet.total_purchased_units,
+        updated_at=_iso(wallet.updated_at),
+    )
 
 
 def _build_billing_kpi(
     billing_registry: BillingRegistry,
     owner_key: str,
 ) -> DashboardBillingKPI | None:
-    try:
-        subscription: BillingSubscription | None = billing_registry.get_active_subscription_for_customer(owner_key)
-        if subscription is None:
-            return None
-        return DashboardBillingKPI(
-            plan=subscription.plan,
-            status=subscription.status,
-            units_consumed=subscription.units_consumed,
-            unit_limit=subscription.unit_limit,
-            remaining_units=subscription.remaining_units,
-        )
-    except Exception:
+    subscription: BillingSubscription | None = billing_registry.get_active_subscription_for_customer(owner_key)
+    if subscription is None:
         return None
+    return DashboardBillingKPI(
+        plan=subscription.plan,
+        status=subscription.status,
+        units_consumed=subscription.units_consumed,
+        unit_limit=subscription.unit_limit,
+        remaining_units=subscription.remaining_units,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -466,24 +470,54 @@ def _build_billing_kpi(
 @router.get(
     "/overview",
     response_model=DashboardResponse,
-    dependencies=[Depends(require_customer_read)],
 )
 def get_dashboard_overview(
     owner_key: str | None = Query(default=None),
+    auth_ctx: AuthContext = Depends(require_customer_read),
     settings: Settings = Depends(get_settings),
     wallet_registry: UnitWalletRegistry = Depends(get_unit_wallet_registry),
     billing_registry: BillingRegistry = Depends(get_billing_registry),
     install_key_registry: InstallKeyRegistry = Depends(get_install_key_registry),
 ) -> DashboardResponse:
     now = _utc_now_iso()
+    resolved_owner = _resolve_dashboard_owner(auth_ctx, owner_key)
+    principal_id = _coerce_string(getattr(auth_ctx, "principal_id", None), default="").strip() or None
+    organization_id = _coerce_string(getattr(auth_ctx, "org_id", None), default="").strip() or None
 
     incident_store = get_incident_store()
     quarantine_store = get_quarantine_store()
     audit_store = get_audit_store()
 
-    incidents = incident_store.list_incidents()
-    quarantine_items = quarantine_store.list_items()
-    audit_events = audit_store.list_events(limit=500)
+    incidents = [
+        incident
+        for incident in incident_store.list_incidents()
+        if _record_matches_dashboard_identity(
+            incident,
+            owner_key=resolved_owner,
+            principal_id=principal_id,
+            organization_id=organization_id,
+        )
+    ]
+    quarantine_items = [
+        item
+        for item in quarantine_store.list_items()
+        if _record_matches_dashboard_identity(
+            item,
+            owner_key=resolved_owner,
+            principal_id=principal_id,
+            organization_id=organization_id,
+        )
+    ]
+    audit_events = [
+        event
+        for event in audit_store.list_events(limit=500)
+        if _record_matches_dashboard_identity(
+            event,
+            owner_key=resolved_owner,
+            principal_id=principal_id,
+            organization_id=organization_id,
+        )
+    ]
 
     open_incidents = [i for i in incidents if i.status in {"open", "triaged"}]
     blocked_events = [e for e in audit_events if (e.verdict or "").lower() in {"block", "quarantine"}]
@@ -505,37 +539,28 @@ def get_dashboard_overview(
         if (event.verdict or "").lower() in {"block", "quarantine"}:
             bucket["blocked_events_24h"] = int(bucket["blocked_events_24h"]) + 1
 
-    _DEMO_OWNER = "demo@ironclaw.local"
-    resolved_owner = _resolve_dashboard_owner(owner_key)
-    if owner_key is not None and _looks_like_generic_platform_auth_value(owner_key):
-        resolved_owner = _DEMO_OWNER
-
-    wallet_kpi = _build_wallet_kpi(wallet_registry, resolved_owner)
-
-    if wallet_kpi is None and resolved_owner == _DEMO_OWNER:
-        try:
-            wallet = wallet_registry.get_or_create_wallet(_DEMO_OWNER)
-            wallet_kpi = DashboardWalletKPI(
-                unit_balance=wallet.balance_units,
-                units_consumed=wallet.total_consumed_units,
-                total_purchased_units=wallet.total_purchased_units,
-                updated_at=_iso(wallet.updated_at),
-            )
-        except Exception:
-            wallet_kpi = None
-
+    wallet = wallet_registry.get_wallet(resolved_owner)
+    wallet_kpi = _build_wallet_kpi(wallet)
     billing_kpi = _build_billing_kpi(billing_registry, resolved_owner)
-    install_keys = _build_install_key_views(install_key_registry, resolved_owner)
+    install_key_records = install_key_registry.get_keys_for_owner(resolved_owner)
+    install_keys = _build_install_key_views(install_key_records, resolved_owner)
+    install_key_dashboard = InstallKeyDashboardSyncService().build_dashboard_summary(
+        owner_key=resolved_owner,
+        install_keys=install_key_records,
+        wallet_summary=wallet.as_summary() if wallet is not None else {},
+        audit_events=audit_events,
+    )
 
-    wallet_meta: dict[str, Any] = {}
+    wallet_meta: dict[str, Any] = {"owner_key": resolved_owner}
     if wallet_kpi is not None:
-        wallet_meta = {
-            "owner_key": resolved_owner,
-            "unit_balance": wallet_kpi.unit_balance,
-            "units_consumed": wallet_kpi.units_consumed,
-            "total_purchased_units": wallet_kpi.total_purchased_units,
-            "updated_at": wallet_kpi.updated_at,
-        }
+        wallet_meta.update(
+            {
+                "unit_balance": wallet_kpi.unit_balance,
+                "units_consumed": wallet_kpi.units_consumed,
+                "total_purchased_units": wallet_kpi.total_purchased_units,
+                "updated_at": wallet_kpi.updated_at,
+            }
+        )
 
     subscription_meta: dict[str, Any] = {}
     if billing_kpi is not None:
@@ -571,6 +596,13 @@ def get_dashboard_overview(
                 value=len(blocked_events),
                 delta=0,
                 metadata={"window": "active"},
+            ),
+            DashboardStatView(
+                key="blocked_runtime_attacks",
+                label="Blocked Runtime Attacks",
+                value=int(install_key_dashboard["blocked_activity_total"]),
+                delta=0,
+                metadata={"source": "install_key_usage"},
             ),
             DashboardStatView(
                 key="quarantined_items",
@@ -632,6 +664,7 @@ def get_dashboard_overview(
             ],
             "wallet": wallet_meta,
             "subscription": subscription_meta,
+            "install_key_dashboard": install_key_dashboard,
             "owner_key": resolved_owner,
         },
     )
@@ -640,15 +673,16 @@ def get_dashboard_overview(
 @router.get(
     "/units",
     response_model=DashboardUnitsResponse,
-    dependencies=[Depends(require_customer_read)],
 )
 def get_dashboard_units(
     owner_key: str = Query(...),
+    auth_ctx: AuthContext = Depends(require_customer_read),
     registry: InstallKeyRegistry = Depends(get_install_key_registry),
 ) -> DashboardUnitsResponse:
-    records = registry.get_keys_for_owner(owner_key)
+    resolved_owner = _resolve_dashboard_owner(auth_ctx, owner_key)
+    records = registry.get_keys_for_owner(resolved_owner)
     return DashboardUnitsResponse(
-        owner_key=owner_key,
+        owner_key=resolved_owner,
         total_keys=len(records),
         total_units_consumed=sum(r.units_consumed for r in records),
         keys=[
@@ -670,12 +704,18 @@ def get_dashboard_units(
 @router.post(
     "/units/record",
     response_model=RecordKeyUsageResponse,
-    dependencies=[Depends(require_customer_write)],
 )
 def record_key_usage(
     body: RecordKeyUsageRequest,
+    auth_ctx: AuthContext = Depends(require_customer_write),
     registry: InstallKeyRegistry = Depends(get_install_key_registry),
 ) -> RecordKeyUsageResponse:
+    resolved_owner = _resolve_dashboard_owner(auth_ctx)
+    record = registry.get_key_by_id(body.key_id)
+    record_owner = _coerce_string(getattr(record, "owner_key", None), default="").strip().lower() if record is not None else ""
+    if record is None or record_owner != resolved_owner:
+        raise HTTPException(status_code=404, detail="Install key not found.")
+
     try:
         updated = registry.record_key_usage(body.key_id, body.units)
     except InstallKeyNotFoundError as exc:

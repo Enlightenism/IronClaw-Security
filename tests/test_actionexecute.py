@@ -5,9 +5,18 @@ from fastapi.testclient import TestClient
 
 from app.api.actionexecute import router
 from app.config import RISK_THRESHOLD_BLOCK_MIN
+from app.core.auth import AuthContext, get_runtime_auth_context
 
 app = FastAPI()
 app.include_router(router)
+app.dependency_overrides[get_runtime_auth_context] = lambda: AuthContext(
+    api_key="test-system-key",
+    principal_type="user",
+    principal_id="test-user",
+    session_id=None,
+    org_id=None,
+    authenticated=True,
+)
 client = TestClient(app)
 
 

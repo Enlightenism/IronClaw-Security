@@ -137,6 +137,7 @@ class InstallKeyFormatRegistry:
                 "openclaw-cli",
                 "openclaw cli",
                 "ironclaw",
+                "claw",
             ),
             platform_aliases=(
                 "openclaw",
@@ -149,6 +150,7 @@ class InstallKeyFormatRegistry:
                 "openclaw-cli",
                 "openclaw cli",
                 "ironclaw",
+                "claw",
             ),
             command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
         ),

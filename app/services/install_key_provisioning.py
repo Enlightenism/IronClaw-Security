@@ -6,36 +6,27 @@ import logging
 from typing import Any, Literal
 
 from app.core.billing import get_billing_registry, resolve_billing_owner
-from app.core.install_key_formats import InstallKeyFormatRegistry
+from app.core.install_key_formats import (
+    CONNECTOR_INSTALL_KEY_PROGRAMS,
+    RUNTIME_INSTALL_KEY_PROGRAMS,
+    SUPPORTED_INSTALL_KEY_PROGRAMS,
+    InstallKeyFormatRegistry,
+    InstallKeyProgram,
+    RuntimeInstallKeyProgram,
+)
 from app.core.install_keys import InstallKeyRecord, get_install_key_registry
 from app.core.logging import get_logger
 from app.core.unit_wallet import get_unit_wallet_registry
 
 _logger: logging.Logger = get_logger("ironclaw.install_key_provisioning")
 
-RuntimeProgramCode = Literal[
-    "openclaw",
-    "claude_code",
-    "cursor",
-    "goose",
-    "gemini_cli",
-    "copilot",
-    "hermes",
-]
+RuntimeProgramCode = RuntimeInstallKeyProgram
 ConnectorProgramCode = Literal["security_guardian"]
-ProgramCode = RuntimeProgramCode | ConnectorProgramCode
+ProgramCode = InstallKeyProgram
 
-_SUPPORTED_RUNTIME_PROGRAMS: tuple[RuntimeProgramCode, ...] = (
-    "openclaw",
-    "claude_code",
-    "cursor",
-    "goose",
-    "gemini_cli",
-    "copilot",
-    "hermes",
-)
-_CONNECTOR_PROGRAMS: tuple[ConnectorProgramCode, ...] = ("security_guardian",)
-_VALID_PROGRAMS: tuple[ProgramCode, ...] = _SUPPORTED_RUNTIME_PROGRAMS + _CONNECTOR_PROGRAMS
+_SUPPORTED_RUNTIME_PROGRAMS = RUNTIME_INSTALL_KEY_PROGRAMS
+_CONNECTOR_PROGRAMS = CONNECTOR_INSTALL_KEY_PROGRAMS
+_VALID_PROGRAMS = SUPPORTED_INSTALL_KEY_PROGRAMS
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +38,7 @@ class InstallKeyIssued:
     """
 
     record: InstallKeyRecord
-    raw_key: str = ""
+    raw_key: str = field(default="", repr=False)
     issued_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     source: str = "purchase"
     wallet_owner: str = ""
@@ -69,10 +60,7 @@ class InstallKeyIssued:
         }
 
     def delivery_payload(self) -> dict[str, Any]:
-        payload = self.public_view()
-        if self.raw_key:
-            payload["raw_key"] = self.raw_key
-        return payload
+        return self.public_view()
 
 
 class InstallKeyProvisioningService:
@@ -93,10 +81,16 @@ class InstallKeyProvisioningService:
         install_key_registry: Any | None = None,
         wallet_registry: Any | None = None,
         billing_registry: Any | None = None,
+        handoff_service: Any | None = None,
     ) -> None:
         self._install_key_registry = install_key_registry or get_install_key_registry()
         self._wallet_registry = wallet_registry or get_unit_wallet_registry()
         self._billing_registry = billing_registry or get_billing_registry()
+        if handoff_service is None:
+            from app.services.install_key_handoff import get_install_key_handoff_service
+
+            handoff_service = get_install_key_handoff_service()
+        self._handoff_service = handoff_service
 
     @staticmethod
     def _looks_like_generic_platform_auth(value: str | Any) -> bool:
@@ -231,6 +225,7 @@ class InstallKeyProvisioningService:
         if not any(lookup_references):
             lookup_references = set()
 
+        reusable_record: InstallKeyRecord | None = None
         for record in self._install_key_registry.get_keys_for_owner(owner_key):
             if str(getattr(record, "program", "")).strip().lower() != program:
                 continue
@@ -245,9 +240,9 @@ class InstallKeyProvisioningService:
                 }
                 if record_references & lookup_references:
                     return record
-                continue
-            return record
-        return None
+            if reusable_record is None:
+                reusable_record = record
+        return reusable_record
 
     def provision_for_program(
         self,
@@ -294,6 +289,14 @@ class InstallKeyProvisioningService:
             purchase_reference=purchase_reference,
         )
         if existing is not None:
+            if existing.raw_key:
+                self._handoff_service.store_secret(
+                    key_id=existing.key_id,
+                    owner_key=normalized_owner,
+                    program=canonical_program,
+                    install_key=existing.raw_key,
+                )
+                existing.raw_key = ""
             _logger.info(
                 "install_key_reused",
                 extra={
@@ -375,11 +378,16 @@ class InstallKeyProvisioningService:
             checkout_session_id=effective_metadata.get("checkout_session_id"),
             label=label,
             metadata=effective_metadata,
+            secure_record_persistor=self._handoff_service.persist_new_record,
         )
+        raw_key = str(getattr(record, "raw_key", "") or "").strip()
+        if not raw_key:
+            raise RuntimeError("Newly provisioned install key has no recoverable secret for secure handoff.")
+        record.raw_key = ""
 
         issued = InstallKeyIssued(
             record=record,
-            raw_key=record.raw_key,
+            raw_key="",
             source=source,
             wallet_owner=normalized_owner,
             telemetry={

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -12,6 +13,7 @@ from app.api.integrations import router as api_integrations_router
 from app.api.routes.integrations import router as integrations_router
 from app.core.auth import get_auth_context
 from app.routes.integrations.installer import router as installer_router
+from app.services.install_key_handoff import InstallKeySecretUnavailableError
 
 
 @pytest.fixture
@@ -26,6 +28,12 @@ def client() -> Iterator[TestClient]:
 def installer_client() -> Iterator[TestClient]:
     app = FastAPI()
     app.include_router(installer_router)
+    app.dependency_overrides[get_auth_context] = lambda: SimpleNamespace(
+        authenticated=True,
+        metadata={"owner_key": "owner-456"},
+        org_id=None,
+        principal_type="user",
+    )
     with TestClient(app) as test_client:
         yield test_client
 
@@ -106,6 +114,56 @@ def test_installer_detail_endpoint_returns_requested_integration_id(
     assert payload.get("integration_id") == integration_id
 
 
+def test_compatibility_install_route_delegates_to_canonical_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.api.integrations as compatibility_api
+    from app.routes.integrations.installer import InstallationSummaryView
+
+    token = "ic_claim_single_use_0123456789"
+    auth_context = SimpleNamespace(
+        authenticated=True,
+        metadata={"owner_key": "owner-456"},
+        org_id=None,
+        principal_type="user",
+    )
+    expected_response = compatibility_api.IntegrationInstallResponse(
+        status="ok",
+        service="IronClaw-Security",
+        timestamp="2030-01-01T00:00:00Z",
+        integration_id="openclaw",
+        installation=InstallationSummaryView(
+            state="installed",
+            installed=True,
+            steps_total=0,
+            steps_completed=0,
+            steps_failed=0,
+        ),
+    )
+    canonical_handler = MagicMock(return_value=expected_response)
+    monkeypatch.setattr(
+        compatibility_api,
+        "_install_canonical_integration",
+        canonical_handler,
+    )
+    app = FastAPI()
+    app.include_router(api_integrations_router)
+    app.dependency_overrides[get_auth_context] = lambda: auth_context
+
+    with TestClient(app) as compatibility_client:
+        response = compatibility_client.post(
+            "/integrations/openclaw/install",
+            json={"claim_token": token},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["integration_id"] == "openclaw"
+    canonical_handler.assert_called_once()
+    assert canonical_handler.call_args.kwargs["integration_id"] == "openclaw"
+    assert canonical_handler.call_args.kwargs["request"].claim_token == token
+    assert canonical_handler.call_args.kwargs["auth"] == auth_context
+
+
 def test_verifier_detail_endpoint_returns_requested_integration_id(
     client: TestClient,
 ) -> None:
@@ -118,7 +176,7 @@ def test_verifier_detail_endpoint_returns_requested_integration_id(
     assert payload.get("integration_id") == integration_id
 
 
-def test_integration_install_route_requires_paid_install_key(installer_client: TestClient) -> None:
+def test_integration_install_route_requires_one_time_install_claim(installer_client: TestClient) -> None:
     response = installer_client.post(
         "/integrations/integration-openclaw/install",
         json={
@@ -128,10 +186,10 @@ def test_integration_install_route_requires_paid_install_key(installer_client: T
     )
 
     assert response.status_code == 403, response.text
-    assert "paid install key" in response.json()["detail"].lower()
+    assert "one-time install claim" in response.json()["detail"].lower()
 
 
-def test_integration_install_route_rejects_missing_or_inactive_owner_install_key_context(installer_client: TestClient) -> None:
+def test_integration_install_route_rejects_legacy_raw_key_payload_without_claim(installer_client: TestClient) -> None:
     class _InactiveRecord:
         key_id = "ik_paid_123"
         owner_key = "owner-456"
@@ -153,7 +211,7 @@ def test_integration_install_route_rejects_missing_or_inactive_owner_install_key
             },
         )
         assert response.status_code == 403, response.text
-        assert "paid install key" in response.json()["detail"].lower()
+        assert "one-time install claim" in response.json()["detail"].lower()
 
     response = installer_client.post(
         "/integrations/integration-openclaw/install",
@@ -164,10 +222,10 @@ def test_integration_install_route_rejects_missing_or_inactive_owner_install_key
         },
     )
     assert response.status_code == 403, response.text
-    assert "paid install key" in response.json()["detail"].lower()
+    assert "one-time install claim" in response.json()["detail"].lower()
 
 
-def test_integration_install_route_rejects_generic_and_mismatched_keys(installer_client: TestClient) -> None:
+def test_integration_install_route_rejects_generic_and_mismatched_raw_keys_without_claim(installer_client: TestClient) -> None:
     class _Record:
         key_id = "ik_paid_123"
         owner_key = "owner-456"
@@ -190,7 +248,7 @@ def test_integration_install_route_rejects_generic_and_mismatched_keys(installer
                 },
             )
             assert response.status_code == 403, response.text
-            assert "paid install key" in response.json()["detail"].lower()
+            assert "one-time install claim" in response.json()["detail"].lower()
 
         response = installer_client.post(
             "/integrations/integration-openclaw/install",
@@ -202,7 +260,7 @@ def test_integration_install_route_rejects_generic_and_mismatched_keys(installer
             },
         )
         assert response.status_code == 403, response.text
-        assert "paid install key" in response.json()["detail"].lower()
+        assert "one-time install claim" in response.json()["detail"].lower()
 
         response = installer_client.post(
             "/integrations/integration-openclaw/install",
@@ -213,11 +271,11 @@ def test_integration_install_route_rejects_generic_and_mismatched_keys(installer
                 "owner_key": "owner-456",
             },
         )
-        assert response.status_code == 403, response.text
-        assert "paid install key" in response.json()["detail"].lower()
+        assert response.status_code == 400, response.text
+        assert "does not match" in response.json()["detail"].lower()
 
 
-def test_integration_install_route_rejects_masked_and_placeholder_install_keys(installer_client: TestClient) -> None:
+def test_integration_install_route_rejects_masked_and_placeholder_raw_keys_without_claim(installer_client: TestClient) -> None:
     class _Record:
         key_id = "ik_paid_123"
         owner_key = "owner-456"
@@ -249,7 +307,7 @@ def test_integration_install_route_rejects_masked_and_placeholder_install_keys(i
                 },
             )
             assert response.status_code == 403, response.text
-            assert "paid install key" in response.json()["detail"].lower()
+            assert "one-time install claim" in response.json()["detail"].lower()
 
         response = installer_client.post(
             "/integrations/integration-openclaw/install",
@@ -261,10 +319,10 @@ def test_integration_install_route_rejects_masked_and_placeholder_install_keys(i
             },
         )
         assert response.status_code == 403, response.text
-        assert "paid install key" in response.json()["detail"].lower()
+        assert "one-time install claim" in response.json()["detail"].lower()
 
 
-def test_integration_install_route_rejects_raw_key_that_does_not_match_requested_platform_family(installer_client: TestClient) -> None:
+def test_integration_install_route_rejects_long_lived_raw_key(installer_client: TestClient) -> None:
     class _Record:
         key_id = "ik_paid_cursor_123"
         owner_key = "owner-456"
@@ -287,22 +345,81 @@ def test_integration_install_route_rejects_raw_key_that_does_not_match_requested
         )
 
     assert response.status_code == 403, response.text
-    assert "paid install key" in response.json()["detail"].lower()
+    assert "one-time install claim" in response.json()["detail"].lower()
 
 
-def test_integration_install_route_accepts_valid_paid_install_key(installer_client: TestClient) -> None:
-    class _Record:
-        key_id = "ik_paid_123"
-        owner_key = "owner-456"
-        program = "openclaw"
-        active = True
-        payment_status = "paid"
-        entitlements_status = "active"
-        issued_after_payment = True
+def test_integration_install_route_accepts_valid_single_use_claim(installer_client: TestClient) -> None:
+    claim_token = "ic_claim_0123456789abcdefghij"
+    install_key = "ic_install_openclaw_validkey"
+    redemption = SimpleNamespace(
+        key_id="ik_paid_123",
+        owner_key="owner-456",
+        program="openclaw",
+        install_key=install_key,
+    )
+    with (
+        patch(
+            "app.routes.integrations.installer.get_install_key_handoff_service",
+            return_value=SimpleNamespace(redeem_claim=MagicMock(return_value=redemption)),
+        ) as mock_handoff,
+        patch("app.routes.integrations.installer._require_paid_install_key") as mock_validate_key,
+        patch("app.routes.integrations.installer.get_integration_installer") as mock_installer,
+    ):
+        mock_installer.return_value.install_integration.return_value = {
+            "installed": True,
+            "success": True,
+            "status": "active",
+            "steps": [{"step_id": "step-install", "status": "completed", "detail": "installed"}],
+        }
+        response = installer_client.post(
+            "/integrations/integration-openclaw/install",
+            json={
+                "platform": "openclaw",
+                "claim_token": claim_token,
+                "owner_key": "attacker-selected-owner",
+            },
+        )
 
-    with patch("app.routes.integrations.installer.get_install_key_registry") as mock_registry:
-        mock_registry.return_value.authenticate_install_key.return_value = _Record()
-        with patch("app.routes.integrations.installer.get_integration_installer") as mock_installer:
+    assert response.status_code == 200, response.text
+    assert response.json()["installation"]["installed"] is True
+    assert response.json()["installation"]["state"] == "active"
+    assert install_key not in response.text
+    mock_handoff.return_value.redeem_claim.assert_called_once_with(claim_token)
+    mock_validate_key.assert_called_once_with(
+        install_key,
+        "owner-456",
+        integration_id="integration-openclaw",
+        platform="openclaw",
+    )
+
+
+def test_integration_install_route_normalizes_supported_platform_names(installer_client: TestClient) -> None:
+    from app.core.install_key_formats import InstallKeyFormatRegistry
+
+    claim_token = "ic_claim_0123456789abcdefghij"
+    for platform, integration_id, program in (
+        ("cursor", "integration-cursor", "cursor"),
+        ("goose-agent", "integration-goose", "goose"),
+        ("gemini-cli", "integration-gemini-cli", "gemini_cli"),
+        ("github-copilot", "integration-copilot", "copilot"),
+    ):
+        install_key = f"{InstallKeyFormatRegistry.get_spec(program).prefix}validkey"
+        redemption = SimpleNamespace(
+            key_id=f"ik_paid_{program}",
+            owner_key="owner-456",
+            program=program,
+            install_key=install_key,
+        )
+        with (
+            patch(
+                "app.routes.integrations.installer.get_install_key_handoff_service",
+                return_value=SimpleNamespace(
+                    redeem_claim=lambda token, redemption=redemption: redemption,
+                ),
+            ),
+            patch("app.routes.integrations.installer._require_paid_install_key") as mock_validate_key,
+            patch("app.routes.integrations.installer.get_integration_installer") as mock_installer,
+        ):
             mock_installer.return_value.install_integration.return_value = {
                 "installed": True,
                 "success": True,
@@ -310,61 +427,23 @@ def test_integration_install_route_accepts_valid_paid_install_key(installer_clie
                 "steps": [{"step_id": "step-install", "status": "completed", "detail": "installed"}],
             }
             response = installer_client.post(
-                "/integrations/integration-openclaw/install",
+                f"/integrations/{integration_id}/install",
                 json={
-                    "initiated_by": "tester",
-                    "platform": "openclaw",
-                    "install_key": "ic_install_openclaw_validkey",
-                    "owner_key": "owner-456",
+                    "platform": platform,
+                    "claim_token": claim_token,
                 },
             )
-
-    assert response.status_code == 200, response.text
-    assert response.json()["installation"]["installed"] is True
-    assert response.json()["installation"]["state"] == "active"
-
-
-def test_integration_install_route_normalizes_supported_platform_names(installer_client: TestClient) -> None:
-    for platform, integration_id, program in (
-        ("cursor", "integration-cursor", "cursor"),
-        ("goose-agent", "integration-goose", "goose"),
-        ("gemini-cli", "integration-gemini-cli", "gemini_cli"),
-        ("github-copilot", "integration-copilot", "copilot"),
-    ):
-
-        class _Record:
-            key_id = "ik_paid_123"
-            owner_key = "owner-456"
-            active = True
-            payment_status = "paid"
-            entitlements_status = "active"
-            issued_after_payment = True
-
-        record = _Record()
-        record.program = program
-
-        with patch("app.routes.integrations.installer.get_install_key_registry") as mock_registry:
-            mock_registry.return_value.authenticate_install_key.return_value = record
-            with patch("app.routes.integrations.installer.get_integration_installer") as mock_installer:
-                mock_installer.return_value.install_integration.return_value = {
-                    "installed": True,
-                    "success": True,
-                    "status": "active",
-                    "steps": [{"step_id": "step-install", "status": "completed", "detail": "installed"}],
-                }
-                response = installer_client.post(
-                    f"/integrations/{integration_id}/install",
-                    json={
-                        "initiated_by": "tester",
-                        "platform": platform,
-                        "install_key": f"ic_install_{program}_validkey" if program != "gemini_cli" else "ic_install_gemini_cli_validkey",
-                        "owner_key": "owner-456",
-                    },
-                )
 
         assert response.status_code == 200, (platform, response.text)
         assert response.json()["installation"]["installed"] is True
         assert response.json()["installation"]["state"] == "active"
+        assert install_key not in response.text
+        mock_validate_key.assert_called_once_with(
+            install_key,
+            "owner-456",
+            integration_id=integration_id,
+            platform=program,
+        )
 
 
 def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: TestClient) -> None:
@@ -411,8 +490,8 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
     assert payload["user_token"] in {None, ""}
     assert "system-platform-api-key" not in str(payload)
     assert payload["supported_platforms"] == [
-        "claude-code",
         "openclaw",
+        "claude-code",
         "cursor",
         "goose",
         "gemini-cli",
@@ -421,23 +500,27 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
     ]
     assert "security-guardian" not in payload["supported_platforms"]
     assert "security-guardian" not in payload["install_metadata"]
-    assert payload["openclaw_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key ic_install_openclaw_...abcd"
-    assert payload["claude_code_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...efgh"
-    assert payload["cursor_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key ic_install_cursor_...ijkl"
-    assert payload["goose_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key ic_install_goose_...mnop"
-    assert payload["gemini_cli_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key ic_install_gemini_cli_...qrst"
-    assert payload["copilot_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key ic_install_copilot_...uvwx"
-    assert payload["hermes_command"] == "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd"
+    assert payload["status"] == "ok"
+    assert all(
+        not payload[field]
+        for field in (
+            "claude_code_command",
+            "openclaw_command",
+            "cursor_command",
+            "goose_command",
+            "gemini_cli_command",
+            "copilot_command",
+            "hermes_command",
+        )
+    )
+    assert payload["install_metadata"]["openclaw"]["available"] is True
+    assert payload["install_metadata"]["openclaw"]["key_id"] == "ik_openclaw_123"
+    assert "install_key" not in payload["install_metadata"]["openclaw"]
     assert payload["install_metadata"]["cursor"]["program"] == "cursor"
     assert payload["install_metadata"]["hermes"]["program"] == "hermes"
     assert payload["security_guardian_command"] == ""
-    assert payload["command_metadata"]["claude-code"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...efgh"
-    assert payload["command_metadata"]["openclaw"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key ic_install_openclaw_...abcd"
-    assert payload["command_metadata"]["cursor"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key ic_install_cursor_...ijkl"
-    assert payload["command_metadata"]["goose"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key ic_install_goose_...mnop"
-    assert payload["command_metadata"]["gemini-cli"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key ic_install_gemini_cli_...qrst"
-    assert payload["command_metadata"]["copilot"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key ic_install_copilot_...uvwx"
-    assert payload["command_metadata"]["hermes"] == "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_install_hermes_...abcd"
+    assert all(not command for command in payload["command_metadata"].values())
+    assert "ic_install_" not in str(payload)
 
 
 def test_integration_list_endpoints_expose_canonical_platform_metadata(client: TestClient) -> None:
@@ -464,10 +547,12 @@ def test_api_integrations_token_matches_canonical_route_output() -> None:
         principal_id="owner-456",
         org_id=None,
         key_type="personal",
+        metadata={"owner_key": "owner-456"},
     )
     registry = SimpleNamespace(
         get_keys_for_owner=lambda owner_key: [
             SimpleNamespace(
+                key_id="ik_openclaw_123",
                 owner_key="owner-456",
                 program="openclaw",
                 active=True,
@@ -477,6 +562,7 @@ def test_api_integrations_token_matches_canonical_route_output() -> None:
                 masked_key="ic_install_openclaw_...abcd",
             ),
             SimpleNamespace(
+                key_id="ik_claude_123",
                 owner_key="owner-456",
                 program="claude_code",
                 active=True,
@@ -529,6 +615,7 @@ def test_api_integrations_token_ignores_generic_platform_auth_even_with_registry
                     entitlements_status="active",
                     issued_after_payment=True,
                     masked_key="ic_install_openclaw_...wxyz",
+                    key_id="ik_openclaw_789",
                 ),
                 SimpleNamespace(
                     owner_key="owner-789",
@@ -538,6 +625,7 @@ def test_api_integrations_token_ignores_generic_platform_auth_even_with_registry
                     entitlements_status="active",
                     issued_after_payment=True,
                     masked_key="ic_install_claude_code_...qrst",
+                    key_id="ik_claude_789",
                 ),
             ]
         )
@@ -555,8 +643,8 @@ def test_api_integrations_token_ignores_generic_platform_auth_even_with_registry
     assert payload["openclaw_command"] == ""
     assert payload["claude_code_command"] == ""
     assert payload["supported_platforms"] == [
-        "claude-code",
         "openclaw",
+        "claude-code",
         "cursor",
         "goose",
         "gemini-cli",
@@ -575,6 +663,7 @@ def test_integration_token_exposes_registry_normalized_platform_aliases(client: 
         principal_id="owner-456",
         org_id=None,
         key_type="personal",
+        metadata={"owner_key": "owner-456"},
     )
     registry = SimpleNamespace(
         get_keys_for_owner=lambda owner_key: [
@@ -586,6 +675,7 @@ def test_integration_token_exposes_registry_normalized_platform_aliases(client: 
                 entitlements_status="active",
                 issued_after_payment=True,
                 masked_key="ic_install_claude_code_...abc",
+                key_id="ik_claude_123",
             ),
             SimpleNamespace(
                 owner_key="owner-456",
@@ -595,6 +685,7 @@ def test_integration_token_exposes_registry_normalized_platform_aliases(client: 
                 entitlements_status="active",
                 issued_after_payment=True,
                 masked_key="ic_install_gemini_cli_...xyz",
+                key_id="ik_gemini_123",
             ),
         ]
     )
@@ -612,8 +703,10 @@ def test_integration_token_exposes_registry_normalized_platform_aliases(client: 
     assert payload["install_metadata"]["claude-code"]["program"] == "claude_code"
     assert payload["install_metadata"]["claude-code"]["platform"] == "claude-code"
     assert payload["install_metadata"]["claude-code"]["slug"] == "claude-code"
-    assert payload["command_metadata"]["claude-code"].endswith("...abc")
-    assert payload["command_metadata"]["gemini-cli"].endswith("...xyz")
+    assert payload["install_metadata"]["claude-code"]["available"] is True
+    assert payload["install_metadata"]["gemini-cli"]["available"] is True
+    assert payload["command_metadata"]["claude-code"] == ""
+    assert payload["command_metadata"]["gemini-cli"] == ""
     assert "claude_code" not in payload["command_metadata"]
 
 
@@ -674,6 +767,7 @@ def test_integration_token_filters_out_non_runtime_and_shared_family_records(cli
         principal_id="owner-456",
         org_id=None,
         key_type="personal",
+        metadata={"owner_key": "owner-456"},
     )
 
     class _Record:
@@ -681,6 +775,7 @@ def test_integration_token_filters_out_non_runtime_and_shared_family_records(cli
             self.owner_key = "owner-456"
             self.program = program
             self.masked_key = masked_key
+            self.key_id = f"ik_{program}_123"
             self.active = True
             self.payment_status = "paid"
             self.entitlements_status = "active"
@@ -706,13 +801,16 @@ def test_integration_token_filters_out_non_runtime_and_shared_family_records(cli
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["openclaw_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key ic_install_openclaw_...abcd"
-    assert payload["claude_code_command"] == "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...efgh"
+    assert payload["openclaw_command"] == ""
+    assert payload["claude_code_command"] == ""
+    assert payload["install_metadata"]["openclaw"]["available"] is True
+    assert payload["install_metadata"]["claude-code"]["available"] is True
+    assert all(not command for command in payload["command_metadata"].values())
     assert payload["security_guardian_command"] == ""
     assert all(platform not in payload["install_metadata"] for platform in ("security-guardian",))
     assert set(payload["command_metadata"]) == {
-        "claude-code",
         "openclaw",
+        "claude-code",
         "cursor",
         "goose",
         "gemini-cli",
@@ -720,3 +818,116 @@ def test_integration_token_filters_out_non_runtime_and_shared_family_records(cli
         "hermes",
     }
     assert set(payload["install_metadata"]) == set(payload["command_metadata"])
+
+
+def test_install_claim_is_owner_bound_short_lived_and_not_a_raw_key(client: TestClient) -> None:
+    owner_key = "buyer@ironclaw.test"
+    auth_context = SimpleNamespace(
+        authenticated=True,
+        api_key=None,
+        principal_id="user-id",
+        org_id=None,
+        key_type="personal",
+        metadata={"email": owner_key},
+    )
+    record = SimpleNamespace(
+        key_id="ik_openclaw_claim_001",
+        owner_key=owner_key,
+        program="openclaw",
+        active=True,
+        payment_status="paid",
+        entitlements_status="active",
+        issued_after_payment=True,
+        masked_key="ic_install_openclaw_...6789",
+    )
+    registry = SimpleNamespace(get_keys_for_owner=lambda _owner: [record])
+    claim = SimpleNamespace(
+        claim_token="ic_claim_single_use_0123456789",
+        expires_at=datetime(2030, 1, 1, tzinfo=UTC),
+    )
+    handoff_service = SimpleNamespace(issue_claim=MagicMock(return_value=claim))
+
+    client.app.dependency_overrides[get_auth_context] = lambda: auth_context
+    try:
+        with (
+            patch("app.api.routes.integrations.get_install_key_registry", return_value=registry),
+            patch("app.api.routes.integrations.get_install_key_handoff_service", return_value=handoff_service),
+        ):
+            response = client.post(
+                "/integrations/installers/openclaw/claim",
+                json={"owner_key": "attacker@ironclaw.test"},
+            )
+    finally:
+        client.app.dependency_overrides.clear()
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["key_id"] == record.key_id
+    assert payload["claim_token"] == claim.claim_token
+    assert payload["command"].endswith(f"--key {claim.claim_token}")
+    assert "install_key" not in payload
+    assert response.headers["cache-control"] == "no-store, private"
+    handoff_service.issue_claim.assert_called_once_with(
+        key_id=record.key_id,
+        owner_key=owner_key,
+        program="openclaw",
+    )
+
+
+def test_install_claim_requires_recoverable_secret(client: TestClient) -> None:
+    auth_context = SimpleNamespace(
+        authenticated=True,
+        principal_id="user-id",
+        org_id=None,
+        key_type="personal",
+        metadata={"owner_key": "buyer@ironclaw.test"},
+    )
+    record = SimpleNamespace(
+        key_id="ik_openclaw_claim_002",
+        owner_key="buyer@ironclaw.test",
+        program="openclaw",
+        active=True,
+        payment_status="paid",
+        entitlements_status="active",
+        issued_after_payment=True,
+        masked_key="ic_install_openclaw_...6789",
+    )
+    registry = SimpleNamespace(get_keys_for_owner=lambda _owner: [record])
+    handoff_service = SimpleNamespace(issue_claim=MagicMock(side_effect=InstallKeySecretUnavailableError("Install-key secret unavailable.")))
+
+    client.app.dependency_overrides[get_auth_context] = lambda: auth_context
+    try:
+        with (
+            patch("app.api.routes.integrations.get_install_key_registry", return_value=registry),
+            patch("app.api.routes.integrations.get_install_key_handoff_service", return_value=handoff_service),
+        ):
+            response = client.post("/integrations/installers/openclaw/claim")
+    finally:
+        client.app.dependency_overrides.clear()
+
+    assert response.status_code == 409
+    assert "Install-key secret unavailable." in response.json()["detail"]
+
+
+def test_install_claim_redemption_returns_key_once_without_caching(client: TestClient) -> None:
+    redemption = SimpleNamespace(
+        key_id="ik_openclaw_claim_003",
+        program="openclaw",
+        install_key="ic_install_openclaw_one_time_secret_123456",
+    )
+    handoff_service = SimpleNamespace(redeem_claim=MagicMock(return_value=redemption))
+
+    with patch("app.api.routes.integrations.get_install_key_handoff_service", return_value=handoff_service):
+        response = client.post(
+            "/integrations/install-claims/redeem",
+            json={"claim_token": "ic_claim_single_use_0123456789"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "key_id": redemption.key_id,
+        "program": redemption.program,
+        "install_key": redemption.install_key,
+    }
+    assert response.headers["cache-control"] == "no-store, private"
+    handoff_service.redeem_claim.assert_called_once_with("ic_claim_single_use_0123456789")

@@ -13,10 +13,23 @@ from app.api.actionexecute import (
     router,
 )
 from app.config import RISK_THRESHOLD_BLOCK_MIN
+from app.core.auth import AuthContext, get_runtime_auth_context
 from app.services.action_guard import ActionGuardDecision
 
 app = FastAPI()
 app.include_router(router)
+_TEST_AUTH_CONTEXT = AuthContext(
+    api_key="test-api-key",
+    principal_type="api_key",
+    principal_id="test-principal",
+    session_id=None,
+    org_id=None,
+    authenticated=True,
+    auth_source="test",
+    auth_method="api_key",
+    metadata={"owner_key": "system"},
+)
+app.dependency_overrides[get_runtime_auth_context] = lambda: _TEST_AUTH_CONTEXT
 client = TestClient(app)
 
 

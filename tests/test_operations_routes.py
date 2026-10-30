@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -12,6 +14,9 @@ from app.api.routes.onboarding import router as onboarding_router
 from app.api.routes.organizations import router as organizations_router
 from app.api.routes.policy import router as policy_router
 from app.api.routes.quarantine import router as quarantine_router
+from app.core.auth import AuthContext
+from app.core.install_keys import get_install_key_registry
+from app.dependencies.customer_auth import require_customer_read, require_customer_write
 from app.services.policy_store import reset_policy_store
 from routes import incidents as incidents_routes
 
@@ -41,6 +46,20 @@ def _build_test_app() -> FastAPI:
 
 def _headers() -> dict[str, str]:
     return {"X-API-Key": "test-key"}
+
+
+def _dashboard_auth_context() -> AuthContext:
+    return AuthContext(
+        api_key=None,
+        principal_type="customer",
+        principal_id="customer-user-001",
+        session_id=None,
+        org_id=None,
+        permissions=("customer:read", "customer:write"),
+        roles=("customer_user",),
+        authenticated=True,
+        metadata={"email": "owner@ironclaw.local"},
+    )
 
 
 def _policy_settings_payload(default_decision: str) -> dict[str, object]:
@@ -205,29 +224,71 @@ def test_organizations_flow_creates_org_and_member() -> None:
 
 
 def test_dashboard_overview_returns_expected_sections() -> None:
-    client = TestClient(_build_test_app(), raise_server_exceptions=False)
+    app = _build_test_app()
+    app.dependency_overrides[require_customer_read] = _dashboard_auth_context
+    client = TestClient(app, raise_server_exceptions=False)
 
     response = client.get("/dashboard/overview", headers=_headers())
 
     assert response.status_code == 200
     data = response.json()
     assert len(data["kpis"]) >= 1
-    assert len(data["alerts"]) >= 1
+    assert data["alerts"] == []
     assert len(data["activity"]) >= 1
-    assert data["metadata"]["wallet"]["owner_key"] == "demo@ironclaw.local"
+    assert data["metadata"]["wallet"]["owner_key"] == "owner@ironclaw.local"
+    assert data["metadata"]["owner_key"] == "owner@ironclaw.local"
+    assert data["metadata"]["install_key_dashboard"]["owner_key"] == "owner@ironclaw.local"
+    assert len(data["metadata"]["install_key_dashboard"]["daily_usage"]) == 7
 
 
-def test_dashboard_overview_rejects_generic_platform_owner_values() -> None:
-    client = TestClient(_build_test_app(), raise_server_exceptions=False)
+def test_dashboard_overview_rejects_caller_selected_owner() -> None:
+    app = _build_test_app()
+    app.dependency_overrides[require_customer_read] = _dashboard_auth_context
+    client = TestClient(app, raise_server_exceptions=False)
 
     response = client.get(
         "/dashboard/overview",
         headers=_headers(),
-        params={"owner_key": "ghp_legacy_system_key"},
+        params={"owner_key": "other@ironclaw.local"},
     )
 
-    assert response.status_code == 200
-    assert response.json()["metadata"]["owner_key"] == "demo@ironclaw.local"
+    assert response.status_code == 403
+
+
+def test_dashboard_units_rejects_caller_selected_owner() -> None:
+    app = _build_test_app()
+    app.dependency_overrides[require_customer_read] = _dashboard_auth_context
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.get(
+        "/dashboard/units",
+        headers=_headers(),
+        params={"owner_key": "other@ironclaw.local"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_dashboard_usage_record_rejects_foreign_install_key() -> None:
+    class ForeignInstallKeyRegistry:
+        def get_key_by_id(self, key_id: str) -> SimpleNamespace:
+            return SimpleNamespace(key_id=key_id, owner_key="other@ironclaw.local")
+
+        def record_key_usage(self, key_id: str, *, units: int) -> None:
+            raise AssertionError(f"foreign key usage must not be recorded: {key_id} ({units})")
+
+    app = _build_test_app()
+    app.dependency_overrides[require_customer_write] = _dashboard_auth_context
+    app.dependency_overrides[get_install_key_registry] = ForeignInstallKeyRegistry
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.post(
+        "/dashboard/units/record",
+        headers=_headers(),
+        json={"key_id": "foreign-key-001", "units": 1},
+    )
+
+    assert response.status_code == 404
 
 
 def test_alert_endpoint_create_and_update_flow() -> None:

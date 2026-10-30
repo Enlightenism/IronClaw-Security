@@ -116,6 +116,7 @@ class StripeUnitEventReason(StrEnum):
 
 class StripeWebhookEventType(StrEnum):
     CHECKOUT_SESSION_COMPLETED = "checkout.session.completed"
+    CHECKOUT_SESSION_ASYNC_PAYMENT_SUCCEEDED = "checkout.session.async_payment_succeeded"
     CHECKOUT_SESSION_EXPIRED = "checkout.session.expired"
     CUSTOMER_SUBSCRIPTION_CREATED = "customer.subscription.created"
     CUSTOMER_SUBSCRIPTION_UPDATED = "customer.subscription.updated"
@@ -988,7 +989,7 @@ class StripeService:
     @staticmethod
     def _is_successful_payment_status(value: Any) -> bool:
         normalized = str(value).strip().lower() if value is not None else ""
-        return normalized in {"paid", "succeeded", "success", "complete", "completed", "active"}
+        return normalized in {"paid", "succeeded", "success"}
 
     def _resolve_owner_key_for_org(self, org_id: str) -> str:
         normalized = str(org_id).strip().lower()
@@ -1552,6 +1553,9 @@ class StripeService:
                 "stripe_reason": reason.value,
                 "reference_id": reference_id,
                 "source": "stripe_service",
+                "event_id": (f"stripe:{reason.value}:{str(reference_id).strip()}" if reference_id and str(reference_id).strip() else None),
+                "purchase_reference": str(reference_id).strip() if reference_id else None,
+                "checkout_session_id": (str(reference_id).strip() if reference_id and reason == StripeUnitEventReason.CHECKOUT_COMPLETE else None),
             },
         )
         with self._lock:
@@ -2099,6 +2103,7 @@ class StripeService:
 
         handler_map: dict[str, Any] = {
             StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value: self._handle_checkout_completed,
+            StripeWebhookEventType.CHECKOUT_SESSION_ASYNC_PAYMENT_SUCCEEDED.value: self._handle_checkout_completed,
             StripeWebhookEventType.CHECKOUT_SESSION_EXPIRED.value: self._handle_checkout_expired,
             StripeWebhookEventType.CUSTOMER_SUBSCRIPTION_CREATED.value: self._handle_subscription_upsert,
             StripeWebhookEventType.CUSTOMER_SUBSCRIPTION_UPDATED.value: self._handle_subscription_updated,
@@ -2125,7 +2130,15 @@ class StripeService:
                     event_id=event_id,
                     event_type=event_type,
                     purchase_reference=data_obj.get("metadata", {}).get("purchase_reference") or data_obj.get("metadata", {}).get("purchase_id"),
-                    checkout_session_id=data_obj.get("id") if event_type == StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value else None,
+                    checkout_session_id=(
+                        data_obj.get("id")
+                        if event_type
+                        in {
+                            StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value,
+                            StripeWebhookEventType.CHECKOUT_SESSION_ASYNC_PAYMENT_SUCCEEDED.value,
+                        }
+                        else None
+                    ),
                     owner_key=data_obj.get("metadata", {}).get("org_id"),
                     customer_id=data_obj.get("customer"),
                     program=None,
@@ -2154,7 +2167,7 @@ class StripeService:
         mode: str = obj.get("mode", "payment")
         payment_status = obj.get("payment_status")
         if payment_status is None:
-            payment_status = "paid" if obj.get("status") in {None, "", "complete", "completed"} else obj.get("status")
+            payment_status = obj.get("status")
 
         try:
             unit_credits = int(unit_credits_raw)
@@ -2163,6 +2176,11 @@ class StripeService:
 
         checkout_idem_key = f"checkout_completed:{session_id}"
         payment_confirmed = self._is_successful_payment_status(payment_status)
+
+        if payment_confirmed and not session_id:
+            raise StripeServiceError("checkout session ID is required for payment fulfillment")
+        if payment_confirmed and not org_id:
+            raise StripeServiceError("checkout session is missing the organization identity")
 
         with self._lock:
             already_credited = checkout_idem_key in self._processed_event_ids
@@ -2198,7 +2216,7 @@ class StripeService:
         }
 
         install_key_issuance: dict[str, dict[str, Any]] = {}
-        if org_id and not already_credited:
+        if org_id and payment_confirmed and not already_credited:
             if payment_confirmed and unit_credits > 0:
                 self.credit_units(
                     org_id,
@@ -2209,23 +2227,22 @@ class StripeService:
                 result["units_credited"] = unit_credits
                 result["tokens_covered"] = unit_credits * TOKENS_PER_UNIT
 
-            if payment_confirmed:
-                try:
-                    install_key_issuance = self._issue_paid_install_keys_for_checkout(
-                        org_id=org_id,
-                        customer_id=customer_id,
-                        session_id=session_id,
-                        unit_credits=unit_credits,
-                        metadata={"mode": mode, "payment_status": payment_status},
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "stripe.checkout_install_key_issue_failed org=%s session=%s error=%s",
-                        org_id,
-                        session_id,
-                        exc,
-                    )
-                    install_key_issuance = {}
+            try:
+                install_key_issuance = self._issue_paid_install_keys_for_checkout(
+                    org_id=org_id,
+                    customer_id=customer_id,
+                    session_id=session_id,
+                    unit_credits=unit_credits,
+                    metadata={"mode": mode, "payment_status": payment_status},
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "stripe.checkout_install_key_issue_failed org=%s session=%s error_type=%s",
+                    org_id,
+                    session_id,
+                    type(exc).__name__,
+                )
+                raise
 
             with self._lock:
                 self._processed_event_ids.add(checkout_idem_key)

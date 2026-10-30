@@ -119,6 +119,7 @@ def _build_checkout_completed_event(
                 "id": session_id,
                 "mode": "payment",
                 "customer": customer_id,
+                "payment_status": "paid",
                 "metadata": {
                     "org_id": org_id,
                     "unit_credits": str(unit_credits),
@@ -616,7 +617,7 @@ class TestHandleCheckoutCompleted:
         assert install_keys["openclaw"]["active"] is True
         assert install_keys["claude_code"]["active"] is True
 
-    def test_checkout_completed_partial_failure_does_not_leave_paid_active_key_issued(self, svc: StripeService, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_checkout_completed_key_provisioning_failure_is_reported_for_retry(self, svc: StripeService, monkeypatch: pytest.MonkeyPatch) -> None:
         def fake_fail(*args: Any, **kwargs: Any) -> MagicMock:
             raise RuntimeError("persistence write-order failure")
 
@@ -628,26 +629,47 @@ class TestHandleCheckoutCompleted:
         event = _build_checkout_completed_event(unit_credits=5_000, org_id="org-install-keys-partial-fail")
         result = svc.handle_webhook_event(event)
 
-        assert result["action"] == "processed"
-        assert "install_key_issuance" not in result["detail"]
+        assert result["action"] == "error"
+        assert "install_key_issuance" not in result
         assert svc.get_unit_balance("org-install-keys-partial-fail").balance == 5_000
 
-    def test_checkout_completed_replay_after_partial_success_does_not_double_credit_units(self, svc: StripeService, monkeypatch: pytest.MonkeyPatch) -> None:
-        def fake_fail(*args: Any, **kwargs: Any) -> MagicMock:
-            raise RuntimeError("persistence write-order failure")
+    def test_checkout_completed_retries_failed_key_provisioning_without_double_credit(
+        self,
+        svc: StripeService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls = 0
+
+        def fake_fail_once(*args: Any, **kwargs: Any) -> MagicMock:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("persistence write-order failure")
+
+            record = MagicMock()
+            record.key_id = f"ik_{kwargs['program']}_001"
+            record.owner_key = kwargs["owner_key"]
+            record.program = kwargs["program"]
+            record.active = True
+            record.masked_key = f"ic_install_{kwargs['program']}_...1234"
+            record.subscription_id = kwargs["subscription_id"]
+            issued = MagicMock()
+            issued.record = record
+            return issued
 
         monkeypatch.setattr(
             "app.services.stripe_service.provision_install_key_service",
-            lambda *args, **kwargs: MagicMock(provision_for_program=fake_fail),
+            lambda *args, **kwargs: MagicMock(provision_for_program=fake_fail_once),
         )
 
         event = _build_checkout_completed_event(unit_credits=2_000, org_id="org-replay-no-double-credit")
         first = svc.handle_webhook_event(event)
         second = svc.handle_webhook_event(event)
 
-        assert first["action"] == "processed"
-        assert second["action"] == "duplicate"
+        assert first["action"] == "error"
+        assert second["action"] == "processed"
         assert svc.get_unit_balance("org-replay-no-double-credit").balance == 2_000
+        assert len(second["detail"]["install_key_issuance"]) == 7
 
     def test_checkout_completed_issues_paid_install_keys_for_org_owner(self, svc: StripeService) -> None:
         event = _build_checkout_completed_event(unit_credits=5_000, org_id="org-install-keys")
@@ -759,6 +781,38 @@ class TestHandleCheckoutCompleted:
         assert result["action"] == "processed"
         assert "install_key_issuance" not in result["detail"]
         assert svc.get_unit_balance("org-pending-checkout").balance == 0
+
+    def test_checkout_completed_status_alone_does_not_confirm_payment(self, svc: StripeService) -> None:
+        event = _build_checkout_completed_event(
+            unit_credits=500,
+            org_id="org-status-not-payment",
+        )
+        checkout = event["data"]["object"]
+        checkout.pop("payment_status")
+        checkout["status"] = "complete"
+
+        result = svc.handle_webhook_event(event)
+
+        assert result["action"] == "processed"
+        assert result["detail"]["payment_confirmed"] is False
+        assert "install_key_issuance" not in result["detail"]
+        assert svc.get_unit_balance("org-status-not-payment").balance == 0
+
+    def test_async_payment_success_uses_confirmed_checkout_fulfillment(
+        self,
+        svc: StripeService,
+    ) -> None:
+        event = _build_checkout_completed_event(
+            unit_credits=500,
+            org_id="org-async-payment",
+        )
+        event["type"] = StripeWebhookEventType.CHECKOUT_SESSION_ASYNC_PAYMENT_SUCCEEDED.value
+
+        result = svc.handle_webhook_event(event)
+
+        assert result["action"] == "processed"
+        assert result["detail"]["payment_confirmed"] is True
+        assert svc.get_unit_balance("org-async-payment").balance == 500
 
     def test_checkout_completed_zero_credits_no_balance_change(self, svc: StripeService) -> None:
         event = _build_checkout_completed_event(unit_credits=0)

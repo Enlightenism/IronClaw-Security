@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.api.integrations import router as integrations_router
+from app.core.auth import AuthContext, get_auth_context
 from app.core.install_keys import get_install_key_registry
 from app.main import create_app
 from app.routes.install_keys import router as install_keys_router
@@ -112,11 +113,28 @@ def test_hermes_end_to_end_paid_flow_and_contract() -> None:
     assert evaluate_payload["secret_scan"]["scanned"] is True
     assert evaluate_payload["audit_trail"]["secret_scan_triggered"] is True
 
-    dashboard = client.get(
-        "/dashboard/overview",
-        params={"owner_key": owner_key},
-        headers={"X-API-Key": "test-api-key"},
+    dashboard_auth = AuthContext(
+        api_key="test-api-key",
+        principal_type="customer",
+        principal_id=owner_key,
+        session_id=None,
+        org_id=None,
+        permissions=("customer:read", "customer:write"),
+        roles=("customer_admin",),
+        authenticated=True,
+        auth_source="test",
+        auth_method="test",
+        metadata={"owner_key": owner_key},
     )
+    client.app.dependency_overrides[get_auth_context] = lambda: dashboard_auth
+    try:
+        dashboard = client.get(
+            "/dashboard/overview",
+            params={"owner_key": owner_key},
+            headers={"X-API-Key": "test-api-key"},
+        )
+    finally:
+        client.app.dependency_overrides.pop(get_auth_context, None)
     assert dashboard.status_code == 200, dashboard.text
     dashboard_payload = dashboard.json()
     hermes_card = next(item for item in dashboard_payload["install_keys"] if item["program"] == "hermes")

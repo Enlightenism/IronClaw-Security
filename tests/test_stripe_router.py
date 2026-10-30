@@ -799,3 +799,35 @@ class TestAdditionalRoutes:
         assert call_kwargs["amount"] == 250
         assert call_kwargs["reason"] == StripeUnitEventReason.MANUAL_CREDIT
         assert call_kwargs["reference_id"] == "credit-ref-001"
+
+
+class TestStripeWebhookFailureRetry:
+    def test_handler_failure_returns_non_success_status_to_stripe(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.verify_webhook_signature.return_value = SimpleNamespace(
+            valid=True,
+            event_type="checkout.session.completed",
+            event_id="evt_retry_001",
+            error=None,
+            payload={
+                "id": "evt_retry_001",
+                "type": "checkout.session.completed",
+                "data": {"object": {"id": "cs_retry_001"}},
+            },
+        )
+        mock_svc.handle_webhook_event.return_value = {
+            "action": "error",
+            "error": "sensitive internal details",
+        }
+
+        response = client.post(
+            "/webhooks/stripe",
+            content=b"{}",
+            headers={"stripe-signature": "t=1,v1=test"},
+        )
+
+        assert response.status_code == 502
+        assert "sensitive internal details" not in response.text

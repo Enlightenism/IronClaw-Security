@@ -18,7 +18,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.core.install_keys import InstallKeyRecord
+from app.services.install_key_handoff import reset_install_key_handoff_service
 from app.services.install_key_provisioning import InstallKeyIssued, InstallKeyProvisioningService
+
+
+@pytest.fixture(autouse=True)
+def reset_install_key_handoffs() -> None:
+    reset_install_key_handoff_service()
 
 
 def _make_install_key_record(
@@ -137,7 +143,9 @@ def test_provision_for_program_issues_paid_active_key_with_stripe_metadata() -> 
 
     assert isinstance(issued, InstallKeyIssued)
     assert issued.record.key_id == "ik_open_001"
-    assert issued.raw_key == record.raw_key
+    assert issued.raw_key == ""
+    assert record.raw_key == ""
+    assert "raw_key" not in issued.delivery_payload()
     wallet_registry.get_or_create_wallet.assert_called()
     billing_registry.has_active_subscription.assert_called_with("buyer@ironclaw.test")
 
@@ -153,6 +161,7 @@ def test_provision_for_program_issues_paid_active_key_with_stripe_metadata() -> 
     assert kwargs["metadata"]["customer_id"] == "cus_123"
     assert kwargs["metadata"]["checkout_session_id"] == "cs_real_123"
     assert kwargs["metadata"]["purchase_reference"] == "pi_real_456"
+    assert kwargs["secure_record_persistor"] == service._handoff_service.persist_new_record
 
 
 def test_provision_for_program_reuses_active_key_without_duplicate_generation() -> None:
@@ -271,7 +280,8 @@ def test_provision_for_program_accepts_aliases_for_supported_runtimes() -> None:
         )
 
         assert issued.record.program == expected
-        assert issued.record.raw_key.startswith(f"ic_install_{expected}_")
+        assert issued.record.raw_key == ""
+        assert issued.raw_key == ""
 
 
 @pytest.mark.parametrize(
@@ -309,7 +319,9 @@ def test_provision_for_program_generates_modern_runtime_keys_only_after_paid_ent
     )
 
     assert issued.record.program == program
-    assert issued.raw_key.startswith(expected_prefix)
+    assert issued.record.raw_key == ""
+    assert issued.raw_key == ""
+    assert "raw_key" not in issued.delivery_payload()
 
 
 def test_provision_for_program_rejects_hermes_when_payment_not_confirmed() -> None:
@@ -413,17 +425,8 @@ def test_provision_for_purchase_generates_all_supported_programs() -> None:
     expected_programs = {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"}
     assert set(results.keys()) == expected_programs
     for program in expected_programs:
-        assert results[program].raw_key.startswith(
-            {
-                "openclaw": "ic_install_openclaw_",
-                "claude_code": "ic_install_claude_code_",
-                "cursor": "ic_install_cursor_",
-                "goose": "ic_install_goose_",
-                "gemini_cli": "ic_install_gemini_cli_",
-                "copilot": "ic_install_copilot_",
-                "hermes": "ic_install_hermes_",
-            }[program]
-        )
+        assert results[program].raw_key == ""
+        assert "raw_key" not in results[program].delivery_payload()
     assert "security_guardian" not in results
     assert install_key_registry.generate_for_paid_customer.call_count == 7
 
@@ -582,7 +585,8 @@ def test_issue_install_key_calls_same_provisioning_path() -> None:
 
     assert isinstance(issued, InstallKeyIssued)
     assert issued.record.key_id == "ik_open_manual"
-    assert issued.raw_key.startswith("ic_install_openclaw_")
+    assert issued.raw_key == ""
+    assert issued.record.raw_key == ""
     install_key_registry.generate_for_paid_customer.assert_called_once()
 
 
@@ -630,7 +634,7 @@ def test_provision_for_program_reuses_valid_key_for_matching_checkout_reference(
     install_key_registry.generate_for_paid_customer.assert_not_called()
 
 
-def test_provision_for_program_generates_new_key_when_checkout_reference_differs() -> None:
+def test_provision_for_program_reuses_active_key_when_checkout_reference_differs() -> None:
     existing = _make_install_key_record(
         owner_key="buyer@ironclaw.test",
         subscription_id="sub_123",
@@ -641,17 +645,6 @@ def test_provision_for_program_generates_new_key_when_checkout_reference_differs
         checkout_session_id="cs_old",
     )
     service, install_key_registry, _, _ = _make_service(existing_records=[existing])
-    replacement = _make_install_key_record(
-        owner_key="buyer@ironclaw.test",
-        subscription_id="sub_123",
-        program="openclaw",
-        key_id="ik_new_checkout_001",
-        raw_key="ic_install_openclaw_new_checkout_secret_9",
-        purchase_reference="purchase_ref_new",
-        checkout_session_id="cs_new",
-    )
-    install_key_registry.generate_for_paid_customer.return_value = replacement
-
     issued = service.provision_for_program(
         owner_key="buyer@ironclaw.test",
         subscription_id="sub_123",
@@ -663,8 +656,9 @@ def test_provision_for_program_generates_new_key_when_checkout_reference_differs
         purchase_reference="purchase_ref_new",
     )
 
-    assert issued.record.key_id == "ik_new_checkout_001"
-    install_key_registry.generate_for_paid_customer.assert_called_once()
+    assert issued.record.key_id == "ik_existing_old_001"
+    assert issued.raw_key == ""
+    install_key_registry.generate_for_paid_customer.assert_not_called()
 
 
 def test_issue_install_key_requires_payment_verification_gate() -> None:

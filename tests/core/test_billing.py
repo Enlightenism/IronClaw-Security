@@ -30,6 +30,7 @@ from app.core.billing import (
     _reset_billing_registry_for_testing,
     get_active_subscription_for_customer,
     get_billing_registry,
+    resolve_authenticated_billing_owner,
     resolve_billing_owner,
     resolve_package_id,
     resolve_plan_code,
@@ -281,6 +282,47 @@ def test_resolve_billing_owner_different_org_ids_produce_different_keys() -> Non
     ctx_a = SimpleNamespace(key_type="org", org_id="org_a")
     ctx_b = SimpleNamespace(key_type="org", org_id="org_b")
     assert resolve_billing_owner(ctx_a, "xx.com") != resolve_billing_owner(ctx_b, "xx.com")
+
+
+def test_resolve_authenticated_billing_owner_uses_verified_owner_metadata() -> None:
+    ctx = SimpleNamespace(
+        authenticated=True,
+        key_type="personal",
+        org_id=None,
+        metadata={"owner_key": "Owner@IronClaw.TEST"},
+        principal_id="user-123",
+    )
+
+    assert resolve_authenticated_billing_owner(ctx) == "owner@ironclaw.test"
+
+
+def test_resolve_authenticated_billing_owner_uses_verified_email_claim() -> None:
+    ctx = SimpleNamespace(
+        authenticated=True,
+        key_type="personal",
+        org_id=None,
+        metadata={"email": "User@IronClaw.TEST"},
+        principal_id="user-123",
+    )
+
+    assert resolve_authenticated_billing_owner(ctx) == "user@ironclaw.test"
+
+
+def test_resolve_authenticated_billing_owner_rejects_missing_or_generic_identity() -> None:
+    unauthenticated = SimpleNamespace(
+        authenticated=False,
+        metadata={"email": "owner@ironclaw.test"},
+    )
+    generic = SimpleNamespace(
+        authenticated=True,
+        key_type="personal",
+        org_id=None,
+        metadata={"owner_key": "ghp_legacy_system_key"},
+        principal_id="system",
+    )
+
+    assert resolve_authenticated_billing_owner(unauthenticated) is None
+    assert resolve_authenticated_billing_owner(generic) is None
 
 
 # ---------------------------------------------------------------------------

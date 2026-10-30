@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.core.install_key_formats import InstallKeyFormatRegistry
@@ -142,13 +143,59 @@ class InstallKeyDashboardSyncService:
         program = self._normalize_program(usage_entry.get("program"))
         if program is None or program == "security_guardian":
             return {}
+        usage_by_day = usage_entry.get("usage_by_day") or {}
+        if not isinstance(usage_by_day, dict):
+            usage_by_day = {}
+        normalized_usage_by_day = {str(day): int(units or 0) for day, units in usage_by_day.items()}
+        units_used_today = int(usage_entry.get("units_used_today") or usage_entry.get("units_today") or 0)
+        units_used_this_week = int(usage_entry.get("units_used_this_week") or usage_entry.get("units_week") or 0)
+        if units_used_today < 0 or units_used_this_week < 0 or any(units < 0 for units in normalized_usage_by_day.values()):
+            raise ValueError("Install-key usage units must be non-negative.")
         return {
             "key_id": usage_key_id,
             "owner_key": str(usage_entry.get("owner_key") or "").strip().lower(),
             "program": program,
             "total_consumed_units": int(usage_entry.get("total_consumed_units") or usage_entry.get("units_consumed") or 0),
             "total_blocked_attacks": int(usage_entry.get("total_blocked_attacks") or usage_entry.get("blocked_attack_count") or 0),
+            "units_used_today": units_used_today,
+            "units_used_this_week": units_used_this_week,
+            "usage_by_day": normalized_usage_by_day,
             "metadata": dict(usage_entry.get("metadata") or {}),
+        }
+
+    def _normalize_attack_event(self, event: Any) -> dict[str, Any] | None:
+        verdict = str(self._row_value(event, "verdict") or "").strip().lower()
+        if verdict not in {"block", "quarantine"}:
+            return None
+
+        event_id = str(self._row_value(event, "event_id") or self._row_value(event, "id") or "").strip()
+        timestamp = self._row_value(event, "created_at") or self._row_value(event, "timestamp")
+        if not event_id or timestamp is None:
+            return None
+        if isinstance(timestamp, datetime):
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=UTC)
+            timestamp_value = timestamp.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        elif isinstance(timestamp, str) and timestamp.strip():
+            timestamp_value = timestamp.strip()
+        else:
+            return None
+
+        metadata = self._row_value(event, "metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        event_type = str(self._row_value(event, "event_type") or "").strip()
+        threat_type = str(metadata.get("category") or event_type or "security_event").strip()
+        severity = str(self._row_value(event, "severity") or "unknown").strip()
+        return {
+            "id": event_id,
+            "title": threat_type.replace("-", " ").replace("_", " ").title(),
+            "description": f"Blocked by IronClaw policy ({verdict}).",
+            "severity": severity,
+            "timestamp": timestamp_value,
+            "threat_type": threat_type,
+            "risk_score": severity,
+            "verdict": verdict.upper(),
         }
 
     def build_dashboard_summary(
@@ -157,6 +204,7 @@ class InstallKeyDashboardSyncService:
         owner_key: Any,
         install_keys: Any,
         wallet_summary: dict[str, Any] | None,
+        audit_events: Any = (),
     ) -> dict[str, Any]:
         normalized_owner = self._normalize_owner_key(owner_key)
         if self._looks_like_generic_platform_auth(normalized_owner):
@@ -165,6 +213,10 @@ class InstallKeyDashboardSyncService:
         wallet_payload = wallet_summary or {}
         runtime_coverage = {program: False for program in self._RUNTIME_PROGRAMS}
         slots_by_program: dict[str, dict[str, Any]] = {}
+        units_today = 0
+        units_week = 0
+        usage_by_day: dict[str, int] = {}
+        today_key = datetime.now(UTC).date().isoformat()
 
         for entry in install_keys or []:
             normalized = self._normalize_install_key_record(entry, owner_key=normalized_owner)
@@ -187,11 +239,18 @@ class InstallKeyDashboardSyncService:
                 if program == "security_guardian" or program not in runtime_coverage:
                     continue
                 slot = next((item for item in slots_by_program.values() if item.get("key_id") == key_id), None)
-                if slot is None:
+                if slot is None or slot["program"] != program:
                     continue
                 slot["units_consumed"] = max(slot.get("units_consumed", 0), normalized_usage["total_consumed_units"])
                 slot["metadata"].setdefault("usage_summary", normalized_usage)
                 slot["metadata"]["usage_summary"] = normalized_usage
+                units_today += max(
+                    normalized_usage["units_used_today"],
+                    normalized_usage["usage_by_day"].get(today_key, 0),
+                )
+                units_week += normalized_usage["units_used_this_week"]
+                for day, units in normalized_usage["usage_by_day"].items():
+                    usage_by_day[day] = usage_by_day.get(day, 0) + units
 
         install_key_slots = []
         for program in self._RUNTIME_PROGRAMS:
@@ -225,11 +284,29 @@ class InstallKeyDashboardSyncService:
         total_blocked_attacks = max(total_blocked_attacks, int(wallet_payload.get("total_blocked_attacks") or 0))
 
         wallet_total_units = int(wallet_payload.get("balance_units") or wallet_payload.get("wallet_total_units") or 0)
+        if units_today:
+            usage_by_day[today_key] = max(usage_by_day.get(today_key, 0), units_today)
+        today = datetime.now(UTC).date()
+        daily_dates = [today - timedelta(days=offset) for offset in range(6, -1, -1)]
+        daily_usage = [
+            {
+                "date": day.isoformat(),
+                "label": day.strftime("%a"),
+                "units": usage_by_day.get(day.isoformat(), 0),
+            }
+            for day in daily_dates
+        ]
+        attacks = [attack for event in audit_events or [] if (attack := self._normalize_attack_event(event)) is not None]
+        attacks.sort(key=lambda attack: attack["timestamp"], reverse=True)
 
         return {
             "owner_key": normalized_owner,
             "wallet_total_units": wallet_total_units,
             "blocked_activity_total": total_blocked_attacks,
+            "units_today": units_today,
+            "units_week": units_week,
+            "daily_usage": daily_usage,
+            "attacks": attacks,
             "runtime_coverage": runtime_coverage,
             "install_key_slots": sorted(install_key_slots, key=lambda item: self._RUNTIME_PROGRAMS.index(item["program"])),
         }

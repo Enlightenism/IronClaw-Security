@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 import hashlib
@@ -11,6 +12,14 @@ import secrets
 from threading import RLock
 from typing import Any, Final, Literal
 
+from app.core.install_key_formats import (
+    CONNECTOR_INSTALL_KEY_PROGRAMS,
+    RUNTIME_INSTALL_KEY_PROGRAMS,
+    SUPPORTED_INSTALL_KEY_PROGRAMS,
+    InstallKeyFormatRegistry,
+    InstallKeyProgram,
+    RuntimeInstallKeyProgram,
+)
 from app.core.logging import get_logger
 from app.core.supabase import get_supabase_service_client, is_supabase_configured
 from app.core.unit_wallet import get_unit_wallet_registry
@@ -22,16 +31,8 @@ _logger: logging.Logger = get_logger("ironclaw.install_keys")
 # Constants — distinct from apikeys.py ic_ and ic_org_ prefixes
 # ---------------------------------------------------------------------------
 
-_INSTALL_KEY_PREFIX_OPENCLAW: Final[str] = "ic_install_openclaw_"
-_INSTALL_KEY_PREFIX_CLAUDE: Final[str] = "ic_install_claude_code_"
-_INSTALL_KEY_PREFIX_CURSOR: Final[str] = "ic_install_cursor_"
-_INSTALL_KEY_PREFIX_GOOSE: Final[str] = "ic_install_goose_"
-_INSTALL_KEY_PREFIX_GEMINI: Final[str] = "ic_install_gemini_cli_"
-_INSTALL_KEY_PREFIX_COPILOT: Final[str] = "ic_install_copilot_"
-_INSTALL_KEY_PREFIX_HERMES: Final[str] = "ic_install_hermes_"
-_INSTALL_KEY_PREFIX_SECURITY_GUARDIAN: Final[str] = "ic_install_security_guardian_"
 _INSTALL_KEY_SECRET_BYTES: Final[int] = 32
-_T_INSTALL_KEYS: Final[str] = "install_keys"
+_T_INSTALL_KEYS: Final[str] = "install_key_records"
 _T_INSTALL_KEY_STATE: Final[str] = "ironclaw_install_key_state"
 _T_INSTALL_KEY_HISTORY: Final[str] = "ironclaw_install_key_history"
 _T_EVENT_IDEMPOTENCY: Final[str] = "ironclaw_event_idempotency"
@@ -39,91 +40,14 @@ _T_EVENT_IDEMPOTENCY: Final[str] = "ironclaw_event_idempotency"
 # Security Guardian is a shared connector/install-key family that links the
 # runtime platforms to IronClaw security. It is not a standalone runtime
 # platform and must never be treated as one in platform enumeration or UI lists.
-RuntimeProgramCode = Literal[
-    "openclaw",
-    "claude_code",
-    "cursor",
-    "goose",
-    "gemini_cli",
-    "copilot",
-    "hermes",
-]
+RuntimeProgramCode = RuntimeInstallKeyProgram
 ConnectorProgramCode = Literal["security_guardian"]
-ProgramCode = RuntimeProgramCode | ConnectorProgramCode
+ProgramCode = InstallKeyProgram
 
-_RUNTIME_PROGRAMS: Final[frozenset[str]] = frozenset(
-    {
-        "openclaw",
-        "claude_code",
-        "cursor",
-        "goose",
-        "gemini_cli",
-        "copilot",
-        "hermes",
-    }
-)
-_CONNECTOR_PROGRAMS: Final[frozenset[str]] = frozenset({"security_guardian"})
-_VALID_PROGRAMS: Final[frozenset[str]] = _RUNTIME_PROGRAMS | _CONNECTOR_PROGRAMS
-
-_RUNTIME_PROGRAM_ALIASES: Final[dict[str, RuntimeProgramCode]] = {
-    "openclaw": "openclaw",
-    "open_claw": "openclaw",
-    "open_claw_": "openclaw",
-    "open-claw": "openclaw",
-    "claw": "openclaw",
-    "claude_code": "claude_code",
-    "claude-code": "claude_code",
-    "claude code": "claude_code",
-    "claude": "claude_code",
-    "cursor": "cursor",
-    "cursor_agent": "cursor",
-    "cursor-agent": "cursor",
-    "cursor_cli": "cursor",
-    "cursor-cli": "cursor",
-    "goose": "goose",
-    "goose_agent": "goose",
-    "goose-agent": "goose",
-    "gemini_cli": "gemini_cli",
-    "gemini-cli": "gemini_cli",
-    "gemini cli": "gemini_cli",
-    "gemini": "gemini_cli",
-    "copilot": "copilot",
-    "github_copilot": "copilot",
-    "github-copilot": "copilot",
-    "githubcopilot": "copilot",
-    "hermes": "hermes",
-    "hermes_agent": "hermes",
-    "hermes-agent": "hermes",
-    "hermes_cli": "hermes",
-    "hermes-cli": "hermes",
-}
-_CONNECTOR_PROGRAM_ALIASES: Final[dict[str, ConnectorProgramCode]] = {
-    "security_guardian": "security_guardian",
-    "security-guardian": "security_guardian",
-    "securityguardian": "security_guardian",
-    "security_guardian_skill": "security_guardian",
-    "security_guardian_skill_": "security_guardian",
-    "skill": "security_guardian",
-    "skills": "security_guardian",
-}
-_CANONICAL_PROGRAM_ALIASES: Final[dict[str, ProgramCode]] = {
-    **_RUNTIME_PROGRAM_ALIASES,
-    **_CONNECTOR_PROGRAM_ALIASES,
-}
-
-# Security Guardian is intentionally retained here as a connector/shared
-# install-key family prefix because it is part of the install-key trust domain,
-# but it is excluded from the runtime platform set and platform enumeration.
-_PREFIX_BY_PROGRAM: Final[dict[ProgramCode, str]] = {
-    "openclaw": _INSTALL_KEY_PREFIX_OPENCLAW,
-    "claude_code": _INSTALL_KEY_PREFIX_CLAUDE,
-    "cursor": _INSTALL_KEY_PREFIX_CURSOR,
-    "goose": _INSTALL_KEY_PREFIX_GOOSE,
-    "gemini_cli": _INSTALL_KEY_PREFIX_GEMINI,
-    "copilot": _INSTALL_KEY_PREFIX_COPILOT,
-    "hermes": _INSTALL_KEY_PREFIX_HERMES,
-    "security_guardian": _INSTALL_KEY_PREFIX_SECURITY_GUARDIAN,
-}
+_RUNTIME_PROGRAMS: Final[frozenset[str]] = frozenset(RUNTIME_INSTALL_KEY_PROGRAMS)
+_CONNECTOR_PROGRAMS: Final[frozenset[str]] = frozenset(CONNECTOR_INSTALL_KEY_PROGRAMS)
+_VALID_PROGRAMS: Final[frozenset[str]] = frozenset(SUPPORTED_INSTALL_KEY_PROGRAMS)
+_PREFIX_BY_PROGRAM: Final[dict[ProgramCode, str]] = {spec.program: spec.prefix for spec in InstallKeyFormatRegistry.list_specs()}
 
 # Ordered longest-first so the greedy prefix match is always correct.
 _KNOWN_PREFIXES: Final[tuple[str, ...]] = tuple(sorted(_PREFIX_BY_PROGRAM.values(), key=len, reverse=True))
@@ -248,16 +172,9 @@ def _normalize_program(program: str | Any) -> ProgramCode:
     if not candidate:
         raise ValueError("program is required")
 
-    normalized = candidate.replace(" ", "_").replace("-", "_")
-    normalized = normalized.replace("__", "_")
-    normalized = normalized.strip("_")
-
-    canonical = _CANONICAL_PROGRAM_ALIASES.get(normalized)
+    canonical = InstallKeyFormatRegistry.normalize_program(candidate)
     if canonical is not None:
         return canonical
-
-    if normalized in _VALID_PROGRAMS:
-        return str(normalized)  # type: ignore[return-value]
 
     raise ValueError(f"Invalid program: {program!r}. Must be one of {sorted(_VALID_PROGRAMS)}")
 
@@ -1047,6 +964,7 @@ class InstallKeyRegistry:
         checkout_session_id: str | None = None,
         label: str = "",
         metadata: dict[str, Any] | None = None,
+        secure_record_persistor: Callable[[InstallKeyRecord], None] | None = None,
     ) -> InstallKeyRecord:
         """
         Authoritative install-key issuance path.
@@ -1120,12 +1038,16 @@ class InstallKeyRegistry:
                 metadata=dict(metadata or {}),
             )
 
-            if not _should_use_memory_fallback():
+            use_memory_fallback = _should_use_memory_fallback()
+            if not use_memory_fallback:
                 try:
                     client = get_supabase_service_client()
-                    insert_result = client.table(_T_INSTALL_KEYS).insert(record.to_db_row()).execute()
-                    if not _is_durable_write_result(insert_result):
-                        raise RuntimeError(f"Supabase insert returned no durable result for key {key_id!r}")
+                    if secure_record_persistor is None:
+                        insert_result = client.table(_T_INSTALL_KEYS).insert(record.to_db_row()).execute()
+                        if not _is_durable_write_result(insert_result):
+                            raise RuntimeError(f"Supabase insert returned no durable result for key {key_id!r}")
+                    else:
+                        secure_record_persistor(record)
                     state_result = (
                         client.table(_T_INSTALL_KEY_STATE)
                         .upsert(
@@ -1205,6 +1127,8 @@ class InstallKeyRegistry:
                 except (SupabaseAPIError, SupabaseClientError, RuntimeError, Exception):
                     _logger.exception("install_keys: failed to persist new key %s", key_id)
                     raise
+            elif secure_record_persistor is not None:
+                secure_record_persistor(record)
 
             self._records_by_id[key_id] = record
             self._key_id_by_hash[raw_key_hash] = key_id

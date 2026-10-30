@@ -30,6 +30,7 @@ ORG_ID_HEADER_NAME = "X-Org-Id"
 ORGANIZATION_ID_HEADER_NAME = "X-Organization-Id"
 TENANT_ID_HEADER_NAME = "X-Tenant-Id"
 AUTHORIZATION_HEADER_NAME = "Authorization"
+INSTALL_KEY_HEADER_NAME = "X-Install-Key"
 
 
 _RESOLVED_API_KEY_RECORD_REQUEST_STATE_KEY = "_resolved_api_key_record"
@@ -44,6 +45,7 @@ organization_id_header = APIKeyHeader(
 )
 tenant_id_header = APIKeyHeader(name=TENANT_ID_HEADER_NAME, auto_error=False)
 authorization_header = APIKeyHeader(name=AUTHORIZATION_HEADER_NAME, auto_error=False)
+install_key_header = APIKeyHeader(name=INSTALL_KEY_HEADER_NAME, auto_error=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +71,16 @@ class BearerAuthContext:
     claims: dict[str, Any]
     auth_source: str = "supabase_jwt"
     auth_method: str = "bearer_jwt"
+
+
+@dataclass(frozen=True, slots=True)
+class InstallKeyAuthContext:
+    key_id: str
+    owner_key: str
+    program: str
+    authenticated: bool = True
+    auth_source: str = "install_key"
+    auth_method: str = "install_key"
 
 
 def _get_settings(request: Request) -> Any | None:
@@ -1263,6 +1275,13 @@ def get_auth_context(
             registry_record,
         )
         resolved_principal_id = _coerce_principal_id(registry_record)
+        metadata = {
+            "header": API_KEY_HEADER_NAME,
+            "org_source": org_source,
+        }
+        registry_owner_key = _clean_optional_string(getattr(registry_record, "owner_key", None))
+        if registry_owner_key is not None:
+            metadata["owner_key"] = registry_owner_key.lower()
 
         if registry_record is not None and resolved_key_type == "org":
             principal_type = "org_key"
@@ -1279,10 +1298,7 @@ def get_auth_context(
             auth_source=auth_source,
             auth_method=auth_method,
             key_type=resolved_key_type,
-            metadata={
-                "header": API_KEY_HEADER_NAME,
-                "org_source": org_source,
-            },
+            metadata=metadata,
         )
 
     if isinstance(bearer_context, BearerAuthContext):
@@ -1361,6 +1377,60 @@ def require_api_key(
     if _is_preflight_request(request):
         return None
     return api_key
+
+
+def get_install_key_auth_context(
+    request: Request,
+    install_key: str | None = Depends(install_key_header),
+) -> InstallKeyAuthContext:
+    candidate = _clean_optional_string(install_key) or _clean_optional_string(
+        request.headers.get(INSTALL_KEY_HEADER_NAME),
+    )
+    if candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Missing install key — provide {INSTALL_KEY_HEADER_NAME}",
+        ) from None
+
+    from app.core.install_keys import get_install_key_registry
+
+    record = get_install_key_registry().authenticate_install_key(candidate)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or inactive install key",
+        ) from None
+
+    return InstallKeyAuthContext(
+        key_id=record.key_id,
+        owner_key=record.owner_key,
+        program=str(record.program),
+    )
+
+
+def get_runtime_auth_context(request: Request) -> AuthContext | InstallKeyAuthContext:
+    install_key = _clean_optional_string(request.headers.get(INSTALL_KEY_HEADER_NAME))
+    if install_key is not None:
+        return get_install_key_auth_context(request, install_key=install_key)
+
+    bearer_context = get_bearer_context(
+        request,
+        raw_authorization=request.headers.get(AUTHORIZATION_HEADER_NAME),
+    )
+    api_key = get_api_key(
+        request,
+        provided_api_key=request.headers.get(API_KEY_HEADER_NAME),
+        bearer_context=bearer_context,
+    )
+    return get_auth_context(
+        request,
+        api_key=api_key,
+        bearer_context=bearer_context,
+        session_id=request.headers.get(SESSION_ID_HEADER_NAME),
+        provided_org_id=request.headers.get(ORG_ID_HEADER_NAME),
+        provided_organization_id=request.headers.get(ORGANIZATION_ID_HEADER_NAME),
+        provided_tenant_id=request.headers.get(TENANT_ID_HEADER_NAME),
+    )
 
 
 def require_auth_context(

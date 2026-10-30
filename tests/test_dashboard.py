@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 import pytest
 
-from app.core.auth import AuthContext, require_auth_context
+from app.core.auth import AuthContext, get_auth_context, require_auth_context
 from app.core.billing import (
     BillingRegistry,
     _reset_billing_registry_for_testing,
@@ -47,18 +47,23 @@ _OWNER_KEY_2 = "owner-test-key-002"
 _AUTH_HEADERS = {"X-API-Key": os.environ["IRONCLAW_API_KEY"]}
 
 
-_TEST_AUTH = AuthContext(
-    api_key="test-api-key",
-    principal_type="api_key",
-    principal_id="test-principal",
-    session_id=None,
-    org_id="test-org",
-    permissions=(),
-    roles=(),
-    authenticated=True,
-    auth_source="test",
-    auth_method="api_key",
-)
+def _auth_context_for_owner(owner_key: str) -> AuthContext:
+    return AuthContext(
+        api_key="test-api-key",
+        principal_type="customer",
+        principal_id=owner_key,
+        session_id=None,
+        org_id=None,
+        permissions=("customer:read", "customer:write"),
+        roles=("customer_admin",),
+        authenticated=True,
+        auth_source="test",
+        auth_method="test",
+        metadata={"owner_key": owner_key},
+    )
+
+
+_TEST_AUTH = _auth_context_for_owner(_OWNER_KEY)
 
 
 def _override_auth() -> AuthContext:
@@ -241,10 +246,12 @@ def _make_unit_wallet_registry_absent() -> MagicMock:
 @pytest.fixture(scope="function")
 def dashboard_client() -> Generator[TestClient, None, None]:
     _app.dependency_overrides[require_auth_context] = _override_auth
+    _app.dependency_overrides[get_auth_context] = _override_auth
     with TestClient(_app, raise_server_exceptions=True) as client:
         client.headers.update(_AUTH_HEADERS)
         yield client
     _app.dependency_overrides.pop(require_auth_context, None)
+    _app.dependency_overrides.pop(get_auth_context, None)
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +514,7 @@ class TestDashboardInstallKeySlotLogic:
             program="claude_code",
         )
         _apply_registry_overrides(mock_registry, _make_unit_wallet_registry(_OWNER_KEY_2), _make_billing_registry(_OWNER_KEY_2))
+        dashboard_client.app.dependency_overrides[get_auth_context] = lambda: _auth_context_for_owner(_OWNER_KEY_2)
         try:
             response = dashboard_client.get(
                 "/dashboard/overview",
@@ -856,12 +864,12 @@ class TestDashboardGracefulFallback:
         response = dashboard_client.get("/dashboard/overview")
         assert response.status_code in (200, 400, 422)
 
-    def test_unknown_owner_key_returns_200_or_404(self, dashboard_client: TestClient) -> None:
+    def test_unknown_owner_key_is_rejected_for_authenticated_customer(self, dashboard_client: TestClient) -> None:
         response = dashboard_client.get(
             "/dashboard/overview",
             params={"owner_key": "nonexistent-owner-xxxxxxx"},
         )
-        assert response.status_code in (200, 404)
+        assert response.status_code == 403
 
     def test_different_owner_keys_do_not_bleed_state(self, dashboard_client: TestClient) -> None:
         r1 = dashboard_client.get(
@@ -873,4 +881,4 @@ class TestDashboardGracefulFallback:
             params={"owner_key": _OWNER_KEY_2},
         )
         assert r1.status_code in (200, 404)
-        assert r2.status_code in (200, 404)
+        assert r2.status_code == 403

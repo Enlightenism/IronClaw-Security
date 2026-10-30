@@ -2,39 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Copy, Check, Terminal } from "lucide-react";
 import { toast } from "sonner";
 
-const INSTALL_KEY_PREFIXES = {
-  claude_code: "ic_install_claude_code_",
-  openclaw: "ic_install_openclaw_",
-  cursor: "ic_install_cursor_",
-  goose: "ic_install_goose_",
-  gemini_cli: "ic_install_gemini_cli_",
-  copilot: "ic_install_copilot_",
-  hermes: "ic_install_hermes_",
-};
-const SECURITY_GUARDIAN_ALIASES = new Set([
-  "security guardian",
-  "security_guardian",
-  "security-guardian",
-  "securityguardian",
-  "security guardian skill",
-  "security_guardian_skill",
-  "skill",
-  "skills",
-]);
-
-const RUNTIME_TITLE_ALIASES = {
-  "claude code": "Claude Code",
-  claude_code: "Claude Code",
-  openclaw: "OpenClaw",
-  cursor: "Cursor",
-  goose: "Goose",
-  "gemini cli": "Gemini CLI",
-  gemini_cli: "Gemini CLI",
-  "github copilot": "GitHub Copilot",
-  copilot: "GitHub Copilot",
-  hermes: "Hermes",
-};
-
 const TINT_STYLES = {
   gold: { surface: "glass-gold", accent: "#FFD700" },
   platinum: { surface: "glass-platinum", accent: "#E5E4E2" },
@@ -47,180 +14,42 @@ const TINT_STYLES = {
 
 const DEFAULT_TINT_STYLE = TINT_STYLES.platinum;
 
-const normalizeRuntimeKey = (value) => {
-  if (typeof value !== "string") {
-    return "";
+const CLAIM_TOKEN_PATTERN = /^ic_claim_[A-Za-z0-9_-]{32,64}$/;
+const SHELL_CONTROL_CHARACTERS = /[\r\n;&|`$<>]/;
+const PLACEHOLDER_TEXT = "Generate a one-time install command after purchase";
+
+const validateInstallClaim = (claim, program, integrationId) => {
+  if (
+    !claim ||
+    claim.program !== program ||
+    claim.integration_id !== integrationId ||
+    typeof claim.claim_token !== "string" ||
+    !CLAIM_TOKEN_PATTERN.test(claim.claim_token) ||
+    typeof claim.command !== "string" ||
+    claim.command.length > 512 ||
+    SHELL_CONTROL_CHARACTERS.test(claim.command) ||
+    /ic_install_[A-Za-z0-9_./~:-]+/i.test(claim.command)
+  ) {
+    return null;
   }
 
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const commandParts = claim.command.trim().split(/\s+/);
+  const keyIndex = commandParts.indexOf("--key");
+  const expiresAt = Date.parse(claim.expires_at);
+
+  if (
+    !claim.command.trim() ||
+    keyIndex < 0 ||
+    commandParts[keyIndex + 1] !== claim.claim_token ||
+    commandParts.indexOf("--key", keyIndex + 1) !== -1 ||
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= Date.now()
+  ) {
+    return null;
+  }
+
+  return { command: claim.command.trim(), expiresAt };
 };
-
-const resolveCanonicalTitle = (value) => {
-  if (typeof value !== "string") {
-    return "";
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  const normalized = normalizeRuntimeKey(trimmed);
-  if (!normalized) {
-    return "";
-  }
-
-  if (RUNTIME_TITLE_ALIASES[normalized]) {
-    return RUNTIME_TITLE_ALIASES[normalized];
-  }
-
-  return trimmed;
-};
-
-const resolveCanonicalRuntimeKey = (value) => {
-  const title = resolveCanonicalTitle(value);
-  if (!title) {
-    return "";
-  }
-
-  const normalized = normalizeRuntimeKey(title);
-  const keyMap = {
-    "claude code": "claude_code",
-    openclaw: "openclaw",
-    cursor: "cursor",
-    goose: "goose",
-    "gemini cli": "gemini_cli",
-    "github copilot": "copilot",
-    hermes: "hermes",
-  };
-
-  return keyMap[normalized] || "";
-};
-
-const isSecurityGuardian = (value) => {
-  const key = normalizeRuntimeKey(value);
-  return Boolean(key) && SECURITY_GUARDIAN_ALIASES.has(key);
-};
-
-const GENERIC_TOKEN_PATTERNS = [
-  /--token\s*(?:=|\b)/i,
-  /token\s+(?:placeholder|loading|example|your|demo)/i,
-  /api[-_\s]?key\s*(?:=|\b)/i,
-  /gh\s+auth\s+(?:login|status|token)/i,
-  /placeholder/i,
-  /loading/i,
-  /<token>/i,
-  /your\s+(?:api|install)\s+(?:key|token)/i,
-  /example\s+(?:key|token)/i,
-  /\b(?:demo|sample)\b/i,
-];
-
-const looksLikeTokenCommand = (value) => {
-  if (typeof value !== "string") {
-    return true;
-  }
-
-  const candidate = value.trim();
-  if (!candidate) {
-    return true;
-  }
-
-  if (GENERIC_TOKEN_PATTERNS.some((pattern) => pattern.test(candidate))) {
-    return true;
-  }
-
-  return !/--key\s+ic_install_[A-Za-z0-9_./~:-]+/i.test(candidate);
-};
-
-const hasEmbeddedInstallKey = (command, runtimeKey) => {
-  if (!runtimeKey || typeof command !== "string") {
-    return false;
-  }
-
-  const candidate = command.trim();
-  if (!candidate || looksLikeTokenCommand(candidate)) {
-    return false;
-  }
-
-  const prefix = INSTALL_KEY_PREFIXES[runtimeKey];
-  if (!prefix) {
-    return false;
-  }
-
-  return new RegExp(
-    `--key\\s+${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[A-Za-z0-9_./~:-]+`,
-    "i",
-  ).test(candidate);
-};
-
-const commandMatchesRuntime = (command, runtimeKey) => {
-  if (!runtimeKey || typeof command !== "string") {
-    return false;
-  }
-
-  const candidate = command.trim();
-  if (!candidate || looksLikeTokenCommand(candidate)) {
-    return false;
-  }
-
-  if (!hasEmbeddedInstallKey(candidate, runtimeKey)) {
-    return false;
-  }
-
-  switch (runtimeKey) {
-    case "claude_code":
-      return /^gh\s+skill\s+install\b.*--agent\s+claude-code\b.*--key\s+ic_install_claude_code_[A-Za-z0-9_./~:-]+/i.test(
-        candidate,
-      );
-    case "openclaw":
-      return /^gh\s+skill\s+install\b.*--agent\s+openclaw\b.*--key\s+ic_install_openclaw_[A-Za-z0-9_./~:-]+/i.test(
-        candidate,
-      );
-    case "cursor":
-      return /^gh\s+skill\s+install\b.*--agent\s+cursor\b.*--key\s+ic_install_cursor_[A-Za-z0-9_./~:-]+/i.test(
-        candidate,
-      );
-    case "goose":
-      return /^gh\s+skill\s+install\b.*--agent\s+goose\b.*--key\s+ic_install_goose_[A-Za-z0-9_./~:-]+/i.test(
-        candidate,
-      );
-    case "gemini_cli":
-      return /^gh\s+skill\s+install\b.*--agent\s+gemini-cli\b.*--key\s+ic_install_gemini_cli_[A-Za-z0-9_./~:-]+/i.test(
-        candidate,
-      );
-    case "copilot":
-      return /^gh\s+skill\s+install\b.*--agent\s+copilot\b.*--key\s+ic_install_copilot_[A-Za-z0-9_./~:-]+/i.test(
-        candidate,
-      );
-    case "hermes":
-      return /^hermes\s+skills\s+install\b.*--key\s+ic_install_hermes_[A-Za-z0-9_./~:-]+/i.test(
-        candidate,
-      );
-    default:
-      return false;
-  }
-};
-
-const resolveCommand = (title, command) => {
-  const runtimeKey = resolveCanonicalRuntimeKey(title);
-  if (!runtimeKey) {
-    return "";
-  }
-
-  const rawCommand = typeof command === "string" ? command.trim() : "";
-  if (!rawCommand) {
-    return "";
-  }
-
-  return commandMatchesRuntime(rawCommand, runtimeKey) ? rawCommand : "";
-};
-
-const PLACEHOLDER_TEXT = "Install key will be generated after purchase";
 
 const prefersReducedMotion = () =>
   typeof window !== "undefined" &&
@@ -232,9 +61,22 @@ const supportsFinePointer = () =>
   typeof window.matchMedia === "function" &&
   window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 
-const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
+const IntegrationCard = ({
+  title,
+  program,
+  integrationId,
+  available = false,
+  unitsConsumed = 0,
+  blockedAttacks = 0,
+  onCreateClaim,
+  tint = "gold",
+  testid,
+}) => {
   const [copied, setCopied] = useState(false);
   const [pressed, setPressed] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [installCommand, setInstallCommand] = useState("");
+  const [claimExpiresAt, setClaimExpiresAt] = useState(null);
   const cardRef = useRef(null);
   const reducedMotionRef = useRef(false);
   const finePointerRef = useRef(false);
@@ -244,15 +86,60 @@ const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
     finePointerRef.current = supportsFinePointer();
   }, []);
 
-  const canonicalTitle = resolveCanonicalTitle(title);
-  const runtimeKey = resolveCanonicalRuntimeKey(canonicalTitle);
+  useEffect(() => {
+    if (available) {
+      return undefined;
+    }
 
-  if (!canonicalTitle || isSecurityGuardian(canonicalTitle) || !runtimeKey) {
+    setInstallCommand("");
+    setClaimExpiresAt(null);
+    return undefined;
+  }, [available]);
+
+  useEffect(() => {
+    if (claimExpiresAt === null) {
+      return undefined;
+    }
+
+    const delay = claimExpiresAt - Date.now();
+    if (delay <= 0) {
+      setInstallCommand("");
+      setClaimExpiresAt(null);
+      return undefined;
+    }
+
+    const timeout = globalThis.setTimeout(() => {
+      setInstallCommand("");
+      setClaimExpiresAt(null);
+    }, delay);
+
+    return () => globalThis.clearTimeout(timeout);
+  }, [claimExpiresAt]);
+
+  const canonicalTitle = typeof title === "string" ? title.trim() : "";
+  if (
+    !canonicalTitle ||
+    typeof program !== "string" ||
+    !program ||
+    program === "security_guardian" ||
+    typeof integrationId !== "string" ||
+    !integrationId.trim()
+  ) {
     return null;
   }
 
-  const normalizedCommand = resolveCommand(canonicalTitle, command);
+  const normalizedCommand = available === true ? installCommand : "";
   const isLocked = !normalizedCommand;
+  const canGenerate =
+    available === true && typeof onCreateClaim === "function";
+  const displayedUnitsConsumed =
+    Number.isSafeInteger(unitsConsumed) && unitsConsumed >= 0
+      ? unitsConsumed
+      : 0;
+  const displayedBlockedAttacks =
+    Number.isSafeInteger(blockedAttacks) && blockedAttacks >= 0
+      ? blockedAttacks
+      : 0;
 
   const { surface, accent } = TINT_STYLES[tint] || DEFAULT_TINT_STYLE;
 
@@ -298,6 +185,36 @@ const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
 
   const handleTouchEnd = () => {
     setPressed(false);
+  };
+
+  const generate = async () => {
+    if (!canGenerate || generating) {
+      return;
+    }
+
+    setGenerating(true);
+    try {
+      const claim = await onCreateClaim(integrationId);
+      const validatedClaim = validateInstallClaim(
+        claim,
+        program,
+        integrationId,
+      );
+      if (!validatedClaim) {
+        throw new Error("The install claim response is invalid.");
+      }
+
+      setInstallCommand(validatedClaim.command);
+      setClaimExpiresAt(validatedClaim.expiresAt);
+      setCopied(false);
+      toast.success("One-time install command generated");
+    } catch {
+      toast.error(
+        "Unable to generate a secure install command. Please try again.",
+      );
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const copy = async () => {
@@ -359,9 +276,38 @@ const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
         </h3>
       </div>
 
+      <div
+        className="mb-3 grid grid-cols-2 gap-3 text-xs text-[#BFC1C2]"
+        data-testid={`${testid}-usage`}
+      >
+        <div>
+          <div className="text-[10px] uppercase tracking-wider">
+            Protection units used
+          </div>
+          <div
+            className="font-tech mt-1 text-sm text-white"
+            data-testid={`${testid}-units-consumed`}
+          >
+            {displayedUnitsConsumed.toLocaleString()}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider">
+            Attacks blocked
+          </div>
+          <div
+            className="font-tech mt-1 text-sm text-white"
+            data-testid={`${testid}-blocked-attacks`}
+          >
+            {displayedBlockedAttacks.toLocaleString()}
+          </div>
+        </div>
+      </div>
+
       <p className="mb-3 text-xs text-[#BFC1C2]">
-        Drop this one-liner into your agent host. Every unit draw and blocked
-        attack from this install streams straight to your dashboard.
+        Generate a one-time claim command for this agent host. Each claim can
+        be redeemed once and expires automatically. The token is visible in
+        your command history, so use a trusted terminal.
       </p>
 
       <div className="flex items-stretch gap-2">
@@ -385,13 +331,39 @@ const IntegrationCard = ({ title, command, tint = "gold", testid }) => {
           }}
           aria-label={
             isLocked
-              ? `${canonicalTitle} install command locked until purchase`
+              ? canGenerate
+                ? `Generate a one-time ${canonicalTitle} install command before copying`
+                : `${canonicalTitle} install command locked until purchase`
               : `Copy ${canonicalTitle} install command`
           }
         >
           {copied ? <Check size={18} /> : <Copy size={18} />}
         </button>
       </div>
+      {claimExpiresAt !== null ? (
+        <p className="mt-2 text-xs text-white/50">
+          This one-time command expires{" "}
+          {new Date(claimExpiresAt).toLocaleTimeString()}.
+        </p>
+      ) : null}
+      <button
+        type="button"
+        onClick={generate}
+        disabled={!canGenerate || generating}
+        data-testid={`${testid}-generate`}
+        className="mt-3 rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
+        style={{
+          borderColor: `${accent}55`,
+          background: `${accent}14`,
+          color: accent,
+        }}
+      >
+        {generating
+          ? "Generating..."
+          : normalizedCommand
+            ? "Generate a new one-time command"
+            : "Generate one-time install command"}
+      </button>
     </div>
   );
 };

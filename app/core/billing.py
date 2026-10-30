@@ -48,6 +48,7 @@ __all__ = [
     "get_billing_registry",
     "get_active_subscription_for_customer",
     "resolve_billing_owner",
+    "resolve_authenticated_billing_owner",
     "_reset_billing_registry_for_testing",
 ]
 
@@ -198,6 +199,31 @@ def resolve_billing_owner(auth_ctx: Any, buyer_email: str) -> str:
     if not _is_real_billing_owner(normalized_email):
         return ""
     return normalized_email
+
+
+def resolve_authenticated_billing_owner(auth_ctx: Any) -> str | None:
+    """Resolve the billing owner from verified authentication context only."""
+    if auth_ctx is None or getattr(auth_ctx, "authenticated", True) is False:
+        return None
+
+    metadata = getattr(auth_ctx, "metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    metadata_owner = str(metadata.get("owner_key") or "").strip()
+    if metadata_owner:
+        resolved_owner = resolve_billing_owner(auth_ctx, metadata_owner)
+        if resolved_owner:
+            return resolved_owner
+
+    buyer_email = str(metadata.get("email") or getattr(auth_ctx, "email", "") or "").strip()
+    if not buyer_email:
+        principal_id = str(getattr(auth_ctx, "principal_id", "") or "").strip()
+        if "@" in principal_id:
+            buyer_email = principal_id
+
+    resolved_owner = resolve_billing_owner(auth_ctx, buyer_email)
+    return resolved_owner or None
 
 
 PlanCode = Literal["starter-5k", "team-25k", "enterprise-60k"]

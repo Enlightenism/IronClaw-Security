@@ -9,7 +9,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.core.auth import require_api_key
+from app.core.auth import InstallKeyAuthContext, get_install_key_auth_context
 from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import InstallKeyRegistry, get_install_key_registry
 from app.core.unit_wallet import (
@@ -21,7 +21,6 @@ from app.persistencebootstrap import get_persistence_store
 router = APIRouter(
     prefix="/install-key-events",
     tags=["install-key-events"],
-    dependencies=[Depends(require_api_key)],
 )
 
 InstallKeyEventType = Literal[
@@ -75,10 +74,9 @@ def _normalize_program(program: str | None) -> str | None:
     if not normalized:
         return None
     canonical = InstallKeyFormatRegistry.normalize_program(normalized)
-    if canonical is not None:
+    if canonical is not None and canonical in InstallKeyFormatRegistry.list_programs():
         return canonical
-    normalized = normalized.replace(" ", "_").replace("-", "_").replace("__", "_").strip("_")
-    return normalized if normalized in set(InstallKeyFormatRegistry.list_programs()) else None
+    return None
 
 
 def _looks_like_generic_platform_auth(value: str | None) -> bool:
@@ -174,6 +172,7 @@ class InstallKeyEventResponse(BaseModel):
 
 
 _IDEMPOTENCY_TTL_SECONDS = int(os.environ.get("IRONCLAW_INSTALL_KEY_EVENT_TTL_SECONDS", "86400"))
+_EVENT_PROCESSING_LOCK = Lock()
 
 
 def _is_test_environment() -> bool:
@@ -290,29 +289,30 @@ def _event_store_record(event_id: str) -> None:
 def _ensure_key_context(
     *,
     payload: InstallKeyEventRequest,
-    install_key_registry: InstallKeyRegistry,
-) -> tuple[str | None, str | None]:
-    owner_key = _normalize_owner(payload.owner_key)
-    program = _normalize_program(payload.program)
-
-    if payload.key_id:
-        record = install_key_registry.get_key_by_id(payload.key_id)
-        if record is not None:
-            if owner_key is None:
-                owner_key = _normalize_owner(record.owner_key)
-            if program is None:
-                program = _normalize_program(record.program)
-
-    if owner_key is None and payload.key_id is None:
+    auth_context: InstallKeyAuthContext,
+) -> tuple[str, str]:
+    owner_key = _normalize_owner(auth_context.owner_key)
+    program = _normalize_program(auth_context.program)
+    if owner_key is None or program is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="owner_key or key_id is required for install-key telemetry events.",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Install-key authentication did not resolve to an active runtime identity.",
         )
 
-    if owner_key is not None and _looks_like_generic_platform_auth(owner_key):
+    if payload.key_id is not None and payload.key_id != auth_context.key_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Install-key lifecycle events must resolve to the canonical install-key owner, not the generic platform auth credential.",
+            detail="The supplied key_id does not match the authenticated install key.",
+        )
+    if payload.owner_key is not None and _normalize_owner(payload.owner_key) != owner_key:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The supplied owner_key does not match the authenticated install key owner.",
+        )
+    if payload.program is not None and _normalize_program(payload.program) != program:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The supplied program does not match the authenticated install key runtime.",
         )
 
     return owner_key, program
@@ -320,28 +320,21 @@ def _ensure_key_context(
 
 def _require_key_record(
     *,
-    payload: InstallKeyEventRequest,
+    auth_context: InstallKeyAuthContext,
     install_key_registry: InstallKeyRegistry,
-    owner_key: str | None,
     op: str,
 ) -> Any:
-    if payload.key_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"{op} requires key_id.",
-        )
-
-    record = install_key_registry.get_key_by_id(payload.key_id)
+    record = install_key_registry.get_key_by_id(auth_context.key_id)
     if record is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Install key not found: {payload.key_id!r}",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Install key is no longer active.",
         )
 
-    if owner_key is not None and _normalize_owner(record.owner_key) != owner_key:
+    if _normalize_owner(record.owner_key) != _normalize_owner(auth_context.owner_key) or _normalize_program(record.program) != _normalize_program(auth_context.program):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Install key does not belong to the supplied owner_key.",
+            detail=f"Install key identity changed while processing {op}.",
         )
 
     return record
@@ -376,15 +369,12 @@ def _sync_wallet_event(
 def _apply_event(
     *,
     payload: InstallKeyEventRequest,
+    auth_context: InstallKeyAuthContext,
+    event_id: str,
     install_key_registry: InstallKeyRegistry,
     wallet_registry: UnitWalletRegistry,
 ) -> tuple[bool, dict[str, Any]]:
-    owner_key, program = _ensure_key_context(payload=payload, install_key_registry=install_key_registry)
-    if owner_key is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="owner_key could not be resolved for this install-key event.",
-        )
+    owner_key, program = _ensure_key_context(payload=payload, auth_context=auth_context)
 
     event_name = payload.event_type
     if event_name in {"install_key_issued", "install_key_provisioned"}:
@@ -396,66 +386,39 @@ def _apply_event(
     occurred_at = _coerce_iso(payload.occurred_at, default=_utc_now_iso())
     metadata = dict(payload.metadata or {})
     metadata.setdefault("source", "install-key-events")
+    metadata["event_id"] = event_id
+    metadata["event_type"] = event_name
+    key_id = auth_context.key_id
+    _require_key_record(
+        auth_context=auth_context,
+        install_key_registry=install_key_registry,
+        op=event_name,
+    )
 
     if event_name in {"usage_units_debited", "install_key_usage_recorded"}:
-        if payload.key_id is None or payload.units is None:
+        if payload.units is None or payload.units <= 0:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="usage_units_debited requires key_id and units.",
-            )
-        record = install_key_registry.get_key_by_id(payload.key_id)
-        if record is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Install key not found: {payload.key_id!r}",
-            )
-        if record.owner_key != owner_key:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Install key does not belong to the supplied owner_key.",
+                detail="usage events require a positive units value.",
             )
 
         wallet_registry.debit_units_for_install_key(
             owner_key=owner_key,
-            key_id=payload.key_id,
-            program=program or record.program,
+            key_id=key_id,
+            program=program,
             units=payload.units,
             action_type=payload.action_type or "telemetry",
             blocked_attack_count=payload.blocked_attack_count,
-            metadata={**metadata, "event_type": event_name},
-        )
-        install_key_registry.record_key_usage(payload.key_id, units=payload.units)
-        _sync_wallet_event(
-            wallet_registry=wallet_registry,
-            owner_key=owner_key,
-            key_id=payload.key_id,
-            program=program or record.program,
-            event_type=event_name,
-            units=int(payload.units),
-            blocked_attack_count=int(payload.blocked_attack_count),
-            action_type=payload.action_type or "telemetry",
-            occurred_at=occurred_at,
-            metadata={**metadata, "event_type": event_name},
+            metadata=metadata,
         )
         return True, {"event_type": event_name, "balance_update": "debit"}
 
     if event_name == "install_key_reported":
-        if payload.key_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="install_key_reported requires key_id.",
-            )
-        record = _require_key_record(
-            payload=payload,
-            install_key_registry=install_key_registry,
-            owner_key=owner_key,
-            op="install_key_reported",
-        )
         _sync_wallet_event(
             wallet_registry=wallet_registry,
             owner_key=owner_key,
-            key_id=payload.key_id,
-            program=program or record.program,
+            key_id=key_id,
+            program=program,
             event_type=event_name,
             units=0,
             blocked_attack_count=int(payload.blocked_attack_count or 0),
@@ -466,23 +429,12 @@ def _apply_event(
         return True, {"event_type": event_name, "status": "reported"}
 
     if event_name in {"action_blocked", "prompt_injection_detected", "quarantine_detected", "quarantine_event"}:
-        if payload.key_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"{event_name} requires key_id.",
-            )
-        record = _require_key_record(
-            payload=payload,
-            install_key_registry=install_key_registry,
-            owner_key=owner_key,
-            op=event_name,
-        )
         blocked_count = max(1, int(payload.blocked_attack_count or 1))
         _sync_wallet_event(
             wallet_registry=wallet_registry,
             owner_key=owner_key,
-            key_id=payload.key_id,
-            program=program or record.program,
+            key_id=key_id,
+            program=program,
             event_type=event_name,
             units=0,
             blocked_attack_count=blocked_count,
@@ -493,16 +445,10 @@ def _apply_event(
         return True, {"event_type": event_name, "blocked_attack_count": blocked_count}
 
     if event_name == "install_key_activated":
-        _require_key_record(
-            payload=payload,
-            install_key_registry=install_key_registry,
-            owner_key=owner_key,
-            op="install_key_activated",
-        )
         _sync_wallet_event(
             wallet_registry=wallet_registry,
             owner_key=owner_key,
-            key_id=payload.key_id,
+            key_id=key_id,
             program=program,
             event_type=event_name,
             units=0,
@@ -514,14 +460,8 @@ def _apply_event(
         return True, {"event_type": event_name, "status": "activated"}
 
     if event_name == "install_key_revoked":
-        _require_key_record(
-            payload=payload,
-            install_key_registry=install_key_registry,
-            owner_key=owner_key,
-            op="install_key_revoked",
-        )
         try:
-            install_key_registry.revoke_key(payload.key_id)
+            install_key_registry.revoke_key(key_id)
         except Exception as exc:  # pragma: no cover - defensive; re-raise as HTTP 404/409 style
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -530,7 +470,7 @@ def _apply_event(
         _sync_wallet_event(
             wallet_registry=wallet_registry,
             owner_key=owner_key,
-            key_id=payload.key_id,
+            key_id=key_id,
             program=program,
             event_type=event_name,
             units=0,
@@ -556,35 +496,45 @@ def _apply_event(
 )
 def ingest_install_key_event(
     payload: InstallKeyEventRequest,
+    auth_context: InstallKeyAuthContext = Depends(get_install_key_auth_context),
     install_key_registry: InstallKeyRegistry = Depends(get_install_key_registry),
     wallet_registry: UnitWalletRegistry = Depends(get_unit_wallet_registry),
 ) -> InstallKeyEventResponse:
-    if _event_seen(payload.event_id):
-        return InstallKeyEventResponse(
-            event_id=payload.event_id,
-            event_type=payload.event_type,
-            key_id=payload.key_id,
-            owner_key=_normalize_owner(payload.owner_key),
-            program=_normalize_program(payload.program),
-            processed=True,
-            wallet_updated=False,
-            dashboard_synced=True,
-            recorded_at=_coerce_iso(payload.occurred_at, default=_utc_now_iso()),
-            metadata={"status": "duplicate", "source": "install-key-events"},
-        )
-
-    wallet_updated, _ = _apply_event(
-        payload=payload,
+    owner_key, program = _ensure_key_context(payload=payload, auth_context=auth_context)
+    _require_key_record(
+        auth_context=auth_context,
         install_key_registry=install_key_registry,
-        wallet_registry=wallet_registry,
+        op=payload.event_type,
     )
-    _event_store_record(payload.event_id)
+    scoped_event_id = f"{auth_context.key_id}:{payload.event_id}"
+    with _EVENT_PROCESSING_LOCK:
+        if _event_seen(scoped_event_id):
+            return InstallKeyEventResponse(
+                event_id=payload.event_id,
+                event_type=payload.event_type,
+                key_id=auth_context.key_id,
+                owner_key=owner_key,
+                program=program,
+                processed=True,
+                wallet_updated=False,
+                dashboard_synced=True,
+                recorded_at=_coerce_iso(payload.occurred_at, default=_utc_now_iso()),
+                metadata={"status": "duplicate", "source": "install-key-events"},
+            )
 
-    owner_key, program = _ensure_key_context(payload=payload, install_key_registry=install_key_registry)
+        wallet_updated, _ = _apply_event(
+            payload=payload,
+            auth_context=auth_context,
+            event_id=scoped_event_id,
+            install_key_registry=install_key_registry,
+            wallet_registry=wallet_registry,
+        )
+        _event_store_record(scoped_event_id)
+
     return InstallKeyEventResponse(
         event_id=payload.event_id,
         event_type=payload.event_type,
-        key_id=payload.key_id,
+        key_id=auth_context.key_id,
         owner_key=owner_key,
         program=program,
         processed=True,

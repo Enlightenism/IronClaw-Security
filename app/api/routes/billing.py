@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field, field_validator
 from app.core.auth import AuthContext, get_auth_context, require_auth_context
 from app.core.billing import resolve_billing_owner, resolve_package_id
 from app.core.install_key_formats import InstallKeyFormatRegistry
-from app.core.install_keys import InstallKeyAlreadyExistsError, get_install_key_registry
 from app.core.unit_wallet import (
     ORG_KEY_PREFIX,
     TOKEN_CHUNK_SIZE,
@@ -25,6 +24,7 @@ from app.core.unit_wallet import (
     units_required_for_tokens,
 )
 from app.persistencebootstrap import build_store
+from app.services.install_key_provisioning import InstallKeyProvisioningService
 
 logger = logging.getLogger(__name__)
 
@@ -440,14 +440,6 @@ def _parse_checkout_status(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
-def _install_key_records_for_owner(owner_key: str) -> list[Any]:
-    try:
-        return get_install_key_registry().get_keys_for_owner(owner_key)
-    except Exception:
-        logger.exception("billing: failed to load install keys for owner_key=%s", owner_key)
-        return []
-
-
 def _provision_paid_install_keys(
     *,
     owner_key: str,
@@ -455,55 +447,38 @@ def _provision_paid_install_keys(
     session_id: str | None,
     payment_id: str | None,
     buyer_email: str,
-) -> dict[str, str]:
-    issued: dict[str, str] = {}
-    registry = get_install_key_registry()
-    for program in InstallKeyFormatRegistry.list_programs():
-        try:
-            record = registry.generate_install_key(
-                owner_key=owner_key,
-                subscription_id=purchase_id,
-                program=program,
-                label=f"paid-provisioned on purchase {purchase_id}",
-                metadata={
-                    "purchase_id": purchase_id,
-                    "checkout_session_id": session_id,
-                    "payment_id": payment_id,
-                    "payment_status": "paid",
-                    "entitlements_status": "active",
-                    "issued_after_payment": True,
-                    "auto_provisioned": True,
-                    "buyer_email": buyer_email,
-                },
-                payment_status="paid",
-                entitlements_status="active",
-                issued_after_payment=True,
-                purchase_reference=purchase_id,
-                checkout_session_id=session_id,
-            )
-        except InstallKeyAlreadyExistsError:
-            existing = next((item for item in registry.get_keys_for_owner(owner_key) if item.program == program and (item.active or str(item.payment_status).lower() == "paid")), None)
-            if existing is None:
-                continue
-            record = existing
-        except Exception:
-            logger.exception(
-                "billing: install key issuance failed for owner=%s program=%s purchase_id=%s",
-                owner_key,
-                program,
-                purchase_id,
-            )
-            continue
+) -> dict[str, Any]:
+    normalized_owner = str(owner_key).strip().lower()
 
-        if str(getattr(record, "payment_status", "")).strip().lower() != "paid":
-            continue
-        if not bool(getattr(record, "issued_after_payment", False)):
-            continue
-        masked_key = getattr(record, "masked_key", None)
-        if not masked_key:
-            continue
-        issued[program] = str(masked_key)
-    return issued
+    class _ConfirmedPaymentEntitlement:
+        def has_active_subscription(self, candidate_owner_key: str) -> bool:
+            return str(candidate_owner_key).strip().lower() == normalized_owner
+
+    provisioning_service = InstallKeyProvisioningService(
+        billing_registry=_ConfirmedPaymentEntitlement(),
+    )
+    issued_keys = provisioning_service.provision_for_purchase(
+        owner_key=normalized_owner,
+        subscription_id=purchase_id,
+        source="billing.checkout",
+        metadata={
+            "purchase_id": purchase_id,
+            "checkout_session_id": session_id,
+            "payment_id": payment_id,
+            "buyer_email": buyer_email,
+            "payment_status": "paid",
+            "entitlements_status": "active",
+            "issued_after_payment": True,
+            "auto_provisioned": True,
+        },
+        payment_status="paid",
+        entitlements_status="active",
+        issued_after_payment=True,
+        checkout_session_id=session_id,
+        purchase_reference=purchase_id,
+        payment_confirmed=True,
+    )
+    return {program: issued.record for program, issued in issued_keys.items()}
 
 
 def _find_matching_purchase(
@@ -814,17 +789,6 @@ def _process_checkout_session_completed_webhook(
     payload_hash = _compute_payload_hash(payload)
 
     existing_event = _read_event_ledger_record(session_id=session_id, payload_hash=payload_hash, purchase_id=purchase_id or None)
-    if existing_event is not None:
-        wallet = get_unit_wallet_registry().get_or_create_wallet(owner_key or buyer_email or purchase_id)
-        return {
-            "status": "duplicate",
-            "event_id": str(payload.get("id") or event_data.get("id") or session_id),
-            "purchase_id": purchase_id,
-            "session_id": session_id,
-            "payload_hash": payload_hash,
-            "wallet": _wallet_to_view(wallet),
-            "reason": "event_already_processed",
-        }
 
     purchase = _find_matching_purchase(
         session_id=session_id,
@@ -834,6 +798,17 @@ def _process_checkout_session_completed_webhook(
         purchase_id=purchase_id or None,
     )
     if purchase is None:
+        if existing_event is not None:
+            wallet = get_unit_wallet_registry().get_or_create_wallet(owner_key or buyer_email or purchase_id)
+            return {
+                "status": "duplicate",
+                "event_id": str(payload.get("id") or event_data.get("id") or session_id),
+                "purchase_id": purchase_id,
+                "session_id": session_id,
+                "payload_hash": payload_hash,
+                "wallet": _wallet_to_view(wallet),
+                "reason": "event_already_processed",
+            }
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -844,15 +819,17 @@ def _process_checkout_session_completed_webhook(
         )
 
     already_credited = bool(purchase.metadata.get("units_credited")) or bool(purchase.metadata.get("wallet_credited"))
-    if already_credited:
+    install_keys_provisioned = bool(purchase.metadata.get("install_keys_provisioned"))
+    if already_credited and install_keys_provisioned:
         wallet = get_unit_wallet_registry().get_or_create_wallet(purchase.owner_key)
-        _write_event_ledger_record(
-            event_id=str(payload.get("id") or event_data.get("id") or session_id),
-            event_type=event_type,
-            session_id=session_id,
-            purchase_id=purchase.purchase_id,
-            payload_hash=payload_hash,
-        )
+        if existing_event is None:
+            _write_event_ledger_record(
+                event_id=str(payload.get("id") or event_data.get("id") or session_id),
+                event_type=event_type,
+                session_id=session_id,
+                purchase_id=purchase.purchase_id,
+                payload_hash=payload_hash,
+            )
         return {
             "status": "duplicate",
             "purchase_id": purchase.purchase_id,
@@ -867,49 +844,69 @@ def _process_checkout_session_completed_webhook(
     if granted_units <= 0 and pkg is not None:
         granted_units = int(pkg["included_units"])
 
-    wallet = get_unit_wallet_registry().get_or_create_wallet(purchase.owner_key)
-    try:
-        updated_wallet = get_unit_wallet_registry().credit_units(
-            owner_key=purchase.owner_key,
-            units=granted_units,
-            metadata={
-                "source": "checkout.session.completed",
-                "purchase_id": purchase.purchase_id,
-                "checkout_session_id": session_id,
-                "package_id": purchase.package_id,
-                "event_type": event_type,
-                "customer_id": customer_id,
-                "payment_status": "paid",
-                "fulfillment_status": "fulfilled",
-                "payload_hash": payload_hash,
-            },
-        )
-    except Exception:
-        purchase.payment_status = "pending"
-        purchase.entitlement_status = "not_active"
-        purchase.metadata["payment_status"] = "pending"
-        purchase.metadata["fulfillment_status"] = "pending"
-        purchase.metadata["install_keys_provisioned"] = False
-        purchase.metadata["units_credited"] = False
-        purchase.metadata["wallet_credited"] = False
-        purchase.metadata["checkout_session_id"] = session_id
-        purchase.metadata["customer_id"] = customer_id
-        purchase.metadata["owner_key"] = purchase.owner_key
-        purchase.metadata["buyer_email"] = purchase.buyer_email
-        purchase.metadata["package_id"] = purchase.package_id
+    wallet_registry = get_unit_wallet_registry()
+    if already_credited:
+        updated_wallet = wallet_registry.get_or_create_wallet(purchase.owner_key)
+    else:
         try:
-            _PURCHASE_REPOSITORY.upsert(purchase)
-        except Exception:
-            logger.exception("billing: failed to rollback purchase state after wallet credit failure for purchase_id=%s", purchase.purchase_id)
-        raise
+            updated_wallet = wallet_registry.credit_units(
+                owner_key=purchase.owner_key,
+                units=granted_units,
+                metadata={
+                    "source": "checkout.session.completed",
+                    "purchase_id": purchase.purchase_id,
+                    "purchase_reference": purchase.purchase_id,
+                    "checkout_session_id": session_id,
+                    "event_id": f"billing-checkout:{purchase.purchase_id}:credit",
+                    "package_id": purchase.package_id,
+                    "event_type": event_type,
+                    "customer_id": customer_id,
+                    "payment_status": "paid",
+                    "fulfillment_status": "pending",
+                    "payload_hash": payload_hash,
+                },
+            )
+        except Exception as exc:
+            purchase.payment_status = "paid"
+            purchase.entitlement_status = "not_active"
+            purchase.metadata["payment_status"] = "paid"
+            purchase.metadata["fulfillment_status"] = "pending"
+            purchase.metadata["install_keys_provisioned"] = False
+            purchase.metadata["units_credited"] = False
+            purchase.metadata["wallet_credited"] = False
+            purchase.metadata["checkout_session_id"] = session_id
+            purchase.metadata["customer_id"] = customer_id
+            purchase.metadata["owner_key"] = purchase.owner_key
+            purchase.metadata["buyer_email"] = purchase.buyer_email
+            purchase.metadata["package_id"] = purchase.package_id
+            try:
+                _PURCHASE_REPOSITORY.upsert(purchase)
+            except Exception:
+                logger.error(
+                    "billing: failed to persist paid purchase state after wallet failure purchase_id=%s",
+                    purchase.purchase_id,
+                )
+            logger.error(
+                "billing: wallet credit failed for paid purchase_id=%s error_type=%s",
+                purchase.purchase_id,
+                type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "status": "wallet_credit_failed",
+                    "reason": "paid_purchase_fulfillment_retryable",
+                    "purchase_id": purchase.purchase_id,
+                },
+            ) from exc
 
     purchase.granted_units = granted_units
     purchase.payment_id = str(metadata.get("payment_id") or purchase.purchase_id)
     purchase.payment_status = "paid"
     purchase.entitlement_status = "active"
     purchase.metadata["payment_status"] = "paid"
-    purchase.metadata["fulfillment_status"] = "fulfilled"
-    purchase.metadata["install_keys_provisioned"] = False
+    purchase.metadata["fulfillment_status"] = "pending"
+    purchase.metadata["install_keys_provisioned"] = install_keys_provisioned
     purchase.metadata["units_credited"] = True
     purchase.metadata["wallet_credited"] = True
     purchase.metadata["credit_event_hash"] = payload_hash
@@ -918,30 +915,6 @@ def _process_checkout_session_completed_webhook(
     purchase.metadata["owner_key"] = purchase.owner_key
     purchase.metadata["buyer_email"] = purchase.buyer_email
     purchase.metadata["package_id"] = purchase.package_id
-
-    triggered = _provision_paid_install_keys(
-        owner_key=purchase.owner_key,
-        purchase_id=purchase.purchase_id,
-        session_id=session_id,
-        payment_id=str(metadata.get("payment_id") or purchase.purchase_id),
-        buyer_email=purchase.buyer_email,
-    )
-
-    if triggered:
-        purchase.metadata["install_keys_provisioned"] = True
-        purchase.install_key_id = next(iter(triggered.values()), None)
-        purchase.masked_key = purchase.install_key_id
-        purchase.program = next(iter(sorted(triggered)), None)
-        purchase.usage_summary = {
-            "program": purchase.program,
-            "entitlement_status": "active",
-            "payment_status": "paid",
-            "install_keys_provisioned": True,
-        }
-        purchase.openclaw_install_key = triggered.get("openclaw")
-        purchase.claude_code_install_key = triggered.get("claude_code")
-        purchase.hermes_install_key = triggered.get("hermes")
-        purchase.metadata["issued_programs"] = sorted(triggered)
 
     try:
         _PURCHASE_REPOSITORY.upsert(purchase)
@@ -955,6 +928,88 @@ def _process_checkout_session_completed_webhook(
                 "session_id": session_id,
             },
         ) from exc
+
+    if not install_keys_provisioned:
+        try:
+            triggered = _provision_paid_install_keys(
+                owner_key=purchase.owner_key,
+                purchase_id=purchase.purchase_id,
+                session_id=session_id,
+                payment_id=purchase.payment_id,
+                buyer_email=purchase.buyer_email,
+            )
+        except Exception as exc:
+            logger.error(
+                "billing: install-key provisioning failed for paid purchase_id=%s error_type=%s",
+                purchase.purchase_id,
+                type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "status": "install_key_provisioning_failed",
+                    "reason": "paid_purchase_fulfillment_retryable",
+                    "purchase_id": purchase.purchase_id,
+                },
+            ) from exc
+
+        expected_programs = set(InstallKeyFormatRegistry.list_programs())
+        if set(triggered) != expected_programs:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "status": "install_key_provisioning_incomplete",
+                    "reason": "paid_purchase_fulfillment_retryable",
+                    "purchase_id": purchase.purchase_id,
+                },
+            )
+
+        primary_program = InstallKeyFormatRegistry.list_programs()[0]
+        primary_record = triggered[primary_program]
+        purchase.metadata["install_keys_provisioned"] = True
+        purchase.install_key_id = primary_record.key_id
+        purchase.masked_key = primary_record.masked_key
+        purchase.program = primary_program
+        purchase.usage_summary = {
+            "program": primary_program,
+            "entitlement_status": "active",
+            "payment_status": "paid",
+            "install_keys_provisioned": True,
+            "install_key_ids": {program: record.key_id for program, record in triggered.items()},
+        }
+        purchase.openclaw_install_key = getattr(triggered.get("openclaw"), "masked_key", None)
+        purchase.claude_code_install_key = getattr(triggered.get("claude_code"), "masked_key", None)
+        purchase.hermes_install_key = getattr(triggered.get("hermes"), "masked_key", None)
+        purchase.metadata["issued_programs"] = sorted(triggered)
+        purchase.metadata["install_key_ids"] = {program: record.key_id for program, record in triggered.items()}
+        purchase.metadata["fulfillment_status"] = "fulfilled"
+
+        try:
+            _PURCHASE_REPOSITORY.upsert(purchase)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "status": "purchase_persistence_failed",
+                    "reason": "durable_purchase_storage_unavailable",
+                    "purchase_id": purchase.purchase_id,
+                    "session_id": session_id,
+                },
+            ) from exc
+    else:
+        purchase.metadata["fulfillment_status"] = "fulfilled"
+        try:
+            _PURCHASE_REPOSITORY.upsert(purchase)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "status": "purchase_persistence_failed",
+                    "reason": "durable_purchase_storage_unavailable",
+                    "purchase_id": purchase.purchase_id,
+                    "session_id": session_id,
+                },
+            ) from exc
 
     _write_event_ledger_record(
         event_id=str(payload.get("id") or event_data.get("id") or session_id),

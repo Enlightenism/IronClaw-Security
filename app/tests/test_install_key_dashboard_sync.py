@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from app.services.install_key_dashboard_sync import InstallKeyDashboardSyncService
@@ -66,6 +67,67 @@ def test_dashboard_sync_maps_paid_runtime_keys_to_summary() -> None:
     assert {slot["program"] for slot in summary["install_key_slots"]} == {"openclaw", "hermes"}
     assert all(slot["program"] != "security_guardian" for slot in summary["install_key_slots"])
     assert summary["install_key_slots"][0]["masked_key"] == "ic_install_openclaw_...abcd"
+
+
+def test_dashboard_sync_maps_runtime_usage_and_sanitized_attack_events() -> None:
+    service = InstallKeyDashboardSyncService()
+    owner_key = "owner_dash_usage"
+    today = datetime.now(UTC)
+    today_key = today.date().isoformat()
+    yesterday_key = (today.date() - timedelta(days=1)).isoformat()
+
+    summary = service.build_dashboard_summary(
+        owner_key=owner_key,
+        install_keys=[
+            _record(key_id="ik_cursor_usage", owner_key=owner_key, program="cursor"),
+        ],
+        wallet_summary={
+            "owner_key": owner_key,
+            "balance_units": 90,
+            "install_key_usage": {
+                "ik_cursor_usage": {
+                    "key_id": "ik_cursor_usage",
+                    "owner_key": owner_key,
+                    "program": "cursor",
+                    "total_consumed_units": 8,
+                    "total_blocked_attacks": 2,
+                    "units_used_today": 3,
+                    "units_used_this_week": 8,
+                    "usage_by_day": {yesterday_key: 5, today_key: 3},
+                },
+            },
+        },
+        audit_events=[
+            SimpleNamespace(
+                event_id="audit-blocked-1",
+                event_type="policy_decision",
+                severity="high",
+                created_at=today,
+                verdict="block",
+                metadata={"category": "prompt-injection"},
+                summary="sensitive prompt contents are not dashboard metadata",
+            ),
+            SimpleNamespace(
+                event_id="audit-allowed-1",
+                event_type="policy_decision",
+                severity="low",
+                created_at=today,
+                verdict="allow",
+                metadata={},
+            ),
+        ],
+    )
+
+    assert summary["units_today"] == 3
+    assert summary["units_week"] == 8
+    assert summary["daily_usage"][-2]["date"] == yesterday_key
+    assert summary["daily_usage"][-2]["units"] == 5
+    assert summary["daily_usage"][-1]["date"] == today_key
+    assert summary["daily_usage"][-1]["units"] == 3
+    assert len(summary["attacks"]) == 1
+    assert summary["attacks"][0]["id"] == "audit-blocked-1"
+    assert summary["attacks"][0]["title"] == "Prompt Injection"
+    assert "sensitive prompt contents" not in str(summary["attacks"][0])
 
 
 def test_dashboard_sync_rejects_generic_platform_auth_as_owner() -> None:

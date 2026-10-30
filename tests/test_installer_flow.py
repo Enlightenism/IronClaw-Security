@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -72,93 +73,170 @@ def _assert_json_serializable(value: Any) -> None:
     json.dumps(value)
 
 
-def test_app_cli_install_requires_paid_customer_install_key() -> None:
+def test_app_cli_install_requires_one_time_claim() -> None:
     from app.cli.install import build_install_parser
 
     parser = build_install_parser()
-    args = parser.parse_args(["openclaw", "--key", "ic_123456", "--owner-key", "owner-456"])
+    args = parser.parse_args(["openclaw", "--install-claim", "ic_claim_example"])
 
-    assert args.key == "ic_123456"
-    assert args.owner_key == "owner-456"
+    assert args.claim_token == "ic_claim_example"
+    assert not hasattr(args, "key")
+    assert not hasattr(args, "owner_key")
+    with pytest.raises(SystemExit):
+        parser.parse_args(["openclaw", "--key", "ic_install_openclaw_secret"])
 
     from app.cli.install import run_install_command
 
-    fake_registry = MagicMock()
-    fake_registry.authenticate_install_key.return_value = None
     exit_code, payload = run_install_command(
         "openclaw",
-        key="ic_123456",
-        owner_key="owner-456",
-        registry=fake_registry,
+        claim_token="ic_123456",
     )
 
     assert exit_code == 1
     assert payload["status"] == "failed"
-    assert "install key unavailable until payment is complete" in payload["message"].lower()
+    assert "install claim" in payload["message"].lower()
     assert "ic_123456" not in json.dumps(payload)
 
 
-def test_app_cli_install_rejects_system_api_keys_and_generic_tokens() -> None:
+def test_app_cli_install_infers_every_canonical_runtime() -> None:
+    from app.cli.install import _infer_install_program
+    from app.core.install_key_formats import RUNTIME_INSTALL_KEY_PROGRAMS, InstallKeyFormatRegistry
+
+    for program in RUNTIME_INSTALL_KEY_PROGRAMS:
+        assert _infer_install_program(program) == program
+        assert _infer_install_program(InstallKeyFormatRegistry.get_spec(program).canonical_slug) == program
+
+
+def test_app_cli_install_rejects_raw_keys_and_generic_tokens_as_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.cli.install as cli_install
     from app.cli.install import run_install_command
 
-    for bad_key in ("sk_live_abc123", "token-abc", "ic_org_1234", "ic_123456", "generic-token"):
-        fake_registry = MagicMock()
+    key_registry = MagicMock()
+    monkeypatch.setattr(cli_install, "get_install_key_registry", lambda: key_registry)
+
+    for bad_claim in (
+        "sk_live_abc123",
+        "token-abc",
+        "ic_org_1234",
+        "ic_123456",
+        "generic-token",
+        "ic_install_openclaw_secret",
+    ):
         exit_code, payload = run_install_command(
             "openclaw",
-            key=bad_key,
-            owner_key="owner-456",
-            registry=fake_registry,
+            claim_token=bad_claim,
         )
         assert exit_code == 1
         assert payload["status"] == "failed"
-        assert "install key unavailable until payment is complete" in payload["message"].lower()
-        assert bad_key not in json.dumps(payload)
-        fake_registry.authenticate_install_key.assert_not_called()
+        assert "install claim" in payload["message"].lower()
+        assert bad_claim not in json.dumps(payload)
+    key_registry.authenticate_install_key.assert_not_called()
 
 
-def test_app_cli_install_rejects_platform_api_key_variants_before_registry_lookup() -> None:
+def test_app_cli_install_rejects_claim_for_mismatched_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.cli.install as cli_install
     from app.cli.install import run_install_command
 
-    for bad_key in ("platform-api-key", "internal_platform_api_key", "internal-platform-api-key"):
-        fake_registry = MagicMock()
-        exit_code, payload = run_install_command(
-            "openclaw",
-            key=bad_key,
-            owner_key="owner-456",
-            registry=fake_registry,
-        )
-        assert exit_code == 1
-        assert payload["status"] == "failed"
-        assert payload["key_classification"] == "generic_platform_api_key"
-        assert bad_key not in json.dumps(payload)
-        fake_registry.authenticate_install_key.assert_not_called()
+    token = "ic_claim_runtime_mismatch"
+    handoff = MagicMock()
+    handoff.redeem_claim.return_value = SimpleNamespace(
+        key_id="ik_123",
+        owner_key="owner-456",
+        program="openclaw",
+        install_key="ic_install_openclaw_secret",
+    )
+    key_registry = MagicMock()
+    monkeypatch.setattr(cli_install, "get_install_key_handoff_service", lambda: handoff)
+    monkeypatch.setattr(cli_install, "get_install_key_registry", lambda: key_registry)
+
+    exit_code, payload = run_install_command(
+        "claude-code",
+        claim_token=token,
+    )
+
+    assert exit_code == 1
+    assert payload["status"] == "failed"
+    assert "runtime" in payload["message"].lower()
+    assert token not in json.dumps(payload)
+    assert "ic_install_openclaw_secret" not in json.dumps(payload)
+    key_registry.authenticate_install_key.assert_not_called()
 
 
-def test_app_cli_install_rejects_mismatched_program_and_owner_key() -> None:
-    from app.cli.install import run_install_command
+def test_app_cli_install_redeems_claim_and_does_not_expose_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.cli.install as cli_install
+    from app.services.install_key_handoff import InstallKeyRedemption
 
-    fake_registry = MagicMock()
-    fake_registry.authenticate_install_key.return_value = MagicMock(
+    token = "ic_claim_one_time_example"
+    install_key = "ic_install_openclaw_abc123"
+    redemption = InstallKeyRedemption(
+        key_id="ik_123",
+        owner_key="owner-456",
+        program="openclaw",
+        install_key=install_key,
+    )
+    handoff = MagicMock()
+    handoff.redeem_claim.return_value = redemption
+    install_key_registry = MagicMock()
+    install_key_registry.authenticate_install_key.return_value = SimpleNamespace(
         key_id="ik_123",
         owner_key="owner-456",
         program="openclaw",
         payment_status="paid",
         entitlements_status="active",
         issued_after_payment=True,
-        units_consumed=0,
+        units_consumed=120,
+    )
+    wallet_registry = MagicMock()
+    wallet_registry.get_wallet.return_value = SimpleNamespace(balance_units=4880)
+    wallet_registry.get_key_usage_summary.return_value = {"total_blocked_attacks": 2}
+    install_calls: dict[str, Any] = {}
+
+    def fake_install_integration(
+        active_registry: Any,
+        integration_id: str,
+        **kwargs: Any,
+    ) -> object:
+        install_calls["registry"] = active_registry
+        install_calls["integration_id"] = integration_id
+        install_calls["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(cli_install, "get_install_key_handoff_service", lambda: handoff)
+    monkeypatch.setattr(
+        cli_install,
+        "get_install_key_registry",
+        lambda: install_key_registry,
+    )
+    monkeypatch.setattr(cli_install, "get_unit_wallet_registry", lambda: wallet_registry)
+    monkeypatch.setattr(cli_install, "install_integration", fake_install_integration)
+    monkeypatch.setattr(
+        cli_install,
+        "summarize_install_result",
+        lambda _: {"installed": True, "integration_id": "openclaw"},
+    )
+    integration_registry = MagicMock()
+
+    exit_code, payload = cli_install.run_install_command(
+        "openclaw",
+        claim_token=token,
+        registry=integration_registry,
     )
 
-    exit_code, payload = run_install_command(
-        "claude-code",
-        key="ic_install_openclaw_abc123",
-        owner_key="owner-456",
-        registry=fake_registry,
-    )
-
-    assert exit_code == 1
-    assert payload["status"] == "failed"
-    assert "install key unavailable until payment is complete" in payload["message"].lower()
-    assert "ic_install_openclaw_abc123" not in json.dumps(payload)
+    assert exit_code == 0
+    assert payload["owner_key"] == "owner-456"
+    assert payload["install_key"] is None
+    assert token not in json.dumps(payload)
+    assert install_key not in json.dumps(payload)
+    assert install_calls["registry"] is integration_registry
+    assert install_calls["integration_id"] == "openclaw"
+    assert install_calls["kwargs"]["install_key"] == install_key
+    assert install_calls["kwargs"]["owner_key"] == "owner-456"
 
 
 def test_installer_module_imports(installer_module: Any) -> None:

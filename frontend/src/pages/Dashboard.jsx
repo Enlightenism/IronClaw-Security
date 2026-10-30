@@ -17,87 +17,42 @@ const INSTALL_KEY_PROGRAMS = [
     program: "openclaw",
     label: "OpenClaw",
     tint: "platinum",
-    commandKey: "openclaw_command",
   },
   {
     program: "claude_code",
     label: "Claude Code",
     tint: "gold",
-    commandKey: "claude_code_command",
   },
   {
     program: "cursor",
     label: "Cursor",
     tint: "cyan",
-    commandKey: "cursor_command",
   },
   {
     program: "goose",
     label: "Goose",
     tint: "violet",
-    commandKey: "goose_command",
   },
   {
     program: "gemini_cli",
     label: "Gemini CLI",
     tint: "emerald",
-    commandKey: "gemini_cli_command",
   },
   {
     program: "copilot",
     label: "GitHub Copilot",
     tint: "indigo",
-    commandKey: "copilot_command",
   },
   {
     program: "hermes",
     label: "Hermes",
     tint: "amber",
-    commandKey: "hermes_command",
   },
 ];
-
-const INSTALL_COMMAND_BUILDERS = {
-  claude_code: (key) =>
-    `gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ${key}`,
-  openclaw: (key) =>
-    `gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent openclaw --scope user --key ${key}`,
-  cursor: (key) =>
-    `gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent cursor --scope user --key ${key}`,
-  goose: (key) =>
-    `gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent goose --scope user --key ${key}`,
-  gemini_cli: (key) =>
-    `gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent gemini-cli --scope user --key ${key}`,
-  copilot: (key) =>
-    `gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent copilot --scope user --key ${key}`,
-  hermes: (key) =>
-    `hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ${key}`,
-};
 
 const MemoWalletCard = memo(WalletCard);
 const MemoSecurityAnalysis = memo(SecurityAnalysis);
 const MemoIntegrationCard = memo(IntegrationCard);
-
-const normalizeProgramKey = (value) => {
-  if (typeof value !== "string") {
-    return "";
-  }
-
-  return value.trim().toLowerCase().replace(/[-_]+/g, "_");
-};
-
-const hasEmbeddedInstallCommand = (value) => {
-  if (typeof value !== "string") {
-    return false;
-  }
-
-  const candidate = value.trim();
-  if (!candidate) {
-    return false;
-  }
-
-  return /--key\s+ic_install_[A-Za-z0-9_./~:-]+/i.test(candidate);
-};
 
 const normalizePackageId = (packageId) => {
   return typeof packageId === "string" ? packageId.trim() : "";
@@ -155,7 +110,10 @@ const getErrorMessage = (error) => {
   return "Could not start checkout.";
 };
 
-const AttackFeed = memo(function AttackFeed({ attacks }) {
+const AttackFeed = memo(function AttackFeed({
+  attacks,
+  blockedActivityTotal = 0,
+}) {
   const [page, setPage] = useState(1);
 
   useEffect(() => {
@@ -192,6 +150,12 @@ const AttackFeed = memo(function AttackFeed({ attacks }) {
           {startItem}-{endItem} of {attacks.length}
         </div>
       </div>
+      <p
+        className="mb-4 text-xs text-[#BFC1C2]"
+        data-testid="attack-feed-blocked-total"
+      >
+        Total blocked attacks: {blockedActivityTotal.toLocaleString()}
+      </p>
 
       {attacks.length === 0 ? (
         <div
@@ -437,6 +401,13 @@ const Dashboard = () => {
       setLoadingData(false);
       setRefreshing(false);
     }
+  }, []);
+
+  const createInstallClaim = useCallback(async (integrationId) => {
+    const response = await api.post(
+      `/integrations/installers/${encodeURIComponent(integrationId)}/claim`,
+    );
+    return response.data;
   }, []);
 
   useEffect(() => {
@@ -715,61 +686,20 @@ const Dashboard = () => {
     ],
   );
 
+  const installKeyDashboard = data?.metadata?.install_key_dashboard ?? {};
   const securityProps = useMemo(
     () => ({
-      unitsToday: data?.units_today ?? 0,
-      unitsWeek: data?.units_week ?? 0,
-      dailyUsage: data?.daily_usage ?? [],
-      attacks: data?.attacks ?? [],
+      unitsToday: installKeyDashboard.units_today ?? 0,
+      unitsWeek: installKeyDashboard.units_week ?? 0,
+      dailyUsage: Array.isArray(installKeyDashboard.daily_usage)
+        ? installKeyDashboard.daily_usage
+        : [],
+      attacks: Array.isArray(installKeyDashboard.attacks)
+        ? installKeyDashboard.attacks
+        : [],
     }),
-    [data?.attacks, data?.daily_usage, data?.units_today, data?.units_week],
+    [installKeyDashboard],
   );
-
-  const ownerKey = useMemo(() => {
-    const scopedOwner =
-      typeof data?.metadata?.owner_key === "string"
-        ? data.metadata.owner_key
-        : typeof data?.owner_key === "string"
-          ? data.owner_key
-          : "";
-
-    return scopedOwner.trim().toLowerCase();
-  }, [data?.metadata?.owner_key, data?.owner_key]);
-
-  const ownerScopedInstallKeys = useMemo(() => {
-    const slots = Array.isArray(data?.install_keys) ? data.install_keys : [];
-
-    return slots
-      .filter((slot) => {
-        const program = normalizeProgramKey(slot?.program);
-        if (!program || program === "security_guardian") {
-          return false;
-        }
-
-        if (!ownerKey) {
-          return true;
-        }
-
-        const slotOwner =
-          typeof slot?.owner_key === "string" ? slot.owner_key : "";
-        return !slotOwner || slotOwner.trim().toLowerCase() === ownerKey;
-      })
-      .sort((left, right) => {
-        const leftProgram = normalizeProgramKey(left?.program);
-        const rightProgram = normalizeProgramKey(right?.program);
-        const leftIndex = INSTALL_KEY_PROGRAMS.findIndex(
-          ({ program }) => program === leftProgram,
-        );
-        const rightIndex = INSTALL_KEY_PROGRAMS.findIndex(
-          ({ program }) => program === rightProgram,
-        );
-
-        if (leftIndex === -1 && rightIndex === -1) return 0;
-        if (leftIndex === -1) return 1;
-        if (rightIndex === -1) return -1;
-        return leftIndex - rightIndex;
-      });
-  }, [data?.install_keys, ownerKey]);
 
   const integrationCards = useMemo(() => {
     const toCardTestId = (program) => {
@@ -793,52 +723,50 @@ const Dashboard = () => {
       }
     };
 
-    const rawInstallKeys = Array.isArray(data?.install_keys)
-      ? data.install_keys
-      : [];
-
-    return INSTALL_KEY_PROGRAMS.map(({ program, label, tint, commandKey }) => {
-      const hasAnyRawSlot = rawInstallKeys.some(
-        (entry) => normalizeProgramKey(entry?.program) === program,
-      );
-
-      const ownedMatches = ownerScopedInstallKeys.filter(
-        (entry) => normalizeProgramKey(entry?.program) === program,
-      );
-      const ownedSlot =
-        ownedMatches.find((entry) => Boolean(entry?.masked_key)) ??
-        ownedMatches[0] ??
-        null;
-
-      let command = "";
-
-      if (hasAnyRawSlot) {
-        const maskedKey =
-          typeof ownedSlot?.masked_key === "string"
-            ? ownedSlot.masked_key.trim()
-            : "";
-        const builder = INSTALL_COMMAND_BUILDERS[program];
-        command = maskedKey && builder ? builder(maskedKey) : "";
-      } else {
-        command = hasEmbeddedInstallCommand(tokens?.[commandKey])
-          ? tokens[commandKey]
-          : "";
-      }
-
-      if (!hasEmbeddedInstallCommand(command)) {
-        command = "";
-      }
+    return INSTALL_KEY_PROGRAMS.map(({ program, label, tint }) => {
+      const integrationId = program.replace(/_/g, "-");
+      const metadata = tokens?.install_metadata?.[integrationId];
+      const runtimeSlot = Array.isArray(installKeyDashboard.install_key_slots)
+        ? installKeyDashboard.install_key_slots.find(
+            (slot) => slot.program === program,
+          )
+        : null;
+      const usageSummary = runtimeSlot?.metadata?.usage_summary ?? {};
 
       return {
         title: label,
-        command,
+        program,
+        integrationId,
+        available:
+          metadata?.available === true &&
+          metadata?.program === program &&
+          metadata?.slug === integrationId &&
+          Boolean(metadata?.key_id),
+        unitsConsumed: Number.isSafeInteger(runtimeSlot?.units_consumed)
+          ? runtimeSlot.units_consumed
+          : 0,
+        blockedAttacks: Number.isSafeInteger(
+          usageSummary.total_blocked_attacks,
+        )
+          ? usageSummary.total_blocked_attacks
+          : 0,
+        onCreateClaim: createInstallClaim,
         tint,
         testid: toCardTestId(program),
       };
     });
-  }, [data?.install_keys, ownerScopedInstallKeys, tokens]);
+  }, [
+    createInstallClaim,
+    installKeyDashboard.install_key_slots,
+    tokens?.install_metadata,
+  ]);
 
-  const attackFeedItems = useMemo(() => data?.attacks ?? [], [data?.attacks]);
+  const attackFeedItems = securityProps.attacks;
+  const blockedActivityTotal = Number.isSafeInteger(
+    installKeyDashboard.blocked_activity_total,
+  )
+    ? installKeyDashboard.blocked_activity_total
+    : 0;
 
   if (loading || (loadingData && !data)) {
     return (
@@ -970,7 +898,10 @@ const Dashboard = () => {
 
           <div className="space-y-6 lg:row-span-2">
             <MemoSecurityAnalysis {...securityProps} />
-            <AttackFeed attacks={attackFeedItems} />
+            <AttackFeed
+              attacks={attackFeedItems}
+              blockedActivityTotal={blockedActivityTotal}
+            />
           </div>
 
           <div className="space-y-6">
@@ -979,7 +910,12 @@ const Dashboard = () => {
                 <MemoIntegrationCard
                   key={card.testid}
                   title={card.title}
-                  command={card.command}
+                  program={card.program}
+                  integrationId={card.integrationId}
+                  available={card.available}
+                  unitsConsumed={card.unitsConsumed}
+                  blockedAttacks={card.blockedAttacks}
+                  onCreateClaim={card.onCreateClaim}
                   tint={card.tint}
                   testid={card.testid}
                 />
