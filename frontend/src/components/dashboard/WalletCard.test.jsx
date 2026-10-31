@@ -220,7 +220,8 @@ describe("WalletCard — no Stripe key", () => {
   it("shows Best Deal on the highest-priced package", async () => {
     await renderWalletCard({ organizationId: "" });
 
-    const enterpriseCard = screen.getByTestId("purchase-pkg_60000").parentElement;
+    const enterpriseCard =
+      screen.getByTestId("purchase-pkg_60000").parentElement;
     const teamCard = screen.getByTestId("purchase-pkg_25000").parentElement;
 
     expect(within(enterpriseCard).getByText(/Best Deal/i)).toBeInTheDocument();
@@ -351,11 +352,7 @@ describe("tier purchase buttons", () => {
 
     await act(async () => {
       rerender(
-        <WalletCard
-          {...DEFAULT_PROPS}
-          purchasingId={null}
-          organizationId=""
-        />,
+        <WalletCard {...DEFAULT_PROPS} purchasingId={null} organizationId="" />,
       );
     });
 
