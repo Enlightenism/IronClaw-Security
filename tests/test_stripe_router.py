@@ -1040,12 +1040,16 @@ class TestAdditionalRoutes:
 
     def test_credit_units_success(self, client: TestClient, mock_svc: MagicMock) -> None:
         mock_svc.credit_units.return_value = _make_balance_response(balance=750)
-
-        resp = client.post(
-            _billing_path("/units/credit"),
-            json={"units": 250, "reason": "manual.credit", "referenceId": "credit-ref-001"},
-            headers=_auth_headers(),
-        )
+        admin_context = replace(_TEST_AUTH_CONTEXT, roles=("platform_admin",))
+        client.app.dependency_overrides[get_auth_context] = lambda: admin_context
+        try:
+            resp = client.post(
+                _billing_path("/units/credit"),
+                json={"units": 250, "reason": "manual.credit", "referenceId": "credit-ref-001"},
+                headers=_auth_headers(),
+            )
+        finally:
+            client.app.dependency_overrides[get_auth_context] = _override_get_auth_context
 
         assert resp.status_code == 200
         mock_svc.credit_units.assert_called_once()
@@ -1054,6 +1058,41 @@ class TestAdditionalRoutes:
         assert call_kwargs["amount"] == 250
         assert call_kwargs["reason"] == StripeUnitEventReason.MANUAL_CREDIT
         assert call_kwargs["reference_id"] == "credit-ref-001"
+
+    def test_credit_units_rejects_non_admin(self, client: TestClient, mock_svc: MagicMock) -> None:
+        resp = client.post(
+            _billing_path("/units/credit"),
+            json={"units": 250, "reason": "manual.credit"},
+            headers=_auth_headers(),
+        )
+
+        assert resp.status_code == 403
+        mock_svc.credit_units.assert_not_called()
+
+    def test_credit_units_rejects_anonymous(self, client: TestClient, mock_svc: MagicMock) -> None:
+        anonymous_context = AuthContext(
+            api_key=None,
+            principal_type="anonymous",
+            principal_id=None,
+            session_id=None,
+            org_id=None,
+            authenticated=False,
+            auth_source="disabled",
+            auth_method=None,
+            key_type="personal",
+        )
+        client.app.dependency_overrides[get_auth_context] = lambda: anonymous_context
+        try:
+            resp = client.post(
+                _billing_path("/units/credit"),
+                json={"units": 250, "reason": "manual.credit"},
+                headers={"X-Org-Id": ORG_ID},
+            )
+        finally:
+            client.app.dependency_overrides[get_auth_context] = _override_get_auth_context
+
+        assert resp.status_code == 401
+        mock_svc.credit_units.assert_not_called()
 
 
 class TestStripeWebhookFailureRetry:

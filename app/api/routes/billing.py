@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.core.auth import AuthContext, get_auth_context, require_auth_context
 from app.core.billing import resolve_billing_owner, resolve_package_id
 from app.core.install_key_formats import InstallKeyFormatRegistry
+from app.core.permissions import require_permission
 from app.core.unit_wallet import (
     ORG_KEY_PREFIX,
     TOKEN_CHUNK_SIZE,
@@ -1227,6 +1228,11 @@ def refund_wallet(
     body: WalletRefundRequest,
     auth_ctx: AuthContext = Depends(get_auth_context),
 ) -> WalletRefundResponse:
+    require_permission(
+        auth_ctx,
+        "billing:wallet:refund",
+        metadata={"route": "billing.wallet.refund"},
+    )
     _assert_owner_access(owner_key, auth_ctx)
     registry = get_unit_wallet_registry()
     _require_existing_wallet(registry, owner_key)

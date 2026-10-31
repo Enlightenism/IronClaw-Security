@@ -22,7 +22,7 @@ from app.api.billing import (
     router,
 )
 import app.api.routes.billing as canonical_billing
-from app.core.auth import AuthContext, require_auth_context
+from app.core.auth import AuthContext, get_auth_context, require_auth_context
 from app.core.install_keys import InstallKeyRecord
 from app.core.unit_wallet import TOKEN_CHUNK_SIZE, UNIT_PACKAGE_CATALOG, get_unit_wallet_registry
 
@@ -546,7 +546,23 @@ def test_wallet_refund_recredits_units() -> None:
     registry = get_unit_wallet_registry()
     registry.credit_units(owner_key="alice@example.com", units=100)
 
-    with _client_for(_PERSONAL_AUTH) as c:
+    admin_auth = AuthContext(
+        api_key="test-api-key",
+        principal_type="api_key",
+        principal_id="user-123",
+        session_id=None,
+        org_id=None,
+        authenticated=True,
+        auth_source="test",
+        auth_method="api_key",
+        key_type="personal",
+        roles=("platform_admin",),
+    )
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_auth_context] = lambda: admin_auth
+    app.dependency_overrides[require_auth_context] = lambda: admin_auth
+    with TestClient(app, raise_server_exceptions=False) as c:
         response = c.post(
             "/billing/wallet/alice@example.com/refund",
             json={"units": 25, "reason": "adjustment"},

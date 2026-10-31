@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -16,6 +17,7 @@ from app.core.auth import (
     require_api_key,
     require_auth_context,
 )
+from app.core.errors import register_exception_handlers
 from app.core.install_keys import InstallKeyRecord
 from app.core.unit_wallet import (
     get_unit_wallet_registry,
@@ -53,6 +55,7 @@ _PERSONAL_AUTH_CTX = AuthContext(
     auth_source="test",
     auth_method="api_key",
     key_type="personal",
+    roles=("platform_admin",),
 )
 
 _ORG_AUTH_CTX = AuthContext(
@@ -65,6 +68,7 @@ _ORG_AUTH_CTX = AuthContext(
     auth_source="test",
     auth_method="api_key",
     key_type="org",
+    roles=("platform_admin",),
 )
 
 
@@ -76,6 +80,7 @@ def _build_app(*, auth_ctx: AuthContext | None = None) -> FastAPI:
         admin_api_key=None,
     )
     app.include_router(billing_router)
+    register_exception_handlers(app)
     if auth_ctx is not None:
         app.dependency_overrides[require_api_key] = lambda: auth_ctx.api_key
         app.dependency_overrides[get_auth_context] = lambda: auth_ctx
@@ -811,6 +816,15 @@ def test_refund_zero_units_returns_422() -> None:
         json={"units": 0},
     )
     assert response.status_code == 422
+
+
+def test_refund_wallet_returns_403_for_non_admin() -> None:
+    non_admin_ctx = replace(_PERSONAL_AUTH_CTX, roles=())
+    response = TestClient(_build_app(auth_ctx=non_admin_ctx)).post(
+        "/billing/wallet/refund-personal@ironclaw.test/refund",
+        json={"units": 5},
+    )
+    assert response.status_code == 403
 
 
 def test_refund_wallet_returns_401_unauthenticated() -> None:

@@ -56,6 +56,9 @@ def _make_auth_ctx(
     ctx.principal_id = principal_id
     ctx.org_id = org_id
     ctx.key_type = key_type
+    ctx.authenticated = True
+    ctx.roles = ("platform_admin",)
+    ctx.permissions = ("*",)
     return ctx
 
 

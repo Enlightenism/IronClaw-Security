@@ -16,6 +16,7 @@ from app.core.billing import (
     resolve_package_id,
     resolve_plan_code,
 )
+from app.core.permissions import require_permission
 from app.core.settings import get_settings
 from app.services.secrets_vault import vault
 from app.services.stripe_service import (
@@ -890,6 +891,11 @@ async def credit_units(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
+    require_permission(
+        auth,
+        "billing:units:credit",
+        metadata={"route": "billing.units.credit"},
+    )
     org_id = _require_org_id(auth=auth, request=request, body=body)
     try:
         reason_enum = StripeUnitEventReason(body.reason)

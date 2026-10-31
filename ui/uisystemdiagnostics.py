@@ -4,6 +4,8 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
+from app.core.settings import get_settings
+
 router = APIRouter(prefix="/ui/uisystemdiagnostics", tags=["ui-system-diagnostics"])
 
 
@@ -81,41 +83,43 @@ def ui_system_diagnostics_page(
     profile: str | None = Query(default=None),
     period: str = Query(default="24h"),
 ) -> dict[str, Any]:
-    effective_environment = environment or "local"
+    settings = get_settings()
+    effective_environment = environment or settings.environment or "local"
     effective_profile = profile or "gen1"
+    auth_enforced = settings.effective_auth_required
 
     metrics = [
         _metric(
             id="healthy_components",
             label="Healthy Components",
-            value=12,
-            tone="positive",
-            trend="+1",
-            help_text="Components currently reporting healthy diagnostic state.",
+            value="not_measured",
+            tone="neutral",
+            trend=None,
+            help_text="No live component health probe is wired to this page yet.",
         ),
         _metric(
             id="degraded_components",
             label="Degraded Components",
-            value=1,
-            tone="warning",
-            trend="0",
-            help_text="Components operating with warnings or reduced confidence.",
+            value="not_measured",
+            tone="neutral",
+            trend=None,
+            help_text="No live component health probe is wired to this page yet.",
         ),
         _metric(
             id="failed_checks",
             label="Failed Checks",
-            value=0,
-            tone="positive",
-            trend="-1",
-            help_text="Diagnostic checks that failed in the selected time window.",
+            value="not_measured",
+            tone="neutral",
+            trend=None,
+            help_text="No live diagnostic check results are wired to this page yet.",
         ),
         _metric(
             id="runtime_restarts",
             label="Runtime Restarts",
-            value=2,
+            value="not_measured",
             tone="neutral",
-            trend="+1",
-            help_text="Observed runtime or worker restart events in the period.",
+            trend=None,
+            help_text="No runtime restart telemetry is wired to this page yet.",
         ),
     ]
 
@@ -195,27 +199,27 @@ def ui_system_diagnostics_page(
             items=[
                 _item(
                     label="Authentication",
-                    value="enforced",
-                    tone="positive",
-                    help_text="API key authentication is expected to be active on protected surfaces.",
+                    value="enforced" if auth_enforced else "not_enforced",
+                    tone="positive" if auth_enforced else "warning",
+                    help_text="Derived from AUTH_REQUIRED and configured credentials.",
                 ),
                 _item(
                     label="Guardrails",
-                    value="active",
-                    tone="positive",
-                    help_text="Prompt, execution, and request-level controls are available.",
+                    value="not_verified",
+                    tone="neutral",
+                    help_text="Guardrail status is not yet read from live guardrail state.",
                 ),
                 _item(
                     label="Quarantine Pipeline",
-                    value="available",
-                    tone="positive",
-                    help_text="Isolation and containment paths can receive flagged artifacts.",
+                    value="not_verified",
+                    tone="neutral",
+                    help_text="Quarantine status is not yet read from live pipeline state.",
                 ),
                 _item(
                     label="Audit Logging",
-                    value="enabled",
-                    tone="positive",
-                    help_text="Security-relevant events are expected to be retained for investigation.",
+                    value="not_verified",
+                    tone="neutral",
+                    help_text="Audit retention is not yet read from live audit configuration.",
                 ),
             ],
         ),
