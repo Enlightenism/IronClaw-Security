@@ -217,6 +217,16 @@ describe("WalletCard — no Stripe key", () => {
     expect(screen.getByTestId("purchase-pkg_60000")).not.toBeDisabled();
   });
 
+  it("shows Best Deal on the highest-priced package", async () => {
+    await renderWalletCard({ organizationId: "" });
+
+    const enterpriseCard = screen.getByTestId("purchase-pkg_60000").parentElement;
+    const teamCard = screen.getByTestId("purchase-pkg_25000").parentElement;
+
+    expect(within(enterpriseCard).getByText(/Best Deal/i)).toBeInTheDocument();
+    expect(within(teamCard).queryByText(/Best Deal/i)).not.toBeInTheDocument();
+  });
+
   it("renders the current no-key runtime behavior", async () => {
     await renderWalletCard({
       organizationId: "",
@@ -329,26 +339,29 @@ describe("tier purchase buttons", () => {
     );
   });
 
-  it("keeps purchase buttons in pending state while checkout redirect is in progress", async () => {
-    const user = userEvent.setup();
-    const onPurchase = jest.fn();
-    mockApiPost.mockImplementation(() =>
-      Promise.resolve({
-        data: { checkout_url: "https://checkout.stripe.test/pay" },
-      }),
-    );
-
-    await renderWalletCard({ onPurchase, organizationId: "org-001" });
-
-    await user.click(screen.getByTestId("purchase-pkg_5000"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("purchase-pkg_5000")).toBeDisabled();
-      expect(screen.getByTestId("purchase-pkg_25000")).toBeDisabled();
-      expect(screen.getByTestId("purchase-pkg_60000")).toBeDisabled();
+  it("re-enables purchase buttons when the parent clears a failed checkout", async () => {
+    const { rerender } = await renderWalletCard({
+      purchasingId: "pkg_5000",
+      organizationId: "",
     });
 
-    expect(onPurchase).toHaveBeenCalledWith("pkg_5000");
+    expect(screen.getByTestId("purchase-pkg_5000")).toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg_25000")).toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg_60000")).toBeDisabled();
+
+    await act(async () => {
+      rerender(
+        <WalletCard
+          {...DEFAULT_PROPS}
+          purchasingId={null}
+          organizationId=""
+        />,
+      );
+    });
+
+    expect(screen.getByTestId("purchase-pkg_5000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg_25000")).not.toBeDisabled();
+    expect(screen.getByTestId("purchase-pkg_60000")).not.toBeDisabled();
   });
 });
 

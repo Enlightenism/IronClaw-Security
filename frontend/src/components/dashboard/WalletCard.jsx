@@ -60,7 +60,6 @@ const normalizeBillingPackages = (data) => {
       priceUsd,
       tokensPerUnit,
       tokenCoverage,
-      bestDeal: packageInfo.featured === true,
     };
   });
 
@@ -68,7 +67,14 @@ const normalizeBillingPackages = (data) => {
     throw new Error("Billing catalogue contains no packages.");
   }
 
-  return tiers;
+  const highestPricedTier = tiers.reduce((highest, tier) =>
+    tier.priceUsd > highest.priceUsd ? tier : highest,
+  );
+
+  return tiers.map((tier) => ({
+    ...tier,
+    bestDeal: tier.id === highestPricedTier.id,
+  }));
 };
 
 const getStripePublishableKey = () =>
@@ -532,7 +538,6 @@ const WalletCard = ({
   const animated = useCountUp(balance, 1500, [balance]);
   const stripePublishableKey = getStripePublishableKey();
   const stripeMode = getStripeMode(stripePublishableKey);
-  const [checkoutState, setCheckoutState] = useState("idle");
   const [tiers, setTiers] = useState([]);
   const [catalogueLoading, setCatalogueLoading] = useState(true);
   const [catalogueError, setCatalogueError] = useState(false);
@@ -584,7 +589,6 @@ const WalletCard = ({
         return;
       }
 
-      setCheckoutState("pending");
       onPurchase(tierId);
     },
     [onPurchase, packageIds],
@@ -653,11 +657,7 @@ const WalletCard = ({
               <button
                 type="button"
                 onClick={() => handleCheckoutPurchase(t.id)}
-                disabled={
-                  !!purchasingId ||
-                  checkoutState === "pending" ||
-                  checkoutState === "redirecting"
-                }
+                disabled={!!purchasingId}
                 data-testid={`purchase-${t.id}`}
                 title={
                   stripeMode === "unconfigured"
@@ -677,7 +677,7 @@ const WalletCard = ({
                   {t.tokensPerUnit.toLocaleString()} tokens / unit
                 </span>
                 <span className="mt-2 flex items-center gap-1 text-lg font-semibold text-[#FFD700]">
-                  {purchasingId === t.id || checkoutState === "pending" ? (
+                  {purchasingId === t.id ? (
                     <Loader2 size={16} className="animate-spin" />
                   ) : (
                     t.price
