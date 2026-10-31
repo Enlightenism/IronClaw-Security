@@ -1,0 +1,18 @@
+{
+  "id": "ironclaw-security",
+  "name": "IronClaw Security",
+  "description": "Fail-closed OpenClaw tool authorization through IronClaw.",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "configFile": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "additionalProperties": false
+  }
+}

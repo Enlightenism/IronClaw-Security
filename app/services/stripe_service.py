@@ -5,6 +5,9 @@ from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from datetime import UTC, datetime
 from enum import StrEnum
+import hashlib
+import hmac
+import json
 import logging
 import math
 import re
@@ -38,6 +41,12 @@ _CHECKOUT_SESSION_TTL_SECONDS = 1800  # 30 min
 _SCHEMA_VERSION = "1.0"
 _INVOICE_CACHE_MAX = 200
 _STRIPE_CHECKOUT_SESSION_ID_PATTERN = re.compile(r"cs_[A-Za-z0-9_]{1,250}\Z")
+_CHECKOUT_INTEGRITY_VERSION = "1"
+_CHECKOUT_INTEGRITY_VERSION_KEY = "ironclaw_checkout_version"
+_CHECKOUT_INTEGRITY_SIGNATURE_KEY = "ironclaw_checkout_signature"
+_CHECKOUT_PRICE_ID_KEY = "ironclaw_checkout_price_id"
+_CHECKOUT_QUANTITY_KEY = "ironclaw_checkout_quantity"
+_CHECKOUT_MODE_KEY = "ironclaw_checkout_mode"
 
 # ---------------------------------------------------------------------------
 # Billing tier catalogue view derived from app.core.billing.PLAN_DEFINITIONS.
@@ -807,16 +816,29 @@ class StripeService:
             return normalized
         return f"ic_org_{normalized}"
 
-    def _sync_balances_from_wallet(self, org_id: str) -> UnitBalanceResponse:
-        owner_key = self._canonical_org_owner_key(org_id)
-        wallet = self._wallet_registry.get_wallet(owner_key)
+    def _resolve_wallet_owner_key(self, org_id: str, owner_key: str | None = None) -> str:
+        if owner_key is None:
+            return self._canonical_org_owner_key(org_id)
+        normalized_owner_key = str(owner_key).strip().lower()
+        if not normalized_owner_key:
+            raise StripeServiceError("owner_key is required")
+        return normalized_owner_key
+
+    def _sync_balances_from_wallet(
+        self,
+        org_id: str,
+        *,
+        owner_key: str | None = None,
+    ) -> UnitBalanceResponse:
+        wallet_owner_key = self._resolve_wallet_owner_key(org_id, owner_key)
+        wallet = self._wallet_registry.get_wallet(wallet_owner_key)
         if wallet is None:
             with self._lock:
                 self._unit_balances[org_id] = 0
                 self._unit_ledger.setdefault(org_id, [])
             return UnitBalanceResponse(org_id=org_id, balance=0, ledger_entries=[])
 
-        entries = self._wallet_registry.list_ledger_entries(owner_key=owner_key, limit=50)
+        entries = self._wallet_registry.list_ledger_entries(owner_key=wallet_owner_key, limit=50)
         response_entries = []
         for entry in entries:
             response_entries.append(
@@ -1038,19 +1060,20 @@ class StripeService:
             billing_registry=_CheckoutEntitlementGuard(),
         )
         results: dict[str, dict[str, Any]] = {}
-        base_metadata: dict[str, Any] = {
-            "source": "stripe.checkout",
-            "org_id": org_id,
-            "customer_id": customer_id,
-            "unit_credits": unit_credits,
-            "checkout_session_id": session_id,
-            "purchase_reference": session_id,
-            "payment_status": "paid",
-            "entitlements_status": "active",
-            "issued_after_payment": True,
-        }
-        if metadata:
-            base_metadata.update(metadata)
+        base_metadata: dict[str, Any] = dict(metadata or {})
+        base_metadata.update(
+            {
+                "source": "stripe.checkout",
+                "org_id": org_id,
+                "customer_id": customer_id,
+                "unit_credits": unit_credits,
+                "checkout_session_id": session_id,
+                "purchase_reference": session_id,
+                "payment_status": "paid",
+                "entitlements_status": "active",
+                "issued_after_payment": True,
+            }
+        )
         base_metadata["owner_key"] = owner_key
 
         supported_programs = tuple(InstallKeyFormatRegistry.list_programs())
@@ -1302,6 +1325,88 @@ class StripeService:
     # Checkout
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _checkout_integrity_payload(metadata: dict[str, Any]) -> bytes:
+        payload = {
+            "version": str(metadata.get(_CHECKOUT_INTEGRITY_VERSION_KEY) or ""),
+            "org_id": str(metadata.get("org_id") or ""),
+            "owner_key": str(metadata.get("owner_key") or "").strip().lower(),
+            "package_id": str(metadata.get("package_id") or ""),
+            "price_id": str(metadata.get(_CHECKOUT_PRICE_ID_KEY) or ""),
+            "quantity": str(metadata.get(_CHECKOUT_QUANTITY_KEY) or ""),
+            "unit_credits": str(metadata.get("unit_credits") or ""),
+            "mode": str(metadata.get(_CHECKOUT_MODE_KEY) or ""),
+        }
+        return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+
+    def _sign_checkout_integrity_metadata(self, metadata: dict[str, Any]) -> str:
+        secret = self._get_webhook_secret().encode("utf-8")
+        return hmac.new(secret, self._checkout_integrity_payload(metadata), hashlib.sha256).hexdigest()
+
+    def _verify_checkout_integrity_metadata(
+        self,
+        metadata: dict[str, Any],
+        *,
+        mode: str | None = None,
+    ) -> dict[str, Any]:
+        if metadata.get(_CHECKOUT_INTEGRITY_VERSION_KEY) != _CHECKOUT_INTEGRITY_VERSION:
+            raise StripeServiceError("Checkout session is missing trusted IronClaw integrity metadata.")
+
+        org_id = metadata.get("org_id")
+        if not isinstance(org_id, str) or not org_id.strip():
+            raise StripeServiceError("Checkout session is missing its trusted organization identity.")
+
+        raw_unit_credits = metadata.get("unit_credits")
+        try:
+            unit_credits = int(raw_unit_credits)
+        except (TypeError, ValueError) as exc:
+            raise StripeServiceError("Checkout session contains invalid trusted unit metadata.") from exc
+        if unit_credits < 0:
+            raise StripeServiceError("Checkout session contains invalid trusted unit metadata.")
+
+        raw_quantity = metadata.get(_CHECKOUT_QUANTITY_KEY)
+        try:
+            quantity = int(raw_quantity)
+        except (TypeError, ValueError) as exc:
+            raise StripeServiceError("Checkout session contains invalid trusted quantity metadata.") from exc
+        if quantity < 1:
+            raise StripeServiceError("Checkout session contains invalid trusted quantity metadata.")
+
+        price_id = metadata.get(_CHECKOUT_PRICE_ID_KEY)
+        if not isinstance(price_id, str) or not price_id.strip():
+            raise StripeServiceError("Checkout session is missing its trusted Stripe price.")
+
+        checkout_mode = metadata.get(_CHECKOUT_MODE_KEY)
+        if not isinstance(checkout_mode, str) or checkout_mode not in {item.value for item in StripeCheckoutMode}:
+            raise StripeServiceError("Checkout session contains an invalid trusted mode.")
+        if mode is not None and mode != checkout_mode:
+            raise StripeServiceError("Checkout session mode does not match its trusted metadata.")
+
+        raw_owner_key = metadata.get("owner_key")
+        if raw_owner_key is not None and (not isinstance(raw_owner_key, str) or not raw_owner_key.strip()):
+            raise StripeServiceError("Checkout session contains an invalid trusted billing owner.")
+
+        package_id = metadata.get("package_id")
+        if package_id is not None and not isinstance(package_id, str):
+            raise StripeServiceError("Checkout session contains an invalid trusted package.")
+
+        signature = metadata.get(_CHECKOUT_INTEGRITY_SIGNATURE_KEY)
+        if not isinstance(signature, str) or not hmac.compare_digest(
+            signature,
+            self._sign_checkout_integrity_metadata(metadata),
+        ):
+            raise StripeServiceError("Checkout session integrity verification failed.")
+
+        return {
+            "org_id": org_id,
+            "owner_key": raw_owner_key.strip().lower() if isinstance(raw_owner_key, str) else None,
+            "package_id": package_id.strip() if isinstance(package_id, str) else "",
+            "price_id": price_id.strip(),
+            "quantity": quantity,
+            "unit_credits": unit_credits,
+            "mode": checkout_mode,
+        }
+
     def create_checkout_session(
         self,
         org_id: str,
@@ -1313,6 +1418,7 @@ class StripeService:
         success_url: str,
         cancel_url: str,
         customer_id: str | None = None,
+        owner_key: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> CheckoutSessionResponse:
         """
@@ -1323,6 +1429,8 @@ class StripeService:
         - unit_credits: number of IronClaw units to credit on checkout.session.completed.
           Each unit protects up to TOKENS_PER_UNIT tokens with no scan ceiling.
           Use units_for_tokens(n) to derive the correct unit_credits from a token budget.
+        - Checkout metadata is authenticated with the configured Stripe webhook secret so
+          webhook fulfillment can reject client-influenced or legacy session metadata.
 
         Package amounts and prices are derived from PACKAGE_CATALOGUE.
         """
@@ -1337,15 +1445,32 @@ class StripeService:
             raise StripeServiceError("success_url is required")
         if not cancel_url or not cancel_url.strip():
             raise StripeServiceError("cancel_url is required")
+        if mode == StripeCheckoutMode.PAYMENT and not str(org_id).strip():
+            raise StripeServiceError("org_id is required for payment checkout")
 
         now = _utcnow_iso()
-        session_meta: dict[str, Any] = {
-            "org_id": org_id,
-            "unit_credits": str(unit_credits),
-            "tokens_per_unit": str(TOKENS_PER_UNIT),
-            "ironclaw_source": "ironclaw-security",
-            **(metadata or {}),
-        }
+        price_id = price_id.strip()
+        session_meta: dict[str, Any] = dict(metadata or {})
+        session_meta.update(
+            {
+                "org_id": org_id,
+                "unit_credits": str(unit_credits),
+                "tokens_per_unit": str(TOKENS_PER_UNIT),
+                "ironclaw_source": "ironclaw-security",
+                _CHECKOUT_INTEGRITY_VERSION_KEY: _CHECKOUT_INTEGRITY_VERSION,
+                _CHECKOUT_PRICE_ID_KEY: price_id,
+                _CHECKOUT_QUANTITY_KEY: str(quantity),
+                _CHECKOUT_MODE_KEY: mode.value,
+            }
+        )
+        if owner_key is not None:
+            normalized_owner_key = str(owner_key).strip().lower()
+            if not normalized_owner_key:
+                raise StripeServiceError("owner_key must be a non-empty authenticated billing identity")
+            session_meta["owner_key"] = normalized_owner_key
+        else:
+            session_meta.pop("owner_key", None)
+        session_meta[_CHECKOUT_INTEGRITY_SIGNATURE_KEY] = self._sign_checkout_integrity_metadata(session_meta)
 
         params: dict[str, Any] = {
             "mode": mode.value,
@@ -1480,11 +1605,13 @@ class StripeService:
 
         units_credited = 0
         if resolved_org and record.unit_credits > 0:
+            checkout_owner_key = str(record.metadata.get("owner_key") or "").strip() or None
             self.credit_units(
                 resolved_org,
                 record.unit_credits,
                 StripeUnitEventReason.CHECKOUT_COMPLETE,
                 reference_id=session_id,
+                owner_key=checkout_owner_key,
             )
             units_credited = record.unit_credits
 
@@ -1527,38 +1654,36 @@ class StripeService:
 
         metadata_value = payload.get("metadata", {})
         metadata = metadata_value if isinstance(metadata_value, dict) else {}
-        raw_unit_credits = metadata.get("unit_credits", "0")
-        try:
-            unit_credits = int(raw_unit_credits)
-        except (TypeError, ValueError) as exc:
-            raise StripeServiceError("Stripe returned invalid checkout unit metadata.") from exc
-        if unit_credits < 0:
-            raise StripeServiceError("Stripe returned invalid checkout unit metadata.")
-
-        price_id = ""
-        quantity = 0
+        integrity = self._verify_checkout_integrity_metadata(metadata, mode=payload.get("mode"))
+        unit_credits = integrity["unit_credits"]
+        price_id = integrity["price_id"]
+        quantity = integrity["quantity"]
         line_items_value = payload.get("line_items")
-        line_items = line_items_value.get("data", []) if isinstance(line_items_value, dict) else []
-        if isinstance(line_items, list) and line_items:
-            first_item = line_items[0]
-            if isinstance(first_item, dict):
-                price_value = first_item.get("price")
-                if isinstance(price_value, dict):
-                    price_id = str(price_value.get("id", ""))
-                raw_quantity = first_item.get("quantity", 0)
-                try:
-                    quantity = int(raw_quantity)
-                except (TypeError, ValueError) as exc:
-                    raise StripeServiceError("Stripe returned invalid checkout line-item metadata.") from exc
-                if quantity < 0:
-                    raise StripeServiceError("Stripe returned invalid checkout line-item metadata.")
+        if isinstance(line_items_value, dict):
+            line_items = line_items_value.get("data")
+            if line_items is not None and not isinstance(line_items, list):
+                raise StripeServiceError("Stripe returned invalid checkout line-item metadata.")
+        elif isinstance(line_items_value, list):
+            line_items = line_items_value
+        elif line_items_value is None:
+            line_items = None
+        else:
+            raise StripeServiceError("Stripe returned invalid checkout line-item metadata.")
 
-        if not price_id or quantity == 0:
-            with self._lock:
-                cached_record = self._checkout_sessions.get(normalized_session_id)
-            if cached_record is not None:
-                price_id = price_id or cached_record.price_id
-                quantity = quantity or cached_record.quantity
+        if isinstance(line_items, list) and line_items:
+            if len(line_items) != 1:
+                raise StripeServiceError("Stripe returned an unexpected number of checkout line items.")
+            first_item = line_items[0]
+            if not isinstance(first_item, dict):
+                raise StripeServiceError("Stripe returned invalid checkout line-item metadata.")
+            price_value = first_item.get("price")
+            actual_price_id = price_value.get("id") if isinstance(price_value, dict) else price_value
+            try:
+                actual_quantity = int(first_item.get("quantity"))
+            except (TypeError, ValueError) as exc:
+                raise StripeServiceError("Stripe returned invalid checkout line-item metadata.") from exc
+            if not isinstance(actual_price_id, str) or actual_price_id != price_id or actual_quantity != quantity:
+                raise StripeServiceError("Stripe checkout line items do not match trusted purchase metadata.")
 
         created_at = None
         raw_created_at = payload.get("created")
@@ -1629,6 +1754,8 @@ class StripeService:
         amount: int,
         reason: StripeUnitEventReason,
         reference_id: str | None = None,
+        *,
+        owner_key: str | None = None,
     ) -> UnitBalanceResponse:
         """
         Credit units to an org's balance and record a ledger entry.
@@ -1638,9 +1765,9 @@ class StripeService:
         if amount <= 0:
             raise StripeServiceError("credit amount must be > 0")
 
-        owner_key = self._canonical_org_owner_key(org_id)
+        wallet_owner_key = self._resolve_wallet_owner_key(org_id, owner_key)
         wallet = self._wallet_registry.credit_units(
-            owner_key,
+            wallet_owner_key,
             amount,
             metadata={
                 "stripe_reason": reason.value,
@@ -1662,7 +1789,7 @@ class StripeService:
             wallet.balance_units,
             TOKENS_PER_UNIT,
         )
-        return self._sync_balances_from_wallet(org_id)
+        return self._sync_balances_from_wallet(org_id, owner_key=wallet_owner_key)
 
     def debit_units(
         self,
@@ -2254,18 +2381,18 @@ class StripeService:
 
     def _handle_checkout_completed(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
         session_id: str = obj.get("id", "")
-        org_id: str = obj.get("metadata", {}).get("org_id", "")
-        unit_credits_raw: str = obj.get("metadata", {}).get("unit_credits", "0")
+        raw_metadata = obj.get("metadata")
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        mode_value = obj.get("mode")
+        mode = str(mode_value) if mode_value is not None else ""
+        integrity = self._verify_checkout_integrity_metadata(metadata, mode=mode)
+        org_id: str = integrity["org_id"]
+        unit_credits: int = integrity["unit_credits"]
+        owner_key: str | None = integrity["owner_key"]
         customer_id: str | None = obj.get("customer")
-        mode: str = obj.get("mode", "payment")
         payment_status = obj.get("payment_status")
         if payment_status is None:
             payment_status = obj.get("status")
-
-        try:
-            unit_credits = int(unit_credits_raw)
-        except (ValueError, TypeError):
-            unit_credits = 0
 
         checkout_idem_key = f"checkout_completed:{session_id}"
         payment_confirmed = self._is_successful_payment_status(payment_status)
@@ -2274,6 +2401,12 @@ class StripeService:
             raise StripeServiceError("checkout session ID is required for payment fulfillment")
         if payment_confirmed and not org_id:
             raise StripeServiceError("checkout session is missing the organization identity")
+        if payment_confirmed and mode != StripeCheckoutMode.PAYMENT.value:
+            raise StripeServiceError("Only one-time unit package payments can fulfill checkout entitlements.")
+        if payment_confirmed and unit_credits <= 0:
+            raise StripeServiceError("Paid unit package checkout is missing its trusted unit amount.")
+        if payment_confirmed and not integrity["package_id"]:
+            raise StripeServiceError("Paid unit package checkout is missing its trusted package identity.")
 
         with self._lock:
             already_credited = checkout_idem_key in self._processed_event_ids
@@ -2316,6 +2449,7 @@ class StripeService:
                     unit_credits,
                     StripeUnitEventReason.CHECKOUT_COMPLETE,
                     reference_id=session_id,
+                    owner_key=owner_key,
                 )
                 result["units_credited"] = unit_credits
                 result["tokens_covered"] = unit_credits * TOKENS_PER_UNIT
@@ -2327,7 +2461,7 @@ class StripeService:
                     session_id=session_id,
                     unit_credits=unit_credits,
                     metadata={
-                        **(obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}),
+                        **metadata,
                         "mode": mode,
                         "payment_status": payment_status,
                     },

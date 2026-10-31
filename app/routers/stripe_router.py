@@ -595,26 +595,38 @@ def _checkout_session_status_payload(session_id: str, record: dict[str, Any]) ->
     }
 
 
-def _normalize_checkout_inputs(body: CheckoutSessionCreateRequest) -> tuple[str, int]:
+def _normalize_checkout_inputs(body: CheckoutSessionCreateRequest) -> tuple[str, int, str]:
     package_id = body.package_id or ""
     price_id = body.price_id.strip()
 
     if package_id:
+        plan_code = resolve_plan_code(package_id)
+        if plan_code is None:
+            raise _http_400(
+                f"Unsupported package_id '{package_id}'.",
+                code="unsupported_package_id",
+                extra={"package_id": package_id, "valid_package_ids": sorted(VALID_PACKAGE_IDS)},
+            )
         resolved_price_id = _configured_price_id_for_package(package_id)
         resolved_unit_credits = _unit_credits_for_package(package_id)
-        return resolved_price_id, resolved_unit_credits
+        canonical_package_id = PLAN_DEFINITIONS[plan_code]["package_id"]
+        return resolved_price_id, resolved_unit_credits, canonical_package_id
 
     if price_id:
-        if body.unit_credits <= 0:
+        matching_plans = [plan_code for plan_code, env_key in PACKAGE_PRICE_ENV_MAP.items() if (vault.get(env_key) or "").strip() == price_id]
+        if len(matching_plans) != 1:
             raise _http_400(
-                "unitCredits must be greater than 0 when using a direct priceId.",
-                code="unit_credits_required_for_price_id",
+                "priceId must match exactly one configured IronClaw package.",
+                code="unsupported_price_id",
+                extra={"price_id": price_id},
             )
-        return price_id, body.unit_credits
+        plan_code = matching_plans[0]
+        package = PLAN_DEFINITIONS[plan_code]
+        return price_id, package["unit_limit"], package["package_id"]
 
     raise _http_400(
-        "Either packageId or priceId is required.",
-        code="price_id_or_package_id_required",
+        "Either packageId or a configured package priceId is required.",
+        code="package_id_or_configured_price_id_required",
     )
 
 
@@ -1024,43 +1036,50 @@ async def create_checkout_session(
         )
 
     # proceed with original logic using validated `body`
-    org_id = _require_org_id(auth=auth, request=request, body=body)
+    if getattr(auth, "authenticated", False) is not True:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "authentication_required",
+                "detail": "Authentication is required for purchases that provision install keys.",
+            },
+        )
+
+    owner_key = resolve_authenticated_billing_owner(auth)
+    if not owner_key:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "verified_billing_identity_required",
+                "detail": "A verified billing identity is required for purchases that provision install keys.",
+            },
+        )
+
+    org_id = _resolve_org_id(auth) or owner_key
     mode = StripeCheckoutMode(body.mode)
-    resolved_price_id, resolved_unit_credits = _normalize_checkout_inputs(body)
+    if mode != StripeCheckoutMode.PAYMENT:
+        raise _http_400(
+            "IronClaw unit packages require one-time payment mode.",
+            code="package_checkout_mode_invalid",
+        )
+    resolved_price_id, unit_credits_per_package, canonical_package_id = _normalize_checkout_inputs(body)
+    resolved_unit_credits = unit_credits_per_package * body.quantity
 
     metadata = dict(body.metadata)
-    if body.package_id:
-        metadata["package_id"] = body.package_id
+    metadata["package_id"] = canonical_package_id
     metadata["org_id"] = org_id
-    if resolved_unit_credits > 0:
-        if getattr(auth, "authenticated", False) is not True:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={
-                    "error": "authentication_required",
-                    "detail": "Authentication is required for purchases that provision install keys.",
-                },
-            )
-        owner_key = resolve_authenticated_billing_owner(auth)
-        if not owner_key:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "error": "verified_billing_identity_required",
-                    "detail": "A verified billing identity is required for purchases that provision install keys.",
-                },
-            )
-        metadata["owner_key"] = owner_key
+    metadata["unit_credits"] = str(resolved_unit_credits)
+    metadata["owner_key"] = owner_key
 
-    customer_id = body.customer_id
-    if not customer_id:
-        try:
-            customer_id = _resolve_customer_id(svc, org_id)
-        except Exception:
-            customer_id = None
+    customer_id = _resolve_customer_id(svc, org_id)
 
     try:
-        logger.info("stripe_router.create_checkout_session org_id=%s package_id=%s price_id=%s", org_id, body.package_id, resolved_price_id)
+        logger.info(
+            "stripe_router.create_checkout_session org_id=%s package_id=%s price_id=%s",
+            org_id,
+            canonical_package_id,
+            resolved_price_id,
+        )
         result = svc.create_checkout_session(
             org_id=org_id,
             price_id=resolved_price_id,
@@ -1070,13 +1089,14 @@ async def create_checkout_session(
             success_url=body.success_url,
             cancel_url=body.cancel_url,
             customer_id=customer_id,
+            owner_key=owner_key,
             metadata=metadata,
         )
     except StripeServiceError as exc:
         logger.exception(
             "stripe_router.create_checkout_session_failed org_id=%s package_id=%s price_id=%s",
             org_id,
-            body.package_id,
+            canonical_package_id,
             resolved_price_id,
         )
         raise HTTPException(
@@ -1085,7 +1105,7 @@ async def create_checkout_session(
                 "error": "stripe_checkout_error",
                 "detail": str(exc),
                 "org_id": org_id,
-                "package_id": body.package_id,
+                "package_id": canonical_package_id,
                 "price_id": resolved_price_id,
             },
         ) from exc

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 from dataclasses import asdict, dataclass, field
+from importlib import resources
 import json
 import os
 from pathlib import Path
@@ -30,6 +31,13 @@ DEFAULT_BOOTSTRAP_BASE_URL: Final[str] = IRONCLAW_PUBLIC_BASE_URL
 DEFAULT_CONFIG_DIRNAME: Final[str] = ".ironclaw"
 DEFAULT_CONFIG_FILENAME: Final[str] = "config.json"
 DEFAULT_SKILL_CONFIG_FILENAME: Final[str] = "skill.json"
+OPENCLAW_PLUGIN_ID: Final[str] = "ironclaw-security"
+_OPENCLAW_PLUGIN_FILES: Final[tuple[str, ...]] = (
+    "package.json",
+    "openclaw.plugin.json",
+    "index.js",
+    "policy.js",
+)
 DEFAULT_ENV_FILENAME: Final[str] = ".env"
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 20.0
 DEFAULT_BACKUP_TARGET: Final[str] = "primary"
@@ -626,6 +634,48 @@ def _runtime_skill_install_command(program: str) -> list[str]:
     ]
 
 
+def _stage_openclaw_plugin(config_dir: Path) -> Path:
+    plugin_dir = config_dir / "openclaw-plugin"
+    if plugin_dir.is_symlink():
+        raise IronClawInstallerError(
+            f"Refusing to install the OpenClaw plugin through a symbolic-link directory: {plugin_dir}",
+        )
+    try:
+        _ensure_directory(plugin_dir)
+        packaged_plugin = resources.files("ironclaw_sdk").joinpath("openclaw_plugin")
+        for filename in _OPENCLAW_PLUGIN_FILES:
+            source = packaged_plugin.joinpath(filename)
+            if not source.is_file():
+                raise FileNotFoundError(filename)
+            _write_text_file(
+                plugin_dir / filename,
+                source.read_text(encoding="utf-8"),
+                overwrite=True,
+            )
+    except (ModuleNotFoundError, OSError, UnicodeDecodeError) as exc:
+        raise IronClawInstallerError(
+            "The OpenClaw enforcement plugin is missing from the installed IronClaw package.",
+        ) from exc
+    return plugin_dir
+
+
+def _install_openclaw_plugin(plugin_dir: Path, config_file: Path) -> None:
+    config_path = str(config_file.resolve())
+    config_path_setting = f"plugins.entries.{OPENCLAW_PLUGIN_ID}.config.configFile"
+    commands = (
+        ["openclaw", "plugins", "install", "--link", str(plugin_dir), "--force"],
+        ["openclaw", "config", "set", config_path_setting, config_path],
+        ["openclaw", "plugins", "enable", OPENCLAW_PLUGIN_ID],
+    )
+    try:
+        for command in commands:
+            subprocess.run(command, check=True, timeout=_SUBPROCESS_TIMEOUT)
+    except FileNotFoundError as exc:
+        raise IronClawInstallerError("The OpenClaw CLI was not found.") from exc
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise IronClawInstallerError("The OpenClaw enforcement plugin could not be installed or enabled.") from exc
+
+
 def run_bootstrap(
     *,
     program: str,
@@ -669,6 +719,20 @@ def run_bootstrap(
         raise IronClawInstallerError(
             f"Shared skill installation failed for {runtime_program}. The paid key was securely saved to {config_file}.",
         ) from exc
+
+    if runtime_program == "openclaw":
+        plugin_dir = target_config_dir / "openclaw-plugin"
+        try:
+            plugin_dir = _stage_openclaw_plugin(target_config_dir)
+            _install_openclaw_plugin(plugin_dir, config_file)
+        except IronClawInstallerError as exc:
+            config_path_setting = f"plugins.entries.{OPENCLAW_PLUGIN_ID}.config.configFile"
+            raise IronClawInstallerError(
+                f"OpenClaw enforcement setup failed: {exc} The paid key was securely saved to {config_file}. "
+                f'Complete setup with `openclaw plugins install --link "{plugin_dir}" --force`, '
+                f'`openclaw config set {config_path_setting} "{config_file.resolve()}"`, and '
+                f"`openclaw plugins enable {OPENCLAW_PLUGIN_ID}`.",
+            ) from exc
 
     return BootstrapResult(
         program=runtime_program,

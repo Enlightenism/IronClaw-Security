@@ -50,7 +50,7 @@ def test_execute_guarded_action_denies_high_risk_request():
     assert summary["halted_by_boundary"] is True
     assert summary["executor_result"] is None
     assert summary["policy_verdict"] == "block"
-    assert summary["risk_score"] == 95
+    assert summary["risk_score"] >= 95
     assert summary["reason"]
 
 

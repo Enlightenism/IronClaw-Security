@@ -521,6 +521,54 @@ def test_checkout_session_completed_webhook_rejects_missing_signature_and_replay
     assert second.json()["reason"] == "purchase_already_credited"
 
 
+def test_legacy_checkout_webhook_alias_rejects_unsigned_paid_event(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "legacy-webhook-buyer@ironclaw.test"
+    create_resp = client.post(
+        _PURCHASE_PATH,
+        json={
+            "package_id": "pkg_5000",
+            "buyer_name": "Legacy Buyer",
+            "buyer_email": owner,
+            "metadata": {},
+        },
+    )
+    assert create_resp.status_code == 201
+    purchase_id = create_resp.json()["purchase"]["purchase_id"]
+    checkout_session_id = "cs_legacy_alias_123"
+    payload = {
+        "id": "evt_legacy_alias_001",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": checkout_session_id,
+                "payment_status": "paid",
+                "mode": "payment",
+                "customer_details": {"email": owner},
+                "metadata": {
+                    "owner_key": owner,
+                    "purchase_id": purchase_id,
+                    "buyer_email": owner,
+                    "package_id": "pkg_5000",
+                    "checkout_session_id": checkout_session_id,
+                },
+            }
+        },
+    }
+    provision = MagicMock(return_value=_make_install_key_records())
+    monkeypatch.setattr("app.api.routes.billing._provision_paid_install_keys", provision)
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_secret_value_123")
+
+    response = client.post("/billing/webhook/stripe", json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["reason"] == "missing_stripe_signature"
+    assert client.get(f"/billing/wallet/{owner}").json()["wallet"]["balance_units"] == 0
+    provision.assert_not_called()
+
+
 def test_checkout_session_completed_pending_payment_does_not_credit_or_provision(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

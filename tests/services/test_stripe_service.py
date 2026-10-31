@@ -115,9 +115,30 @@ def _build_checkout_completed_event(
     metadata = {
         "org_id": org_id,
         "unit_credits": str(unit_credits),
+        "package_id": "pkg_5000",
+        "ironclaw_checkout_version": "1",
+        "ironclaw_checkout_price_id": "price_test_package",
+        "ironclaw_checkout_quantity": "1",
+        "ironclaw_checkout_mode": "payment",
     }
     if owner_key is not None:
         metadata["owner_key"] = owner_key
+    integrity_payload = {
+        "version": metadata["ironclaw_checkout_version"],
+        "org_id": metadata["org_id"],
+        "owner_key": str(metadata.get("owner_key") or "").strip().lower(),
+        "package_id": metadata["package_id"],
+        "price_id": metadata["ironclaw_checkout_price_id"],
+        "quantity": metadata["ironclaw_checkout_quantity"],
+        "unit_credits": metadata["unit_credits"],
+        "mode": metadata["ironclaw_checkout_mode"],
+    }
+    signed_payload = json.dumps(integrity_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    metadata["ironclaw_checkout_signature"] = _hmac.new(
+        _WEBHOOK_SECRET.encode("utf-8"),
+        signed_payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
     return {
         "id": event_id,
         "type": StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value,
@@ -198,6 +219,7 @@ def _build_payment_method_record(
 def svc() -> StripeService:
     s = StripeService()
     s.reset()
+    s.set_webhook_secret(_WEBHOOK_SECRET)
     return s
 
 
@@ -619,7 +641,10 @@ class TestHandleCheckoutCompleted:
         result = svc.handle_webhook_event(event)
 
         assert result["action"] == "processed"
-        assert svc.get_unit_balance("org-install-keys-success").balance == 5_000
+        owner_wallet = svc._wallet_registry.get_wallet(owner_key)  # noqa: SLF001
+        assert owner_wallet is not None
+        assert owner_wallet.balance_units == 5_000
+        assert svc.get_unit_balance("org-install-keys-success").balance == 0
         install_keys = result["detail"]["install_key_issuance"]
         assert install_keys["openclaw"]["owner_key"] == owner_key
         assert install_keys["claude_code"]["owner_key"] == owner_key
@@ -769,22 +794,13 @@ class TestHandleCheckoutCompleted:
         )
 
     def test_checkout_completed_pending_payment_never_issues_install_keys(self, svc: StripeService) -> None:
-        event = {
-            "id": "evt_co_pending",
-            "type": StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value,
-            "data": {
-                "object": {
-                    "id": "cs_pending_001",
-                    "mode": "payment",
-                    "customer": _CUSTOMER_ID,
-                    "payment_status": "pending",
-                    "metadata": {
-                        "org_id": "org-pending-checkout",
-                        "unit_credits": "500",
-                    },
-                }
-            },
-        }
+        event = _build_checkout_completed_event(
+            unit_credits=500,
+            org_id="org-pending-checkout",
+            session_id="cs_pending_001",
+            event_id="evt_co_pending",
+        )
+        event["data"]["object"]["payment_status"] = "pending"
 
         result = svc.handle_webhook_event(event)
         assert result["action"] == "processed"
@@ -825,8 +841,36 @@ class TestHandleCheckoutCompleted:
 
     def test_checkout_completed_zero_credits_no_balance_change(self, svc: StripeService) -> None:
         event = _build_checkout_completed_event(unit_credits=0)
-        svc.handle_webhook_event(event)
+        result = svc.handle_webhook_event(event)
+        assert result["action"] == "error"
         assert svc.get_unit_balance(_ORG).balance == 0
+
+    def test_checkout_completed_rejects_tampered_unit_metadata(self, svc: StripeService) -> None:
+        event = _build_checkout_completed_event(unit_credits=100)
+        event["data"]["object"]["metadata"]["unit_credits"] = "100000"
+
+        result = svc.handle_webhook_event(event)
+
+        assert result["action"] == "error"
+        assert svc.get_unit_balance(_ORG).balance == 0
+
+    def test_checkout_completed_rejects_unsigned_legacy_metadata(self, svc: StripeService) -> None:
+        event = _build_checkout_completed_event(unit_credits=100)
+        event["data"]["object"]["metadata"].pop("ironclaw_checkout_signature")
+
+        result = svc.handle_webhook_event(event)
+
+        assert result["action"] == "error"
+        assert svc.get_unit_balance(_ORG).balance == 0
+
+    def test_checkout_completed_rejects_tampered_owner_metadata(self, svc: StripeService) -> None:
+        event = _build_checkout_completed_event(unit_credits=100, owner_key="buyer@ironclaw.test")
+        event["data"]["object"]["metadata"]["owner_key"] = "victim@ironclaw.test"
+
+        result = svc.handle_webhook_event(event)
+
+        assert result["action"] == "error"
+        assert svc._wallet_registry.get_wallet("victim@ironclaw.test") is None  # noqa: SLF001
 
     def test_checkout_completed_result_action_processed(self, svc: StripeService) -> None:
         event = _build_checkout_completed_event(unit_credits=100)
@@ -953,7 +997,8 @@ class TestVerifyWebhookSignatureService:
             result = svc.verify_webhook_signature(payload, sig)
         assert result.valid is False
 
-    def test_missing_webhook_secret_returns_invalid(self, svc: StripeService) -> None:
+    def test_missing_webhook_secret_returns_invalid(self) -> None:
+        svc = StripeService()
         payload = b'{"id":"evt_nocfg_1","type":"invoice.paid","data":{"object":{}}}'
         sig = _make_sig(_WEBHOOK_SECRET, payload)
         empty_vault = MagicMock()
@@ -1061,6 +1106,7 @@ class TestResetClearsAllState:
         event = _build_checkout_completed_event(unit_credits=100)
         svc.handle_webhook_event(event)
         svc.reset()
+        svc.set_webhook_secret(_WEBHOOK_SECRET)
         result = svc.handle_webhook_event(event)
         assert result["action"] == "processed"
         assert svc.get_unit_balance(_ORG).balance == 100
@@ -1603,7 +1649,13 @@ class TestListSubscriptionsForOrg:
 
 
 class TestCompleteCheckoutSession:
-    def _seed_session(self, svc_wired: StripeService, mock_client: MagicMock, unit_credits: int = 500) -> str:
+    def _seed_session(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+        unit_credits: int = 500,
+        owner_key: str | None = None,
+    ) -> str:
         session_id = "cs_complete_test_001"
         mock_client.post.return_value = {
             "id": session_id,
@@ -1618,6 +1670,7 @@ class TestCompleteCheckoutSession:
             success_url="https://example.com/ok",
             cancel_url="https://example.com/cancel",
             customer_id=_CUSTOMER_ID,
+            owner_key=owner_key,
         )
         return session_id
 
@@ -1625,6 +1678,26 @@ class TestCompleteCheckoutSession:
         session_id = self._seed_session(svc_wired, mock_client, unit_credits=1000)
         svc_wired.complete_checkout_session(session_id=session_id, org_id=_ORG)
         assert svc_wired.get_unit_balance(_ORG).balance == 1000
+
+    def test_complete_checkout_session_credits_authenticated_owner_wallet(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        owner_key = "buyer@ironclaw.test"
+        session_id = self._seed_session(
+            svc_wired,
+            mock_client,
+            unit_credits=1000,
+            owner_key=owner_key,
+        )
+
+        svc_wired.complete_checkout_session(session_id=session_id, org_id=_ORG)
+
+        owner_wallet = svc_wired._wallet_registry.get_wallet(owner_key)  # noqa: SLF001
+        assert owner_wallet is not None
+        assert owner_wallet.balance_units == 1000
+        assert svc_wired.get_unit_balance(_ORG).balance == 0
 
     def test_complete_checkout_session_marks_session_complete(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
         session_id = self._seed_session(svc_wired, mock_client, unit_credits=100)

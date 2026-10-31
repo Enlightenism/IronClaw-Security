@@ -7,9 +7,10 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
+from app.dependencies.action_execute import get_action_execute_pipeline
 from app.facade import guardandexecuteaction
 from app.models.action_execute import ExecuteRequest as FacadeExecuteRequest
-from app.orchestrator.secureruntimepipeline import SecureRuntimePipeline, getactionexecutepipeline
+from app.orchestrator.secure_runtime_pipeline import SecureRuntimePipeline
 
 router = APIRouter()
 
@@ -194,7 +195,7 @@ def _normalize_execution_state(raw_state: str | None, status: ExecutionStatus) -
 )
 def guardedexecute(
     payload: ExecuteRequest,
-    pipeline: SecureRuntimePipeline = Depends(getactionexecutepipeline),
+    pipeline: SecureRuntimePipeline = Depends(get_action_execute_pipeline),
 ) -> ExecuteResponse:
     """Guard and optionally execute an action.
 

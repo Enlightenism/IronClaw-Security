@@ -31,6 +31,7 @@ SUBSCRIPTION_ID = "sub_test_001"
 
 _API_KEY = "test-api-key"
 _BILLING_BASE = "/api/billing"
+_TEST_PRICE_IDS = {"BILLING_TIER_5K_PRICE_ID": "price_pkg5000"}
 
 _ALLOWED_SUCCESS_URL = "https://moving-forward.ca/billing/success"
 _ALLOWED_CANCEL_URL = "https://moving-forward.ca/billing/cancel"
@@ -550,16 +551,22 @@ class TestCheckoutSessionRoutes:
         )
 
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("app.routers.stripe_router.vault.get", lambda key, default=None: "price_pkg5000")
+            mp.setattr("app.routers.stripe_router.vault.get", MagicMock(side_effect=_TEST_PRICE_IDS.get))
             resp = client.post(
                 _billing_path("/checkout/sessions"),
                 json={
                     "packageId": "pkg5000",
+                    "priceId": "price_attacker",
                     "unitCredits": 42,
                     "quantity": 1,
                     "successUrl": _ALLOWED_SUCCESS_URL,
                     "cancelUrl": _ALLOWED_CANCEL_URL,
-                    "metadata": {"source": "test", "owner_key": "attacker@ironclaw.test"},
+                    "metadata": {
+                        "source": "test",
+                        "owner_key": "attacker@ironclaw.test",
+                        "org_id": "attacker-org",
+                        "unit_credits": "999999",
+                    },
                 },
                 headers=_auth_headers(),
             )
@@ -574,13 +581,57 @@ class TestCheckoutSessionRoutes:
             success_url=_ALLOWED_SUCCESS_URL,
             cancel_url=_ALLOWED_CANCEL_URL,
             customer_id=None,
+            owner_key="buyer@ironclaw.test",
             metadata={
                 "source": "test",
                 "owner_key": "buyer@ironclaw.test",
                 "package_id": "pkg_5000",
                 "org_id": ORG_ID,
+                "unit_credits": "5000",
             },
         )
+
+    def test_create_checkout_session_ignores_request_owner_and_customer_ids(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        auth_without_org = replace(_TEST_AUTH_CONTEXT, org_id=None)
+        mock_svc.create_checkout_session.return_value = _obj_with_to_dict(
+            session_id=SESSION_ID,
+            checkout_url="https://checkout.stripe.com/c/pay/personal",
+            org_id="buyer@ironclaw.test",
+            mode=StripeCheckoutMode.PAYMENT.value,
+            price_id="price_pkg5000",
+            quantity=1,
+            unit_credits=5000,
+            expires_at=None,
+            metadata={},
+            created_at="2026-06-28T00:00:00Z",
+            schema_version="1.0",
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setitem(app.dependency_overrides, get_auth_context, lambda: auth_without_org)
+            mp.setattr("app.routers.stripe_router.vault.get", MagicMock(side_effect=_TEST_PRICE_IDS.get))
+            response = client.post(
+                _billing_path("/checkout/sessions"),
+                json={
+                    "packageId": "pkg5000",
+                    "organizationId": "attacker-org",
+                    "customerId": "cus_attacker",
+                    "successUrl": _ALLOWED_SUCCESS_URL,
+                    "cancelUrl": _ALLOWED_CANCEL_URL,
+                },
+                headers=_auth_headers(),
+            )
+
+        assert response.status_code == 201
+        checkout_kwargs = mock_svc.create_checkout_session.call_args.kwargs
+        assert checkout_kwargs["org_id"] == "buyer@ironclaw.test"
+        assert checkout_kwargs["customer_id"] is None
+        assert checkout_kwargs["metadata"]["org_id"] == "buyer@ironclaw.test"
+        assert checkout_kwargs["metadata"]["owner_key"] == "buyer@ironclaw.test"
 
     @pytest.mark.parametrize(
         ("success_url", "cancel_url"),
@@ -604,47 +655,73 @@ class TestCheckoutSessionRoutes:
             checkout_url="https://checkout.stripe.com/c/pay/canonical",
             org_id=ORG_ID,
             mode=StripeCheckoutMode.PAYMENT.value,
-            price_id="price_direct_123",
+            price_id="price_pkg5000",
             quantity=1,
-            unit_credits=42,
+            unit_credits=5000,
             expires_at=None,
             metadata={"flow": "canonical", "org_id": ORG_ID},
             created_at="2026-06-28T00:00:00Z",
             schema_version="1.0",
         )
 
-        resp = client.post(
-            _billing_path("/checkout/sessions"),
-            json={
-                "priceId": "price_direct_123",
-                "unitCredits": 42,
-                "quantity": 1,
-                "successUrl": success_url,
-                "cancelUrl": cancel_url,
-                "metadata": {"flow": "canonical"},
-            },
-            headers=_auth_headers(),
-        )
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.routers.stripe_router.vault.get", MagicMock(side_effect=_TEST_PRICE_IDS.get))
+            resp = client.post(
+                _billing_path("/checkout/sessions"),
+                json={
+                    "packageId": "pkg5000",
+                    "unitCredits": 42,
+                    "successUrl": success_url,
+                    "cancelUrl": cancel_url,
+                    "metadata": {"flow": "canonical"},
+                },
+                headers=_auth_headers(),
+            )
 
         assert resp.status_code == 201
         assert mock_svc.create_checkout_session.call_args.kwargs["success_url"] == success_url
         assert mock_svc.create_checkout_session.call_args.kwargs["cancel_url"] == cancel_url
 
-    def test_create_checkout_session_with_direct_price_id_requires_unit_credits(self, client: TestClient) -> None:
-        resp = client.post(
-            _billing_path("/checkout/sessions"),
-            json={
-                "priceId": "price_direct_123",
-                "quantity": 1,
-                "successUrl": _ALLOWED_SUCCESS_URL,
-                "cancelUrl": _ALLOWED_CANCEL_URL,
-            },
-            headers=_auth_headers(),
-        )
+    def test_create_checkout_session_rejects_unconfigured_price_id(self, client: TestClient) -> None:
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.routers.stripe_router.vault.get", MagicMock(side_effect=_TEST_PRICE_IDS.get))
+            resp = client.post(
+                _billing_path("/checkout/sessions"),
+                json={
+                    "priceId": "price_direct_123",
+                    "unitCredits": 42,
+                    "quantity": 1,
+                    "successUrl": _ALLOWED_SUCCESS_URL,
+                    "cancelUrl": _ALLOWED_CANCEL_URL,
+                },
+                headers=_auth_headers(),
+            )
 
         assert resp.status_code == 400
         detail = resp.json()["detail"]
-        assert detail["error"] == "unit_credits_required_for_price_id"
+        assert detail["error"] == "unsupported_price_id"
+
+    def test_create_checkout_session_rejects_nonpayment_package_mode(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.routers.stripe_router.vault.get", MagicMock(side_effect=_TEST_PRICE_IDS.get))
+            response = client.post(
+                _billing_path("/checkout/sessions"),
+                json={
+                    "packageId": "pkg5000",
+                    "mode": "subscription",
+                    "successUrl": _ALLOWED_SUCCESS_URL,
+                    "cancelUrl": _ALLOWED_CANCEL_URL,
+                },
+                headers=_auth_headers(),
+            )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error"] == "package_checkout_mode_invalid"
+        mock_svc.create_checkout_session.assert_not_called()
 
     def test_create_checkout_session_with_direct_price_id_calls_service(self, client: TestClient, mock_svc: MagicMock) -> None:
         checkout_result = _obj_with_to_dict(
@@ -652,40 +729,55 @@ class TestCheckoutSessionRoutes:
             checkout_url="https://checkout.stripe.com/c/pay/direct",
             org_id=ORG_ID,
             mode=StripeCheckoutMode.PAYMENT.value,
-            price_id="price_direct_123",
+            price_id="price_pkg5000",
             quantity=2,
-            unit_credits=42,
+            unit_credits=10000,
             expires_at=None,
-            metadata={"flow": "direct", "org_id": ORG_ID},
+            metadata={
+                "flow": "direct",
+                "package_id": "pkg_5000",
+                "org_id": ORG_ID,
+                "unit_credits": "10000",
+                "owner_key": "buyer@ironclaw.test",
+            },
             created_at="2026-06-28T00:00:00Z",
             schema_version="1.0",
         )
         mock_svc.create_checkout_session.return_value = checkout_result
 
-        resp = client.post(
-            _billing_path("/checkout/sessions"),
-            json={
-                "priceId": "price_direct_123",
-                "unitCredits": 42,
-                "quantity": 2,
-                "successUrl": _ALLOWED_SUCCESS_URL,
-                "cancelUrl": _ALLOWED_CANCEL_URL,
-                "metadata": {"flow": "direct"},
-            },
-            headers=_auth_headers(),
-        )
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.routers.stripe_router.vault.get", MagicMock(side_effect=_TEST_PRICE_IDS.get))
+            resp = client.post(
+                _billing_path("/checkout/sessions"),
+                json={
+                    "priceId": "price_pkg5000",
+                    "unitCredits": 42,
+                    "quantity": 2,
+                    "successUrl": _ALLOWED_SUCCESS_URL,
+                    "cancelUrl": _ALLOWED_CANCEL_URL,
+                    "metadata": {"flow": "direct"},
+                },
+                headers=_auth_headers(),
+            )
 
         assert resp.status_code == 201
         mock_svc.create_checkout_session.assert_called_once_with(
             org_id=ORG_ID,
-            price_id="price_direct_123",
+            price_id="price_pkg5000",
             mode=StripeCheckoutMode.PAYMENT,
             quantity=2,
-            unit_credits=42,
+            unit_credits=10000,
             success_url=_ALLOWED_SUCCESS_URL,
             cancel_url=_ALLOWED_CANCEL_URL,
             customer_id=None,
-            metadata={"flow": "direct", "org_id": ORG_ID, "owner_key": "buyer@ironclaw.test"},
+            owner_key="buyer@ironclaw.test",
+            metadata={
+                "flow": "direct",
+                "package_id": "pkg_5000",
+                "org_id": ORG_ID,
+                "unit_credits": "10000",
+                "owner_key": "buyer@ironclaw.test",
+            },
         )
 
     def test_create_checkout_session_requires_billing_owner(
@@ -849,26 +941,28 @@ class TestCheckoutSessionRoutes:
             checkout_url="https://checkout.stripe.com/c/pay/customer",
             org_id=ORG_ID,
             mode=StripeCheckoutMode.PAYMENT.value,
-            price_id="price_direct_123",
+            price_id="price_pkg5000",
             quantity=1,
-            unit_credits=10,
+            unit_credits=5000,
             expires_at=None,
             metadata={"org_id": ORG_ID},
             created_at="2026-06-28T00:00:00Z",
             schema_version="1.0",
         )
 
-        resp = client.post(
-            _billing_path("/checkout/sessions"),
-            json={
-                "priceId": "price_direct_123",
-                "unitCredits": 10,
-                "quantity": 1,
-                "successUrl": _ALLOWED_SUCCESS_URL,
-                "cancelUrl": _ALLOWED_CANCEL_URL,
-            },
-            headers=_auth_headers(),
-        )
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.routers.stripe_router.vault.get", MagicMock(side_effect=_TEST_PRICE_IDS.get))
+            resp = client.post(
+                _billing_path("/checkout/sessions"),
+                json={
+                    "packageId": "pkg5000",
+                    "unitCredits": 10,
+                    "quantity": 1,
+                    "successUrl": _ALLOWED_SUCCESS_URL,
+                    "cancelUrl": _ALLOWED_CANCEL_URL,
+                },
+                headers=_auth_headers(),
+            )
 
         assert resp.status_code == 201
         mock_svc.create_checkout_session.assert_called_once()

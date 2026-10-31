@@ -131,6 +131,46 @@ def _mock_session_resp(
     }
 
 
+def _signed_checkout_metadata(
+    *,
+    org_id: str = _TEST_ORG,
+    unit_credits: int = _PKG_STARTER_UNITS,
+    owner_key: str | None = None,
+    package_id: str = "pkg_5000",
+    price_id: str = _TEST_PRICE_ID,
+    quantity: int = 1,
+    mode: str = "payment",
+) -> dict[str, str]:
+    metadata = {
+        "org_id": org_id,
+        "unit_credits": str(unit_credits),
+        "package_id": package_id,
+        "ironclaw_checkout_version": "1",
+        "ironclaw_checkout_price_id": price_id,
+        "ironclaw_checkout_quantity": str(quantity),
+        "ironclaw_checkout_mode": mode,
+    }
+    if owner_key is not None:
+        metadata["owner_key"] = owner_key
+    integrity_payload = {
+        "version": metadata["ironclaw_checkout_version"],
+        "org_id": metadata["org_id"],
+        "owner_key": str(metadata.get("owner_key") or "").strip().lower(),
+        "package_id": metadata["package_id"],
+        "price_id": metadata["ironclaw_checkout_price_id"],
+        "quantity": metadata["ironclaw_checkout_quantity"],
+        "unit_credits": metadata["unit_credits"],
+        "mode": metadata["ironclaw_checkout_mode"],
+    }
+    serialized_payload = json.dumps(integrity_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    metadata["ironclaw_checkout_signature"] = _hmac.new(
+        _TEST_WEBHOOK_SECRET.encode("utf-8"),
+        serialized_payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return metadata
+
+
 def _mock_subscription_obj(
     sub_id: str = _TEST_SUB_ID,
     customer_id: str = _TEST_CUSTOMER_ID,
@@ -276,7 +316,7 @@ def _reset_service() -> Generator[None, None, None]:
 
 @pytest.fixture()
 def svc() -> StripeService:
-    return StripeService()
+    return StripeService(webhook_secret=_TEST_WEBHOOK_SECRET)
 
 
 @pytest.fixture()
@@ -362,6 +402,7 @@ class TestStripeServiceConfig:
                 svc._get_api_key()
 
     def test_get_webhook_secret_raises_config_error_when_missing(self, svc: StripeService) -> None:
+        svc._webhook_secret_override = None  # noqa: SLF001
         with patch("app.services.stripe_service.vault") as mock_vault:
             mock_vault.get.return_value = ""
             with pytest.raises(StripeConfigError):
@@ -474,6 +515,50 @@ class TestCheckoutSessionCreation:
         assert resp.unit_credits == _PKG_STARTER_UNITS
         assert resp.org_id == _TEST_ORG
 
+    def test_create_checkout_session_reserves_server_owned_metadata(
+        self,
+        svc_with_client: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.post.return_value = _mock_session_resp()
+
+        response = svc_with_client.create_checkout_session(
+            org_id=_TEST_ORG,
+            price_id=_TEST_PRICE_ID,
+            unit_credits=_PKG_STARTER_UNITS,
+            success_url=_TEST_SUCCESS_URL,
+            cancel_url=_TEST_CANCEL_URL,
+            owner_key="Buyer@ironclaw.test",
+            metadata={
+                "org_id": "attacker-org",
+                "owner_key": "attacker@ironclaw.test",
+                "unit_credits": "999999",
+                "tokens_per_unit": "1",
+                "ironclaw_source": "attacker",
+                "ironclaw_checkout_version": "legacy",
+                "ironclaw_checkout_signature": "forged",
+            },
+        )
+
+        posted_params = mock_client.post.call_args.args[1]
+        assert posted_params["metadata[org_id]"] == _TEST_ORG
+        assert posted_params["metadata[owner_key]"] == "buyer@ironclaw.test"
+        assert posted_params["metadata[unit_credits]"] == str(_PKG_STARTER_UNITS)
+        assert posted_params["metadata[tokens_per_unit]"] == str(_TOKENS_PER_UNIT)
+        assert posted_params["metadata[ironclaw_source]"] == "ironclaw-security"
+        assert posted_params["metadata[ironclaw_checkout_version]"] == "1"
+        assert posted_params["metadata[ironclaw_checkout_price_id]"] == _TEST_PRICE_ID
+        assert posted_params["metadata[ironclaw_checkout_quantity]"] == "1"
+        assert posted_params["metadata[ironclaw_checkout_mode]"] == "payment"
+        assert posted_params["metadata[ironclaw_checkout_signature]"] != "forged"
+        integrity = svc_with_client._verify_checkout_integrity_metadata(  # noqa: SLF001
+            response.metadata,
+            mode="payment",
+        )
+        assert integrity["org_id"] == _TEST_ORG
+        assert integrity["owner_key"] == "buyer@ironclaw.test"
+        assert integrity["unit_credits"] == _PKG_STARTER_UNITS
+
     def test_create_checkout_session_stores_record(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
         mock_client.post.return_value = _mock_session_resp()
         svc_with_client.create_checkout_session(
@@ -536,11 +621,7 @@ class TestCheckoutSessionCreation:
             "cancel_url": _TEST_CANCEL_URL,
             "created": 1_700_000_000,
             "expires_at": 1_700_000_600,
-            "metadata": {
-                "org_id": _TEST_ORG,
-                "owner_key": "buyer@ironclaw.test",
-                "unit_credits": "5000",
-            },
+            "metadata": _signed_checkout_metadata(owner_key="buyer@ironclaw.test"),
             "line_items": {
                 "data": [
                     {
@@ -1068,6 +1149,7 @@ class TestWebhookSignatureVerification:
         m = MagicMock()
         m.get.return_value = ""
         with patch("app.services.stripe_service.vault", m):
+            svc._webhook_secret_override = None  # noqa: SLF001
             result = svc.verify_webhook_signature(payload, sig)
         assert result.valid is False
 
@@ -1103,7 +1185,7 @@ class TestWebhookEventDispatch:
             "mode": "payment",
             "payment_status": "paid",
             "customer": _TEST_CUSTOMER_ID,
-            "metadata": {"org_id": _TEST_ORG, "unit_credits": str(_PKG_STARTER_UNITS)},
+            "metadata": _signed_checkout_metadata(),
         }
         result = svc.handle_webhook_event(self._event("checkout.session.completed", obj))
         assert result["action"] == "processed"
@@ -1114,7 +1196,7 @@ class TestWebhookEventDispatch:
             "id": "cs_webhook_2",
             "mode": "payment",
             "customer": _TEST_CUSTOMER_ID,
-            "metadata": {"org_id": _TEST_ORG, "unit_credits": "0"},
+            "metadata": _signed_checkout_metadata(unit_credits=0),
         }
         svc.handle_webhook_event(self._event("checkout.session.completed", obj))
         assert svc.get_unit_balance(_TEST_ORG).balance == 0
@@ -1349,7 +1431,7 @@ class TestWebhookEventDispatch:
             "mode": "payment",
             "payment_status": "paid",
             "customer": _TEST_CUSTOMER_ID,
-            "metadata": {"org_id": _TEST_ORG, "unit_credits": str(_PKG_STARTER_UNITS)},
+            "metadata": _signed_checkout_metadata(),
         }
         event = self._event("checkout.session.completed", obj, event_id="evt_idempotent_1")
         svc.handle_webhook_event(event)
@@ -1427,7 +1509,7 @@ class TestServiceReset:
             "mode": "payment",
             "payment_status": "paid",
             "customer": _TEST_CUSTOMER_ID,
-            "metadata": {"org_id": _TEST_ORG, "unit_credits": str(_PKG_STARTER_UNITS)},
+            "metadata": _signed_checkout_metadata(),
         }
         event = {"id": "evt_to_clear", "type": "checkout.session.completed", "data": {"object": obj}}
         svc.handle_webhook_event(event)

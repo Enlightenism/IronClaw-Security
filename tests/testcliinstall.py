@@ -518,6 +518,83 @@ def test_run_bootstrap_redeems_once_persists_privately_and_installs_the_shared_s
     assert install_key not in repr(result)
 
 
+def test_run_bootstrap_installs_fail_closed_openclaw_plugin(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim_token = "ic_claim_0123456789abcdefghij"
+    install_key = "ic_install_openclaw_abc123"
+    requests: list[Any] = []
+    commands: list[list[str]] = []
+
+    def fake_open_claim_request(request: Any, *, timeout: float) -> io.BytesIO:
+        requests.append(request)
+        assert timeout == install_module.DEFAULT_TIMEOUT_SECONDS
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "key_id": "ik_openclaw_bootstrap_001",
+                    "program": "openclaw",
+                    "install_key": install_key,
+                },
+            ).encode("utf-8"),
+        )
+
+    def fake_subprocess_run(command: list[str], **kwargs: Any) -> None:
+        commands.append(command)
+        assert kwargs == {"check": True, "timeout": install_module._SUBPROCESS_TIMEOUT}
+
+    monkeypatch.setattr(install_module, "_open_install_claim_request", fake_open_claim_request)
+    monkeypatch.setattr(install_module, "_restrict_private_file_permissions", lambda _: None)
+    monkeypatch.setattr(install_module.subprocess, "run", fake_subprocess_run)
+
+    config_dir = tmp_path / "user-config"
+    result = install_module.run_bootstrap(
+        program="openclaw",
+        claim_token=claim_token,
+        config_dir=config_dir,
+    )
+
+    plugin_dir = config_dir / "openclaw-plugin"
+    config_file = (config_dir / install_module.DEFAULT_CONFIG_FILENAME).resolve()
+    assert requests[0].full_url == "https://ironclaw-security.onrender.com/integrations/install-claims/redeem"
+    assert json.loads(requests[0].data) == {"claim_token": claim_token}
+    assert commands == [
+        [
+            "gh",
+            "skill",
+            "install",
+            "Enlightenism/IronClaw-Security",
+            "skills/ironclaw-security",
+            "--agent",
+            "openclaw",
+            "--scope",
+            "user",
+        ],
+        ["openclaw", "plugins", "install", "--link", str(plugin_dir), "--force"],
+        [
+            "openclaw",
+            "config",
+            "set",
+            "plugins.entries.ironclaw-security.config.configFile",
+            str(config_file),
+        ],
+        ["openclaw", "plugins", "enable", "ironclaw-security"],
+    ]
+
+    saved_config = json.loads(result.config_file.read_text(encoding="utf-8"))
+    assert saved_config["install_keys"] == {"openclaw": install_key}
+    for filename in ("package.json", "openclaw.plugin.json", "index.js", "policy.js"):
+        plugin_file = plugin_dir / filename
+        assert plugin_file.is_file()
+        plugin_contents = plugin_file.read_text(encoding="utf-8")
+        assert claim_token not in plugin_contents
+        assert install_key not in plugin_contents
+    assert install_key not in json.dumps(commands)
+    assert claim_token not in json.dumps(commands)
+
+
 def test_run_install_skips_existing_files_without_overwrite(
     install_module: Any,
     tmp_path: Path,

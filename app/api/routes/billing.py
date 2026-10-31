@@ -1070,8 +1070,14 @@ async def _handle_checkout_session_completed_webhook_route(
     status_code=status.HTTP_200_OK,
     summary="Legacy Stripe webhook alias",
 )
-def handle_checkout_session_completed_webhook_legacy(payload: dict[str, Any]) -> dict[str, Any]:
-    return _process_checkout_session_completed_webhook(payload)
+async def handle_checkout_session_completed_webhook_legacy(
+    request: Request,
+    stripe_signature: str | None = Header(default=None, alias="stripe-signature"),
+) -> dict[str, Any]:
+    return await _handle_checkout_session_completed_webhook_route(
+        request=request,
+        stripe_signature=stripe_signature,
+    )
 
 
 @router.get(

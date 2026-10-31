@@ -4,8 +4,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Literal
+from uuid import uuid4
 
 from app.config import RISK_THRESHOLD_ALLOW_MAX, RISK_THRESHOLD_BLOCK_MIN
+from app.orchestrator.secure_runtime_pipeline import (
+    RuntimeRequest,
+    SecureRuntimePipeline,
+    SecureRuntimeResult,
+)
 from app.runtime.networkguard import NetworkGuard, build_network_guard
 from app.services.action_guard import normalize_action_type
 
@@ -68,37 +74,6 @@ def _get_network_guard() -> NetworkGuard:
     return build_network_guard()
 
 
-def _build_runtime_result(
-    *,
-    risk_score: int,
-    network_policy_blocked: bool = False,
-) -> BoundaryRuntimeResult:
-    if network_policy_blocked:
-        verdict = "block"
-        reasons = ["Request blocked by the configured network egress policy."]
-        review_item_id = "review-001"
-    elif risk_score > RISK_THRESHOLD_ALLOW_MAX:
-        verdict = "block"
-        reasons = ["Request blocked by the configured executor-boundary risk policy."]
-        review_item_id = "review-001"
-    else:
-        verdict = "allow"
-        reasons = ["Request allowed by executor boundary."]
-        review_item_id = None
-
-    decision = BoundaryDecision(
-        decision_id="decision-001",
-        verdict=verdict,
-        reasons=reasons,
-        review_item_id=review_item_id,
-    )
-    return BoundaryRuntimeResult(
-        request_id="request-001",
-        trace_id="trace-001",
-        decision=decision,
-    )
-
-
 def dry_run_executor(request: BoundaryRequest) -> dict[str, Any]:
     return {
         "mode": "dry_run",
@@ -112,7 +87,7 @@ def dry_run_executor(request: BoundaryRequest) -> dict[str, Any]:
 
 def execute_with_boundary(
     *,
-    pipeline: Any,
+    pipeline: SecureRuntimePipeline,
     actor_id: str | None,
     action_type: str,
     target: str,
@@ -131,6 +106,12 @@ def execute_with_boundary(
     if network_policy_blocked:
         risk_score = max(risk_score, RISK_THRESHOLD_BLOCK_MIN)
 
+    request_metadata = dict(metadata or {})
+    if not risk_score_is_valid:
+        request_metadata["boundary_risk_score_invalid"] = True
+    if network_policy_blocked:
+        request_metadata["boundary_network_policy_blocked"] = True
+
     request = BoundaryRequest(
         actor_id=actor_id,
         action_type=action_type,
@@ -139,35 +120,84 @@ def execute_with_boundary(
         risk_score=risk_score,
         session_id=session_id,
         file_path=file_path,
-        metadata=metadata or {},
+        metadata=request_metadata,
     )
 
-    runtime_result = _build_runtime_result(
-        risk_score=risk_score,
-        network_policy_blocked=network_policy_blocked,
+    pipeline_result: SecureRuntimeResult = pipeline.run(
+        RuntimeRequest(
+            actor_id=actor_id or "anonymous-client",
+            action_type=action_type,
+            target=target,
+            content=content,
+            risk_score=risk_score,
+            session_id=session_id,
+            file_path=file_path,
+            metadata=request_metadata,
+        ),
     )
-    decision = runtime_result.decision
+    policy_decision = pipeline_result.decision
+    coordinated_response = pipeline_result.coordination.response
+    policy_risk_blocked = policy_decision.risk_score > RISK_THRESHOLD_ALLOW_MAX
+    boundary_blocked = (
+        not risk_score_is_valid
+        or risk_score > RISK_THRESHOLD_ALLOW_MAX
+        or policy_risk_blocked
+        or network_policy_blocked
+        or policy_decision.verdict != "allow"
+        or policy_decision.allow_execution is not True
+        or policy_decision.requires_review
+        or coordinated_response.action != "allow"
+        or coordinated_response.status != "completed"
+    )
+
+    reasons = list(policy_decision.reasons)
     if not risk_score_is_valid:
-        decision.reasons.insert(0, "Invalid risk score; request blocked by executor boundary.")
+        reasons.insert(0, "Invalid risk score; request blocked by executor boundary.")
+    if risk_score > RISK_THRESHOLD_ALLOW_MAX or policy_risk_blocked:
+        reasons.insert(0, "Request blocked by the configured executor-boundary risk policy.")
+    if network_policy_blocked:
+        reasons.insert(0, "Request blocked by the configured network egress policy.")
+    if boundary_blocked and not reasons:
+        reasons.append(coordinated_response.reason or "Request blocked by the secure runtime pipeline.")
 
-    if decision.verdict == "block":
+    policy_verdict: PolicyVerdict = "block" if boundary_blocked else "allow"
+    final_risk_score = policy_decision.risk_score
+    if policy_verdict == "block":
+        final_risk_score = max(final_risk_score, RISK_THRESHOLD_BLOCK_MIN)
+
+    runtime_result = BoundaryRuntimeResult(
+        request_id=pipeline_result.trace.request_id,
+        trace_id=pipeline_result.trace.trace_id,
+        decision=BoundaryDecision(
+            decision_id=policy_decision.decision_id,
+            verdict=policy_verdict,
+            reasons=reasons,
+            review_item_id=coordinated_response.review_item_id,
+        ),
+    )
+    execution_id = f"exec-{uuid4().hex}"
+
+    if boundary_blocked:
+        response_status = coordinated_response.status
+        if response_status == "completed":
+            response_status = "denied"
         receipt = ExecutionReceipt(
-            execution_id="exec-001",
+            execution_id=execution_id,
             state="denied",
-            response_action=decision.verdict,
-            response_status="denied",
+            response_action="block",
+            response_status=response_status,
             trace_id=runtime_result.trace_id,
             request_id=runtime_result.request_id,
-            decision_id=decision.decision_id,
-            policy_verdict=decision.verdict,
-            risk_score=risk_score,
+            decision_id=runtime_result.decision.decision_id,
+            policy_verdict=policy_verdict,
+            risk_score=final_risk_score,
             should_execute=False,
             halted_by_boundary=True,
-            review_item_id=decision.review_item_id,
+            review_item_id=runtime_result.decision.review_item_id,
             executor_name=None,
             executor_result=None,
-            reason=decision.reasons[0],
-            reasons=decision.reasons,
+            reason=reasons[0],
+            reasons=reasons,
         )
         return receipt, runtime_result
 
@@ -180,18 +210,18 @@ def execute_with_boundary(
             raise TypeError("Executor must return a dict result.")
     except Exception as exc:
         receipt = ExecutionReceipt(
-            execution_id="exec-001",
+            execution_id=execution_id,
             state="failed",
             response_action="review",
             response_status="queued_for_review",
             trace_id=runtime_result.trace_id,
             request_id=runtime_result.request_id,
-            decision_id=decision.decision_id,
-            policy_verdict=decision.verdict,
-            risk_score=risk_score,
+            decision_id=runtime_result.decision.decision_id,
+            policy_verdict=policy_verdict,
+            risk_score=final_risk_score,
             should_execute=False,
             halted_by_boundary=False,
-            review_item_id=decision.review_item_id,
+            review_item_id=runtime_result.decision.review_item_id,
             executor_name=executor_name,
             executor_result=None,
             reason=f"Executor failed: {exc}",
@@ -200,22 +230,22 @@ def execute_with_boundary(
         return receipt, runtime_result
 
     receipt = ExecutionReceipt(
-        execution_id="exec-001",
+        execution_id=execution_id,
         state="executed",
         response_action="allow",
         response_status="completed",
         trace_id=runtime_result.trace_id,
         request_id=runtime_result.request_id,
-        decision_id=decision.decision_id,
-        policy_verdict=decision.verdict,
-        risk_score=risk_score,
+        decision_id=runtime_result.decision.decision_id,
+        policy_verdict=policy_verdict,
+        risk_score=final_risk_score,
         should_execute=True,
         halted_by_boundary=False,
-        review_item_id=decision.review_item_id,
+        review_item_id=runtime_result.decision.review_item_id,
         executor_name=executor_name,
         executor_result=executor_result,
         reason="Execution completed successfully.",
-        reasons=decision.reasons,
+        reasons=reasons,
     )
     return receipt, runtime_result
 

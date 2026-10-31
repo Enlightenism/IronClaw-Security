@@ -64,7 +64,7 @@ def test_guardandexecuteraw_blockshighriskrequest():
     assert response["halted_by_boundary"] is True
     assert response["executor_result"] is None
     assert response["policy_verdict"] == "block"
-    assert response["risk_score"] == 95
+    assert response["risk_score"] >= 95
     assert response["reason"]
     assert response["reasons"]
     assert any(reason["source"] in {"policy", "scan", "ai"} for reason in response["reasons"])

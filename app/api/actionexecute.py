@@ -8,12 +8,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.audit import createauditevent
+from app.api.routes.install_key_events import (
+    InstallKeyEventRequest,
+    ingest_install_key_event,
+)
 from app.config import (
     RISK_THRESHOLD_ALLOW_MAX,
     RISK_THRESHOLD_BLOCK_MIN,
     RISK_THRESHOLD_QUARANTINE_MIN,
 )
 from app.core.auth import AuthContext, InstallKeyAuthContext, get_runtime_auth_context
+from app.core.install_keys import get_install_key_registry
+from app.core.unit_wallet import get_unit_wallet_registry
 from app.services.action_guard import ActionGuardDecision, analyze_action, normalize_action_type
 from app.services.actionexecuteservice import (
     ActionExecutionRequest,
@@ -311,6 +317,33 @@ def executeaction(
     status = _map_audit_event_to_status(audit["eventtype"])
 
     if status != "allowed":
+        if isinstance(auth_context, InstallKeyAuthContext):
+            categories = promptinjection.get("categories")
+            has_prompt_injection = isinstance(categories, list) and any(category in {"prompt_injection", "indirect_prompt_injection"} for category in categories)
+            event_type = "quarantine_detected" if status == "quarantined" else "prompt_injection_detected" if has_prompt_injection else "action_blocked"
+            ingest_install_key_event(
+                payload=InstallKeyEventRequest(
+                    event_id=request.eventid or uuid4().hex,
+                    event_type=event_type,
+                    key_id=auth_context.key_id,
+                    owner_key=auth_context.owner_key,
+                    program=auth_context.program,
+                    action_type=request.actiontype,
+                    blocked_attack_count=1,
+                    metadata={
+                        "risk_score": finalriskscore,
+                        "prompt_injection_flagged": bool(promptinjection.get("flagged")),
+                        "categories": categories if isinstance(categories, list) else [],
+                        "scan_id": promptinjection.get("scan_id"),
+                        "session_id": request.sessionid,
+                        "client_id": request.clientid,
+                    },
+                ),
+                auth_context=auth_context,
+                install_key_registry=get_install_key_registry(),
+                wallet_registry=get_unit_wallet_registry(),
+            )
+
         if status == "review":
             message = "Action requires manual review before execution."
         elif status == "quarantined":

@@ -1,205 +1,208 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import Mock
+
+import pytest
+
+from app.config import RISK_THRESHOLD_ALLOW_MAX
+import app.orchestrator.executor_boundary as executor_boundary
+from app.orchestrator.executor_boundary import execute_with_boundary
+from app.orchestrator.secure_runtime_pipeline import (
+    RuntimeRequest,
+    SecureRuntimePipeline,
+)
 
 
-@dataclass
-class BoundaryRequest:
-    actor_id: str | None
-    action_type: str
-    target: str
-    content: str
-    risk_score: int
-    session_id: str | None
-    file_path: str
-    metadata: dict[str, Any]
-
-
-@dataclass
-class BoundaryDecision:
-    decision_id: str
-    verdict: str
-    reasons: list[str]
-    review_item_id: str | None = None
-
-
-@dataclass
-class BoundaryRuntimeResult:
-    request_id: str
-    trace_id: str
-    decision: BoundaryDecision
-
-
-@dataclass
-class ExecutionReceipt:
-    execution_id: str
-    state: str
-    response_action: str
-    response_status: int
-    trace_id: str
-    request_id: str
-    decision_id: str
-    policy_verdict: str
-    risk_score: int
-    should_execute: bool
-    halted_by_boundary: bool
-    review_item_id: str | None
-    executor_name: str | None
-    executor_result: dict[str, Any] | None
-    reason: str
-    reasons: list[str]
-
-
-def _build_runtime_result(*, risk_score: int) -> BoundaryRuntimeResult:
-    if risk_score >= 90:
-        verdict = "block"
-        reasons = ["High-risk request blocked by executor boundary."]
-        review_item_id = None
-    elif risk_score >= 70:
-        verdict = "block"
-        reasons = ["Request blocked and queued for review by executor boundary."]
-        review_item_id = "review-001"
-    else:
-        verdict = "allow"
-        reasons = ["Request allowed by executor boundary."]
-        review_item_id = None
-
-    decision = BoundaryDecision(
-        decision_id="decision-001",
-        verdict=verdict,
-        reasons=reasons,
-        review_item_id=review_item_id,
-    )
-    return BoundaryRuntimeResult(
-        request_id="request-001",
-        trace_id="trace-001",
-        decision=decision,
-    )
-
-
-def _dry_run_executor(_request: BoundaryRequest) -> dict[str, Any]:
-    return {"mode": "dry_run"}
-
-
-def execute_with_boundary(
+def _pipeline_result(
     *,
-    pipeline: Any,
-    actor_id: str | None,
-    action_type: str,
-    target: str,
-    content: str,
-    risk_score: int,
-    session_id: str | None,
-    file_path: str,
-    metadata: dict[str, Any] | None = None,
-    executor: Callable[[BoundaryRequest], dict[str, Any]] | None = None,
-) -> tuple[ExecutionReceipt, BoundaryRuntimeResult]:
-    request = BoundaryRequest(
-        actor_id=actor_id,
-        action_type=action_type,
-        target=target,
-        content=content,
-        risk_score=risk_score,
-        session_id=session_id,
-        file_path=file_path,
-        metadata=metadata or {},
+    verdict: str = "allow",
+    action: str = "allow",
+    status: str = "completed",
+    requires_review: bool = False,
+    allow_execution: bool | None = None,
+    policy_risk_score: int = 10,
+) -> SimpleNamespace:
+    if allow_execution is None:
+        allow_execution = verdict == "allow" and not requires_review
+    return SimpleNamespace(
+        decision=SimpleNamespace(
+            decision_id="decision-from-pipeline",
+            verdict=verdict,
+            allow_execution=allow_execution,
+            requires_review=requires_review,
+            risk_score=policy_risk_score,
+            reasons=["Pipeline policy decision."],
+        ),
+        coordination=SimpleNamespace(
+            response=SimpleNamespace(
+                action=action,
+                status=status,
+                reason="Pipeline response reason.",
+                review_item_id=("review-from-pipeline" if status == "queued_for_review" else None),
+            )
+        ),
+        trace=SimpleNamespace(
+            request_id="request-from-pipeline",
+            trace_id="trace-from-pipeline",
+        ),
     )
 
-    runtime_result = _build_runtime_result(risk_score=risk_score)
-    decision = runtime_result.decision
 
-    if decision.verdict == "block":
-        policy_verdict = "block"
-        receipt = ExecutionReceipt(
-            execution_id="exec-001",
-            state="denied",
-            response_action="deny",
-            response_status=403,
-            trace_id=runtime_result.trace_id,
-            request_id=runtime_result.request_id,
-            decision_id=decision.decision_id,
-            policy_verdict=policy_verdict,
-            risk_score=risk_score,
-            should_execute=False,
-            halted_by_boundary=True,
-            review_item_id=decision.review_item_id,
-            executor_name=None,
-            executor_result=None,
-            reason=decision.reasons[0],
-            reasons=decision.reasons,
-        )
-        return receipt, runtime_result
-
-    active_executor = executor or _dry_run_executor
-    executor_name = getattr(active_executor, "__name__", "executor")
-
-    try:
-        executor_result = active_executor(request)
-        if not isinstance(executor_result, dict):
-            raise TypeError("Executor must return a dict result.")
-    except Exception as exc:
-        receipt = ExecutionReceipt(
-            execution_id="exec-001",
-            state="failed",
-            response_action="error",
-            response_status=500,
-            trace_id=runtime_result.trace_id,
-            request_id=runtime_result.request_id,
-            decision_id=decision.decision_id,
-            policy_verdict="allow",
-            risk_score=risk_score,
-            should_execute=False,
-            halted_by_boundary=False,
-            review_item_id=decision.review_item_id,
-            executor_name=executor_name,
-            executor_result=None,
-            reason=f"Executor failed: {exc}",
-            reasons=[f"Executor failed: {exc}"],
-        )
-        return receipt, runtime_result
-
-    receipt = ExecutionReceipt(
-        execution_id="exec-001",
-        state="executed",
-        response_action="execute",
-        response_status=200,
-        trace_id=runtime_result.trace_id,
-        request_id=runtime_result.request_id,
-        decision_id=decision.decision_id,
-        policy_verdict="allow",
-        risk_score=risk_score,
-        should_execute=True,
-        halted_by_boundary=False,
-        review_item_id=decision.review_item_id,
-        executor_name=executor_name,
-        executor_result=executor_result,
-        reason="Execution completed successfully.",
-        reasons=decision.reasons,
-    )
-    return receipt, runtime_result
+def _make_pipeline(result: SimpleNamespace) -> tuple[Mock, SecureRuntimePipeline]:
+    pipeline_mock = Mock(spec=SecureRuntimePipeline)
+    pipeline_mock.run.return_value = result
+    return pipeline_mock, cast(SecureRuntimePipeline, pipeline_mock)
 
 
-def summarize_execution_receipt(
-    receipt: ExecutionReceipt,
-    runtime_result: BoundaryRuntimeResult,
-) -> dict[str, Any]:
-    return {
-        "execution_id": receipt.execution_id,
-        "execution_state": receipt.state,
-        "response_action": receipt.response_action,
-        "response_status": receipt.response_status,
-        "trace_id": receipt.trace_id,
-        "request_id": receipt.request_id,
-        "decision_id": receipt.decision_id,
-        "policy_verdict": receipt.policy_verdict,
-        "risk_score": receipt.risk_score,
-        "should_execute": receipt.should_execute,
-        "halted_by_boundary": receipt.halted_by_boundary,
-        "review_item_id": receipt.review_item_id,
-        "executor_name": receipt.executor_name,
-        "executor_result": receipt.executor_result,
-        "reason": receipt.reason,
-        "reasons": receipt.reasons,
+def _execute(
+    pipeline: SecureRuntimePipeline,
+    executor: Any = None,
+    **overrides: Any,
+) -> tuple[Any, Any]:
+    arguments: dict[str, Any] = {
+        "actor_id": "user-123",
+        "action_type": "file_read",
+        "target": "workspace/file.txt",
+        "content": "read file",
+        "risk_score": 5,
+        "session_id": "session-123",
+        "file_path": "workspace/file.txt",
+        "executor": executor,
     }
+    arguments.update(overrides)
+    return execute_with_boundary(pipeline=pipeline, **arguments)
+
+
+def test_executor_boundary_uses_pipeline_ids_and_executes_after_allow() -> None:
+    pipeline_mock, pipeline = _make_pipeline(_pipeline_result())
+    executor = Mock(return_value={"result": "ok"})
+
+    first_receipt, runtime_result = _execute(pipeline, executor)
+    second_receipt, _ = _execute(pipeline, executor)
+
+    pipeline_mock.run.assert_called()
+    assert pipeline_mock.run.call_count == 2
+    pipeline_request = pipeline_mock.run.call_args.args[0]
+    assert isinstance(pipeline_request, RuntimeRequest)
+    assert pipeline_request.actor_id == "user-123"
+    assert runtime_result.request_id == "request-from-pipeline"
+    assert runtime_result.trace_id == "trace-from-pipeline"
+    assert first_receipt.decision_id == "decision-from-pipeline"
+    assert first_receipt.execution_id != second_receipt.execution_id
+    assert first_receipt.state == "executed"
+    assert first_receipt.executor_result == {"result": "ok"}
+    assert executor.call_count == 2
+
+
+def test_blocked_pipeline_decision_never_calls_executor() -> None:
+    pipeline_mock, pipeline = _make_pipeline(
+        _pipeline_result(
+            verdict="block",
+            action="block",
+            status="queued_for_review",
+        )
+    )
+    executor = Mock(return_value={"result": "must not run"})
+
+    receipt, runtime_result = _execute(pipeline, executor)
+
+    pipeline_mock.run.assert_called_once()
+    executor.assert_not_called()
+    assert receipt.state == "denied"
+    assert receipt.response_action == "block"
+    assert receipt.response_status == "queued_for_review"
+    assert receipt.halted_by_boundary is True
+    assert receipt.trace_id == runtime_result.trace_id
+
+
+def test_review_required_pipeline_result_never_calls_executor() -> None:
+    _, pipeline = _make_pipeline(
+        _pipeline_result(
+            requires_review=True,
+            status="queued_for_review",
+        )
+    )
+    executor = Mock(return_value={"result": "must not run"})
+
+    receipt, _ = _execute(pipeline, executor)
+
+    executor.assert_not_called()
+    assert receipt.state == "denied"
+    assert receipt.response_status == "queued_for_review"
+    assert receipt.review_item_id == "review-from-pipeline"
+
+
+@pytest.mark.parametrize(
+    ("risk_score", "expected_reason"),
+    [
+        (-1, "Invalid risk score"),
+        (RISK_THRESHOLD_ALLOW_MAX + 1, "executor-boundary risk policy"),
+    ],
+)
+def test_invalid_or_high_risk_input_never_calls_executor(
+    risk_score: int,
+    expected_reason: str,
+) -> None:
+    _, pipeline = _make_pipeline(_pipeline_result())
+    executor = Mock(return_value={"result": "must not run"})
+
+    receipt, _ = _execute(pipeline, executor, risk_score=risk_score)
+
+    executor.assert_not_called()
+    assert receipt.state == "denied"
+    assert any(expected_reason in reason for reason in receipt.reasons)
+
+
+def test_pipeline_reported_high_risk_never_calls_executor() -> None:
+    _, pipeline = _make_pipeline(_pipeline_result(policy_risk_score=RISK_THRESHOLD_ALLOW_MAX + 1))
+    executor = Mock(return_value={"result": "must not run"})
+
+    receipt, _ = _execute(pipeline, executor)
+
+    executor.assert_not_called()
+    assert receipt.state == "denied"
+    assert "executor-boundary risk policy" in receipt.reason
+
+
+def test_network_egress_block_never_calls_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, pipeline = _make_pipeline(_pipeline_result())
+    executor = Mock(return_value={"result": "must not run"})
+    network_guard = Mock()
+    network_guard.allow.return_value = False
+    monkeypatch.setattr(
+        executor_boundary,
+        "_get_network_guard",
+        Mock(return_value=network_guard),
+    )
+
+    receipt, _ = _execute(
+        pipeline,
+        executor,
+        action_type="network_request",
+        target="https://example.invalid",
+    )
+
+    executor.assert_not_called()
+    network_guard.allow.assert_called_once_with(
+        url="https://example.invalid",
+        metadata={"direction": "egress"},
+    )
+    assert receipt.state == "denied"
+    assert "network egress policy" in receipt.reason
+
+
+def test_executor_failure_returns_failure_receipt() -> None:
+    _, pipeline = _make_pipeline(_pipeline_result())
+    executor = Mock(side_effect=RuntimeError("executor failed"))
+
+    receipt, _ = _execute(pipeline, executor)
+
+    assert receipt.state == "failed"
+    assert receipt.response_action == "review"
+    assert receipt.response_status == "queued_for_review"
+    assert receipt.should_execute is False
+    assert "executor failed" in receipt.reason
