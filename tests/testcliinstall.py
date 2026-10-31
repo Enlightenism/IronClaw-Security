@@ -35,11 +35,14 @@ def install_module() -> Any:
 
 def test_installer_module_exports_expected_symbols(install_module: Any) -> None:
     expected = (
+        "BootstrapResult",
         "InstallConfig",
         "InstallResult",
         "IronClawInstallerError",
+        "build_bootstrap_parser",
         "build_parser",
         "build_install_config",
+        "run_bootstrap",
         "run_install",
         "main",
     )
@@ -191,8 +194,8 @@ def test_install_claims_use_canonical_runtime_names_and_commands(
     }
     assert config.provider_targets == install_module.DEFAULT_PROVIDER_TARGETS
     commands = install_module.build_install_claim_commands(config.install_claims)
-    assert commands["claude_code"] == ("gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_claim_0123456789abcdefghij")
-    assert commands["hermes"] == ("hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key ic_claim_ABCDEFGHIJ0123456789")
+    assert commands["claude_code"] == ("python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ic_claim_0123456789abcdefghij")
+    assert commands["hermes"] == ("python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\npython -m ironclaw_installer bootstrap --program hermes --claim-token ic_claim_ABCDEFGHIJ0123456789")
     assert set(config.to_dict()["install_claims"].values()) == {"[REDACTED]"}
 
     with pytest.raises(install_module.IronClawInstallerError, match="install key"):
@@ -231,6 +234,47 @@ def test_build_install_claim_commands_use_canonical_templates_for_every_runtime(
     assert "fake" not in commands[runtime_program].lower()
     assert "..." not in commands[runtime_program]
     assert "***" not in commands[runtime_program]
+
+
+@pytest.mark.parametrize(
+    ("runtime_program", "expected_command"),
+    [
+        (
+            "openclaw",
+            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "openclaw", "--scope", "user"],
+        ),
+        (
+            "claude_code",
+            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "claude-code", "--scope", "user"],
+        ),
+        (
+            "cursor",
+            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "cursor", "--scope", "user"],
+        ),
+        (
+            "goose",
+            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "goose", "--scope", "user"],
+        ),
+        (
+            "gemini_cli",
+            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "gemini-cli", "--scope", "user"],
+        ),
+        (
+            "copilot",
+            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "github-copilot", "--scope", "user"],
+        ),
+        (
+            "hermes",
+            ["hermes", "skills", "install", "https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md"],
+        ),
+    ],
+)
+def test_runtime_skill_install_command_uses_canonical_host_metadata(
+    install_module: Any,
+    runtime_program: str,
+    expected_command: list[str],
+) -> None:
+    assert install_module._runtime_skill_install_command(runtime_program) == expected_command
 
 
 @pytest.mark.parametrize(
@@ -402,6 +446,76 @@ def test_run_install_redeems_claim_and_keeps_key_out_of_results(
     assert claim_token not in json.dumps(config.to_dict())
     assert install_key not in json.dumps(result.to_dict())
     assert claim_token not in json.dumps(result.to_dict())
+
+
+def test_run_bootstrap_redeems_once_persists_privately_and_installs_the_shared_skill(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claim_token = "ic_claim_0123456789abcdefghij"
+    install_key = "ic_install_claude_code_abc123"
+    requests: list[Any] = []
+    commands: list[list[str]] = []
+    protected_paths: list[Path] = []
+
+    def fake_open_claim_request(request: Any, *, timeout: float) -> io.BytesIO:
+        requests.append(request)
+        assert timeout == install_module.DEFAULT_TIMEOUT_SECONDS
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "key_id": "ik_claude_bootstrap_001",
+                    "program": "claude_code",
+                    "install_key": install_key,
+                },
+            ).encode("utf-8"),
+        )
+
+    def fake_subprocess_run(command: list[str], **kwargs: Any) -> None:
+        commands.append(command)
+        assert kwargs == {"check": True, "timeout": install_module._SUBPROCESS_TIMEOUT}
+
+    monkeypatch.setattr(install_module, "_open_install_claim_request", fake_open_claim_request)
+    monkeypatch.setattr(install_module, "_restrict_private_file_permissions", protected_paths.append)
+    monkeypatch.setattr(install_module.subprocess, "run", fake_subprocess_run)
+
+    config_dir = tmp_path / "user-config"
+    result = install_module.run_bootstrap(
+        program="claude_code",
+        claim_token=claim_token,
+        config_dir=config_dir,
+    )
+
+    request = requests[0]
+    assert request.get_method() == "POST"
+    assert request.full_url == ("https://ironclaw-security.onrender.com/integrations/install-claims/redeem")
+    assert json.loads(request.data) == {"claim_token": claim_token}
+    assert commands == [
+        [
+            "gh",
+            "skill",
+            "install",
+            "Enlightenism/IronClaw-Security",
+            "skills/ironclaw-security",
+            "--agent",
+            "claude-code",
+            "--scope",
+            "user",
+        ],
+    ]
+    assert protected_paths == [config_dir / install_module.DEFAULT_CONFIG_FILENAME]
+
+    saved_config = json.loads(result.config_file.read_text(encoding="utf-8"))
+    assert saved_config["install_keys"] == {"claude_code": install_key}
+    assert saved_config["provider_targets"] == ["claude_code"]
+    assert saved_config["installed_skills"] == {"claude_code": "ironclaw-security"}
+    assert saved_config["features"]["claude_integration"] is True
+    assert saved_config["runtime_commands"]["claude_code"] == (install_module.InstallKeyFormatRegistry.get_spec("claude_code").command_template)
+    assert claim_token not in result.config_file.read_text(encoding="utf-8")
+    assert install_key not in json.dumps(result.to_dict())
+    assert claim_token not in json.dumps(result.to_dict())
+    assert install_key not in repr(result)
 
 
 def test_run_install_skips_existing_files_without_overwrite(

@@ -20,7 +20,7 @@ const makeClaim = (overrides = {}) => ({
   program: "claude_code",
   claim_token: CLAIM_TOKEN,
   expires_at: new Date(Date.now() + 60_000).toISOString(),
-  command: `gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ${CLAIM_TOKEN}`,
+  command: `python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ${CLAIM_TOKEN}`,
   ...overrides,
 });
 
@@ -37,6 +37,9 @@ const renderCard = (props = {}) =>
     />,
   );
 
+const getDisplayedCommand = () =>
+  screen.getByTestId("claude-code-card").querySelector("code")?.textContent;
+
 describe("IntegrationCard", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -48,7 +51,7 @@ describe("IntegrationCard", () => {
     renderCard({ onCreateClaim });
 
     expect(screen.getByTestId("claude-code-card")).toHaveTextContent(
-      "Generate a one-time install command after purchase",
+      "Generate a one-time bootstrap command after purchase",
     );
     expect(screen.getByTestId("claude-code-card-generate")).toBeEnabled();
     expect(screen.getByTestId("claude-code-card-copy")).toBeDisabled();
@@ -76,7 +79,7 @@ describe("IntegrationCard", () => {
     await user.click(screen.getByTestId("claude-code-card-generate"));
 
     await waitFor(() => {
-      expect(screen.getByText(claim.command)).toBeInTheDocument();
+      expect(getDisplayedCommand()).toBe(claim.command);
     });
     expect(onCreateClaim).toHaveBeenCalledWith("claude-code");
     expect(screen.getByTestId("claude-code-card-copy")).toBeEnabled();
@@ -177,7 +180,9 @@ describe("IntegrationCard", () => {
     renderCard({ onCreateClaim: jest.fn().mockResolvedValue(claim) });
 
     await user.click(screen.getByTestId("claude-code-card-generate"));
-    await screen.findByText(claim.command);
+    await waitFor(() => {
+      expect(getDisplayedCommand()).toBe(claim.command);
+    });
     const copyButton = screen.getByTestId("claude-code-card-copy");
     expect(copyButton).toBeEnabled();
     await user.click(copyButton);

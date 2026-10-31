@@ -4,6 +4,18 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final, Literal
 
+IRONCLAW_GITHUB_REPOSITORY: Final[str] = "Enlightenism/IronClaw-Security"
+IRONCLAW_REPOSITORY_URL: Final[str] = f"https://github.com/{IRONCLAW_GITHUB_REPOSITORY}.git"
+IRONCLAW_INSTALLER_SOURCE_URL: Final[str] = f"git+{IRONCLAW_REPOSITORY_URL}"
+IRONCLAW_PUBLIC_BASE_URL: Final[str] = "https://ironclaw-security.onrender.com"
+SECURITY_GUARDIAN_SKILL_NAME: Final[str] = "ironclaw-security"
+SECURITY_GUARDIAN_SKILL_REPOSITORY_PATH: Final[str] = f"skills/{SECURITY_GUARDIAN_SKILL_NAME}"
+SECURITY_GUARDIAN_SKILL_FILE_PATH: Final[str] = f"{SECURITY_GUARDIAN_SKILL_REPOSITORY_PATH}/SKILL.md"
+SECURITY_GUARDIAN_SKILL_ROUTE: Final[str] = f"/{SECURITY_GUARDIAN_SKILL_FILE_PATH}"
+SECURITY_GUARDIAN_SKILL_URL: Final[str] = f"{IRONCLAW_PUBLIC_BASE_URL}{SECURITY_GUARDIAN_SKILL_ROUTE}"
+
+_INSTALL_BOOTSTRAP_COMMAND_TEMPLATE: Final[str] = f"python -m pip install --no-deps --upgrade {IRONCLAW_INSTALLER_SOURCE_URL}\npython -m ironclaw_installer bootstrap --program {{program}} --claim-token {{claim_token}}"
+
 RuntimeInstallKeyProgram = Literal[
     "openclaw",
     "claude_code",
@@ -67,6 +79,7 @@ class InstallKeyFormatSpec:
     prefix: str
     aliases: tuple[str, ...]
     platform_aliases: tuple[str, ...]
+    agent_cli_id: str | None = None
     command_template: str = ""
 
     @property
@@ -84,15 +97,17 @@ class InstallKeyFormatSpec:
             object.__setattr__(self, "command_template", self._default_command_template())
 
     def _default_command_template(self) -> str:
-        if self.program == "hermes":
-            return "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}"
-        return f"gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {self.canonical_slug} --scope user --key {{key}}"
+        return _INSTALL_BOOTSTRAP_COMMAND_TEMPLATE
 
     def format_command(self, install_key: str | None) -> str:
         normalized_key = str(install_key).strip() if install_key is not None else ""
         if not normalized_key:
             raise ValueError("install_key is required")
-        payload: dict[str, str] = {"key": normalized_key, "platform": self.canonical_slug, "program": self.program}
+        payload: dict[str, str] = {
+            "claim_token": normalized_key,
+            "platform": self.canonical_slug,
+            "program": self.program,
+        }
         return self.command_template.format(**payload)
 
     def matches_key(self, candidate: str | None) -> bool:
@@ -152,7 +167,7 @@ class InstallKeyFormatRegistry:
                 "ironclaw",
                 "claw",
             ),
-            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
+            agent_cli_id="openclaw",
         ),
         "claude_code": InstallKeyFormatSpec(
             family="claude_code",
@@ -179,7 +194,7 @@ class InstallKeyFormatRegistry:
                 "claude code cli",
                 "anthropic",
             ),
-            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
+            agent_cli_id="claude-code",
         ),
         "cursor": InstallKeyFormatSpec(
             family="cursor",
@@ -204,7 +219,7 @@ class InstallKeyFormatRegistry:
                 "cursor-cli",
                 "cursor cli",
             ),
-            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
+            agent_cli_id="cursor",
         ),
         "goose": InstallKeyFormatSpec(
             family="goose",
@@ -229,7 +244,7 @@ class InstallKeyFormatRegistry:
                 "goose-cli",
                 "goose cli",
             ),
-            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
+            agent_cli_id="goose",
         ),
         "gemini_cli": InstallKeyFormatSpec(
             family="gemini_cli",
@@ -252,7 +267,7 @@ class InstallKeyFormatRegistry:
                 "gemini_cli_agent",
                 "gemini-cli-agent",
             ),
-            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
+            agent_cli_id="gemini-cli",
         ),
         "copilot": InstallKeyFormatSpec(
             family="copilot",
@@ -277,7 +292,7 @@ class InstallKeyFormatRegistry:
                 "github_copilot_cli",
                 "github-copilot-cli",
             ),
-            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
+            agent_cli_id="github-copilot",
         ),
         "hermes": InstallKeyFormatSpec(
             family="hermes",
@@ -302,7 +317,6 @@ class InstallKeyFormatRegistry:
                 "hermes-cli",
                 "hermes cli",
             ),
-            command_template="hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security --key {key}",
         ),
         "security_guardian": InstallKeyFormatSpec(
             family="security_guardian",
@@ -320,7 +334,6 @@ class InstallKeyFormatRegistry:
                 "skills",
             ),
             platform_aliases=(),
-            command_template="gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent {platform} --scope user --key {key}",
         ),
     }
 
@@ -430,6 +443,15 @@ def iter_supported_install_key_programs() -> Iterable[InstallKeyProgram]:
 
 
 __all__ = [
+    "IRONCLAW_GITHUB_REPOSITORY",
+    "IRONCLAW_REPOSITORY_URL",
+    "IRONCLAW_INSTALLER_SOURCE_URL",
+    "IRONCLAW_PUBLIC_BASE_URL",
+    "SECURITY_GUARDIAN_SKILL_NAME",
+    "SECURITY_GUARDIAN_SKILL_REPOSITORY_PATH",
+    "SECURITY_GUARDIAN_SKILL_FILE_PATH",
+    "SECURITY_GUARDIAN_SKILL_ROUTE",
+    "SECURITY_GUARDIAN_SKILL_URL",
     "InstallKeyProgram",
     "InstallKeyFormatFamily",
     "InstallKeyFormatSpec",

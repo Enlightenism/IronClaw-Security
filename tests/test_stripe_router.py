@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from dataclasses import replace
 import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -46,6 +47,7 @@ _TEST_AUTH_CONTEXT = AuthContext(
     auth_source="test",
     auth_method="api_key",
     key_type="personal",
+    metadata={"email": "buyer@ironclaw.test"},
 )
 
 
@@ -557,7 +559,7 @@ class TestCheckoutSessionRoutes:
                     "quantity": 1,
                     "successUrl": _ALLOWED_SUCCESS_URL,
                     "cancelUrl": _ALLOWED_CANCEL_URL,
-                    "metadata": {"source": "test"},
+                    "metadata": {"source": "test", "owner_key": "attacker@ironclaw.test"},
                 },
                 headers=_auth_headers(),
             )
@@ -572,7 +574,12 @@ class TestCheckoutSessionRoutes:
             success_url=_ALLOWED_SUCCESS_URL,
             cancel_url=_ALLOWED_CANCEL_URL,
             customer_id=None,
-            metadata={"source": "test", "package_id": "pkg_5000", "org_id": ORG_ID},
+            metadata={
+                "source": "test",
+                "owner_key": "buyer@ironclaw.test",
+                "package_id": "pkg_5000",
+                "org_id": ORG_ID,
+            },
         )
 
     @pytest.mark.parametrize(
@@ -678,8 +685,162 @@ class TestCheckoutSessionRoutes:
             success_url=_ALLOWED_SUCCESS_URL,
             cancel_url=_ALLOWED_CANCEL_URL,
             customer_id=None,
-            metadata={"flow": "direct", "org_id": ORG_ID},
+            metadata={"flow": "direct", "org_id": ORG_ID, "owner_key": "buyer@ironclaw.test"},
         )
+
+    def test_create_checkout_session_requires_billing_owner(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        auth_without_owner = replace(_TEST_AUTH_CONTEXT, metadata={})
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setitem(app.dependency_overrides, get_auth_context, lambda: auth_without_owner)
+            resp = client.post(
+                _billing_path("/checkout/sessions"),
+                json={
+                    "priceId": "price_direct_123",
+                    "unitCredits": 42,
+                    "quantity": 1,
+                    "successUrl": _ALLOWED_SUCCESS_URL,
+                    "cancelUrl": _ALLOWED_CANCEL_URL,
+                },
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"]["error"] == "verified_billing_identity_required"
+        mock_svc.create_checkout_session.assert_not_called()
+
+    def test_checkout_session_status_checks_owner_and_redacts_owner_metadata(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.retrieve_checkout_session.return_value = {
+            "session_id": SESSION_ID,
+            "status": "complete",
+            "payment_status": "paid",
+            "mode": "payment",
+            "org_id": ORG_ID,
+            "customer_id": CUSTOMER_ID,
+            "unit_credits": 5000,
+            "units_credited": False,
+            "url": "https://checkout.stripe.com/c/pay/test",
+            "metadata": {
+                "owner_key": "buyer@ironclaw.test",
+                "package_id": "pkg_5000",
+            },
+        }
+
+        response = client.get(
+            _billing_path(f"/checkout/sessions/{SESSION_ID}/status"),
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["payment_status"] == "paid"
+        assert payload["metadata"] == {"package_id": "pkg_5000"}
+        mock_svc.retrieve_checkout_session.assert_called_once_with(SESSION_ID)
+
+    def test_checkout_session_status_rejects_another_billing_owner(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.retrieve_checkout_session.return_value = {
+            "session_id": SESSION_ID,
+            "org_id": ORG_ID,
+            "metadata": {"owner_key": "another-buyer@ironclaw.test"},
+        }
+
+        response = client.get(
+            _billing_path(f"/checkout/sessions/{SESSION_ID}/status"),
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"]["error"] == "checkout_session_not_accessible"
+
+    def test_complete_checkout_session_rejects_unpaid_session(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.retrieve_checkout_session.return_value = {
+            "session_id": SESSION_ID,
+            "status": "complete",
+            "payment_status": "unpaid",
+            "org_id": ORG_ID,
+            "metadata": {"owner_key": "buyer@ironclaw.test"},
+        }
+
+        response = client.post(
+            _billing_path(f"/checkout/sessions/{SESSION_ID}/complete"),
+            json={},
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["error"] == "checkout_payment_not_confirmed"
+        mock_svc.complete_checkout_session.assert_not_called()
+
+    def test_complete_checkout_session_uses_stripe_customer_id(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.retrieve_checkout_session.return_value = {
+            "session_id": SESSION_ID,
+            "status": "complete",
+            "payment_status": "paid",
+            "org_id": ORG_ID,
+            "customer_id": CUSTOMER_ID,
+            "metadata": {"owner_key": "buyer@ironclaw.test"},
+        }
+        mock_svc.complete_checkout_session.return_value = {
+            "session_id": SESSION_ID,
+            "already_complete": False,
+            "units_credited": 5000,
+        }
+
+        response = client.post(
+            _billing_path(f"/checkout/sessions/{SESSION_ID}/complete"),
+            json={},
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 200
+        mock_svc.complete_checkout_session.assert_called_once_with(
+            session_id=SESSION_ID,
+            customer_id=CUSTOMER_ID,
+        )
+
+    def test_complete_checkout_session_rejects_client_customer_mismatch(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.retrieve_checkout_session.return_value = {
+            "session_id": SESSION_ID,
+            "status": "complete",
+            "payment_status": "paid",
+            "org_id": ORG_ID,
+            "customer_id": CUSTOMER_ID,
+            "metadata": {"owner_key": "buyer@ironclaw.test"},
+        }
+
+        response = client.post(
+            _billing_path(f"/checkout/sessions/{SESSION_ID}/complete"),
+            json={"customerId": "cus_attacker"},
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["error"] == "checkout_customer_mismatch"
+        mock_svc.complete_checkout_session.assert_not_called()
 
     def test_create_checkout_session_uses_existing_customer_id_from_service_map(self, client: TestClient, mock_svc: MagicMock) -> None:
         mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID

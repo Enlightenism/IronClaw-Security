@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from app.cli.main import run_cli
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from cli.install import build_operator_install_result
 
 
@@ -77,9 +78,7 @@ def test_cli_install_builds_canonical_command_from_one_time_claim() -> None:
     assert result.status == "ready"
     assert result.retry_after_purchase is False
     assert result.install_command is not None
-    assert claim_token in result.install_command
-    assert "--agent openclaw" in result.install_command
-    assert "--scope user" in result.install_command
+    assert result.install_command == InstallKeyFormatRegistry.get_spec("openclaw").format_command(claim_token)
 
 
 def test_cli_install_rejects_raw_keys_and_malformed_claims() -> None:

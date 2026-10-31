@@ -501,7 +501,7 @@ describe("session_id payment polling", () => {
       if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
       }
-      if (url === "/billing/checkout/sessions/cs_test_pending") {
+      if (url === "/billing/checkout/sessions/cs_test_pending/status") {
         return Promise.resolve({
           data: { payment_status: "pending", status: "open" },
         });
@@ -545,9 +545,9 @@ describe("session_id payment polling", () => {
       if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
       }
-      if (url === "/billing/checkout/sessions/cs_test_abc") {
+      if (url === "/billing/checkout/sessions/cs_test_abc/status") {
         return Promise.resolve({
-          data: { payment_status: "paid", units: 5000 },
+          data: { payment_status: "paid", unit_credits: 5000 },
         });
       }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
@@ -572,9 +572,9 @@ describe("session_id payment polling", () => {
       if (url === "/integrations/token") {
         return Promise.resolve({ data: DEFAULT_TOKENS });
       }
-      if (url === "/billing/checkout/sessions/cs_test_abc") {
+      if (url === "/billing/checkout/sessions/cs_test_abc/status") {
         return Promise.resolve({
-          data: { payment_status: "paid", units: 5000 },
+          data: { payment_status: "paid", unit_credits: 5000 },
         });
       }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
@@ -593,9 +593,9 @@ describe("session_id payment polling", () => {
     mockLocation.search = "?session_id=cs_test_abc&package_id=pkg_5000";
 
     mockApiGet.mockImplementation((url) => {
-      if (url === "/billing/checkout/sessions/cs_test_abc") {
+      if (url === "/billing/checkout/sessions/cs_test_abc/status") {
         return Promise.resolve({
-          data: { payment_status: "paid", units: 5000 },
+          data: { payment_status: "paid", unit_credits: 5000 },
         });
       }
       if (url === "/dashboard/overview") {
@@ -612,6 +612,21 @@ describe("session_id payment polling", () => {
     await waitFor(() => {
       expect(mockToastDismiss).toHaveBeenCalledWith("pay");
     });
+  });
+
+  it("does not mark checkout as paid when Stripe's session ID is missing", async () => {
+    mockLocation.search = "?checkout=success&package_id=pkg_5000";
+
+    await renderDashboard();
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        "Missing payment session. Payment could not be verified.",
+      );
+    });
+    expect(mockToastSuccess).not.toHaveBeenCalledWith(
+      expect.stringContaining("Checkout completed"),
+    );
   });
 });
 
@@ -696,7 +711,7 @@ describe("handlePurchase — valid package", () => {
     expect(mockApiPost).toHaveBeenCalledWith("/billing/checkout/sessions", {
       packageId: "pkg_5000",
       successUrl:
-        "http://localhost/dashboard?checkout=success&package_id=pkg_5000",
+        "http://localhost/dashboard?checkout=success&package_id=pkg_5000&session_id={CHECKOUT_SESSION_ID}",
       cancelUrl:
         "http://localhost/dashboard?checkout=cancel&package_id=pkg_5000",
       organizationId: "org-abc",

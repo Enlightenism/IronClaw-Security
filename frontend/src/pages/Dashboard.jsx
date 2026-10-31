@@ -260,6 +260,7 @@ const Dashboard = () => {
   const [scrollShift, setScrollShift] = useState(0);
   const [_paymentState, setPaymentState] = useState("idle");
   const polledRef = useRef(false);
+  const paymentPollTimeoutRef = useRef(null);
 
   const isAuthenticated = Boolean(user || session);
 
@@ -472,6 +473,12 @@ const Dashboard = () => {
   const pollPayment = useCallback(
     async (sessionId, attempts = 0) => {
       const maxAttempts = 6;
+      const scheduleRetry = () => {
+        paymentPollTimeoutRef.current = globalThis.setTimeout(() => {
+          paymentPollTimeoutRef.current = null;
+          pollPayment(sessionId, attempts + 1);
+        }, 2000);
+      };
 
       if (!sessionId) {
         toast.dismiss("pay");
@@ -487,10 +494,10 @@ const Dashboard = () => {
 
       try {
         const { data: status } = await api.get(
-          `/billing/checkout/sessions/${encodeURIComponent(sessionId)}`,
+          `/billing/checkout/sessions/${encodeURIComponent(sessionId)}/status`,
         );
 
-        if (status?.payment_status === "paid") {
+        if (String(status?.payment_status || "").toLowerCase() === "paid") {
           setPaymentState("paid");
           toast.dismiss("pay");
           const units = Number(status?.unit_credits ?? status?.units);
@@ -519,19 +526,31 @@ const Dashboard = () => {
         }
 
         setPaymentState("pending");
-
-        setTimeout(() => pollPayment(sessionId, attempts + 1), 2000);
+        scheduleRetry();
       } catch {
-        setTimeout(() => pollPayment(sessionId, attempts + 1), 2000);
+        scheduleRetry();
       }
     },
     [fetchDashboard],
+  );
+
+  useEffect(
+    () => () => {
+      if (paymentPollTimeoutRef.current !== null) {
+        globalThis.clearTimeout(paymentPollTimeoutRef.current);
+      }
+    },
+    [],
   );
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const sessionId = params.get("session_id");
     const checkoutState = params.get("checkout");
+
+    if (!sessionId) {
+      polledRef.current = false;
+    }
 
     if (checkoutState === "cancel") {
       setPaymentState("expired");
@@ -542,8 +561,8 @@ const Dashboard = () => {
     }
 
     if (checkoutState === "success" && !sessionId) {
-      setPaymentState("paid");
-      toast.success("Checkout completed. Refreshing billing state...");
+      setPaymentState("pending");
+      toast.error("Missing payment session. Payment could not be verified.");
       fetchDashboard();
       navigate("/dashboard", { replace: true });
       setPurchasingId(null);
@@ -575,6 +594,7 @@ const Dashboard = () => {
         const successUrl = new URL(`${globalThis.location.origin}/dashboard`);
         successUrl.searchParams.set("checkout", "success");
         successUrl.searchParams.set("package_id", packageId);
+        const verifiedSuccessUrl = `${successUrl.toString()}&session_id={CHECKOUT_SESSION_ID}`;
 
         const cancelUrl = new URL(`${globalThis.location.origin}/dashboard`);
         cancelUrl.searchParams.set("checkout", "cancel");
@@ -584,7 +604,7 @@ const Dashboard = () => {
           packageId,
           mode: "payment",
           quantity: 1,
-          successUrl: successUrl.toString(),
+          successUrl: verifiedSuccessUrl,
           cancelUrl: cancelUrl.toString(),
           organizationId,
         });

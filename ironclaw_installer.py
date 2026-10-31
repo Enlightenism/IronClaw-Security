@@ -15,9 +15,18 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from app.core.install_key_formats import InstallKeyFormatRegistry, normalize_install_key_program
+from app.core.install_key_formats import (
+    IRONCLAW_GITHUB_REPOSITORY,
+    IRONCLAW_PUBLIC_BASE_URL,
+    SECURITY_GUARDIAN_SKILL_NAME,
+    SECURITY_GUARDIAN_SKILL_REPOSITORY_PATH,
+    SECURITY_GUARDIAN_SKILL_URL,
+    InstallKeyFormatRegistry,
+    normalize_install_key_program,
+)
 
 DEFAULT_BASE_URL: Final[str] = "http://127.0.0.1:8000"
+DEFAULT_BOOTSTRAP_BASE_URL: Final[str] = IRONCLAW_PUBLIC_BASE_URL
 DEFAULT_CONFIG_DIRNAME: Final[str] = ".ironclaw"
 DEFAULT_CONFIG_FILENAME: Final[str] = "config.json"
 DEFAULT_SKILL_CONFIG_FILENAME: Final[str] = "skill.json"
@@ -30,6 +39,7 @@ DEFAULT_PROVIDER_TARGETS: Final[tuple[str, ...]] = tuple(InstallKeyFormatRegistr
 _CANONICAL_RUNTIME_TARGETS: Final[tuple[str, ...]] = DEFAULT_PROVIDER_TARGETS
 _INSTALL_CLAIM_PATTERN: Final[re.Pattern[str]] = re.compile(r"ic_claim_[A-Za-z0-9_-]{20,128}\Z")
 _MAX_CLAIM_RESPONSE_BYTES: Final[int] = 16_384
+_MAX_USER_CONFIG_BYTES: Final[int] = 1_048_576
 _GENERIC_INSTALL_KEY_PREFIXES: Final[tuple[str, ...]] = (
     "sk_",
     "ghp_",
@@ -105,6 +115,21 @@ class InstallResult:
             "created_paths": list(self.created_paths),
             "updated_paths": list(self.updated_paths),
             "skipped_paths": list(self.skipped_paths),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class BootstrapResult:
+    program: str
+    config_file: Path
+    skill_name: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "program": self.program,
+            "config_file": str(self.config_file),
+            "skill_name": self.skill_name,
         }
 
 
@@ -506,10 +531,154 @@ def _redeem_install_claim(base_url: str, program: str, claim_token: str) -> str:
     return _validate_install_key_for_runtime(program, str(payload.get("install_key", "")))
 
 
-def _build_runtime_config(config: InstallConfig, install_keys: dict[str, str] | None = None) -> dict[str, Any]:
-    provider_set = set(config.provider_targets)
-    redeemed_install_keys = install_keys or {}
-    features = {
+def _read_bootstrap_config(config_file: Path) -> dict[str, Any]:
+    if config_file.is_symlink():
+        raise IronClawInstallerError(f"Refusing to read a credential file through a symbolic link: {config_file}")
+    if not config_file.exists():
+        return {}
+    if not config_file.is_file():
+        raise IronClawInstallerError(f"User configuration is not a regular file: {config_file}")
+
+    try:
+        if config_file.stat().st_size > _MAX_USER_CONFIG_BYTES:
+            raise IronClawInstallerError("User configuration exceeds the maximum supported size.")
+        payload = json.loads(config_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise IronClawInstallerError(f"Unable to read valid user configuration: {config_file}") from exc
+    if not isinstance(payload, dict):
+        raise IronClawInstallerError("User configuration must contain a JSON object.")
+    return payload
+
+
+def _build_bootstrap_config_payload(
+    existing: dict[str, Any],
+    *,
+    program: str,
+    install_key: str,
+    base_url: str,
+) -> dict[str, Any]:
+    install_keys_value = existing.get("install_keys", {})
+    if not isinstance(install_keys_value, dict) or any(not isinstance(key, str) or not isinstance(value, str) for key, value in install_keys_value.items()):
+        raise IronClawInstallerError("User configuration contains an invalid install-key map.")
+    install_keys = dict(install_keys_value)
+    install_keys[program] = install_key
+
+    runtime_commands_value = existing.get("runtime_commands", {})
+    if not isinstance(runtime_commands_value, dict) or any(not isinstance(key, str) or not isinstance(value, str) for key, value in runtime_commands_value.items()):
+        raise IronClawInstallerError("User configuration contains an invalid runtime-command map.")
+    runtime_commands = dict(runtime_commands_value)
+    runtime_commands[program] = InstallKeyFormatRegistry.get_spec(program).command_template
+
+    existing_targets = existing.get("provider_targets", [])
+    if not isinstance(existing_targets, list) or any(not isinstance(value, str) for value in existing_targets):
+        raise IronClawInstallerError("User configuration contains an invalid provider-target list.")
+    provider_targets = _normalize_provider_targets([*existing_targets, program])
+
+    existing_features = existing.get("features", {})
+    if not isinstance(existing_features, dict):
+        raise IronClawInstallerError("User configuration contains an invalid feature map.")
+    features = _build_runtime_features(set(provider_targets), bool(install_keys))
+    features.update({key: value for key, value in existing_features.items() if key not in features})
+
+    installed_skills_value = existing.get("installed_skills", {})
+    if not isinstance(installed_skills_value, dict) or any(not isinstance(key, str) or not isinstance(value, str) for key, value in installed_skills_value.items()):
+        raise IronClawInstallerError("User configuration contains an invalid installed-skill map.")
+    installed_skills = dict(installed_skills_value)
+    installed_skills[program] = SECURITY_GUARDIAN_SKILL_NAME
+
+    payload = dict(existing)
+    payload.update(
+        {
+            "schema_version": 1,
+            "product": "IronClaw-Security",
+            "install_mode": "local-bootstrap",
+            "skill_mode": True,
+            "base_url": base_url,
+            "backup_target": existing.get("backup_target", DEFAULT_BACKUP_TARGET),
+            "restore_target": existing.get("restore_target", DEFAULT_RESTORE_TARGET),
+            "retention_days": existing.get("retention_days", DEFAULT_RETENTION_DAYS),
+            "provider_targets": list(provider_targets),
+            "install_keys": install_keys,
+            "runtime_commands": runtime_commands,
+            "installed_skills": installed_skills,
+            "features": features,
+        },
+    )
+    return payload
+
+
+def _runtime_skill_install_command(program: str) -> list[str]:
+    spec = InstallKeyFormatRegistry.get_spec(program)
+    if program == "hermes":
+        return ["hermes", "skills", "install", SECURITY_GUARDIAN_SKILL_URL]
+    if spec.agent_cli_id is None:
+        raise IronClawInstallerError(f"No supported skill installer is configured for {program}.")
+    return [
+        "gh",
+        "skill",
+        "install",
+        IRONCLAW_GITHUB_REPOSITORY,
+        SECURITY_GUARDIAN_SKILL_REPOSITORY_PATH,
+        "--agent",
+        spec.agent_cli_id,
+        "--scope",
+        "user",
+    ]
+
+
+def run_bootstrap(
+    *,
+    program: str,
+    claim_token: str,
+    config_dir: Path | None = None,
+    base_url: str = DEFAULT_BOOTSTRAP_BASE_URL,
+) -> BootstrapResult:
+    runtime_program = _canonical_program_name(program)
+    if runtime_program is None or runtime_program not in _CANONICAL_RUNTIME_TARGETS:
+        raise IronClawInstallerError(f"Unsupported runtime target for install-claim redemption: {program!r}")
+
+    validated_claim = _validate_install_claim_for_runtime(runtime_program, claim_token)
+    normalized_base_url = _normalize_base_url(base_url)
+    target_config_dir = (config_dir or _default_config_dir()).expanduser()
+    if target_config_dir.is_symlink():
+        raise IronClawInstallerError(f"Refusing to write credentials into a symbolic-link directory: {target_config_dir}")
+    try:
+        _ensure_directory(target_config_dir)
+    except OSError as exc:
+        raise IronClawInstallerError(f"Unable to create user configuration directory: {target_config_dir}") from exc
+
+    config_file = target_config_dir / DEFAULT_CONFIG_FILENAME
+    existing_config = _read_bootstrap_config(config_file)
+    install_key = _redeem_install_claim(normalized_base_url, runtime_program, validated_claim)
+    payload = _build_bootstrap_config_payload(
+        existing_config,
+        program=runtime_program,
+        install_key=install_key,
+        base_url=normalized_base_url,
+    )
+    _write_json_file(config_file, payload, overwrite=True, private=True)
+
+    command = _runtime_skill_install_command(runtime_program)
+    try:
+        subprocess.run(command, check=True, timeout=_SUBPROCESS_TIMEOUT)
+    except FileNotFoundError as exc:
+        raise IronClawInstallerError(
+            f"Required installer '{command[0]}' was not found. The paid key was securely saved to {config_file}.",
+        ) from exc
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise IronClawInstallerError(
+            f"Shared skill installation failed for {runtime_program}. The paid key was securely saved to {config_file}.",
+        ) from exc
+
+    return BootstrapResult(
+        program=runtime_program,
+        config_file=config_file,
+        skill_name=SECURITY_GUARDIAN_SKILL_NAME,
+    )
+
+
+def _build_runtime_features(provider_set: set[str], has_install_keys: bool) -> dict[str, bool]:
+    return {
         "health": True,
         "ui": True,
         "backup": True,
@@ -524,8 +693,14 @@ def _build_runtime_config(config: InstallConfig, install_keys: dict[str, str] | 
         "gemini_cli_integration": "gemini_cli" in provider_set,
         "copilot_integration": "copilot" in provider_set,
         "hermes_integration": "hermes" in provider_set,
-        "embedded_install_keys": bool(redeemed_install_keys),
+        "embedded_install_keys": has_install_keys,
     }
+
+
+def _build_runtime_config(config: InstallConfig, install_keys: dict[str, str] | None = None) -> dict[str, Any]:
+    provider_set = set(config.provider_targets)
+    redeemed_install_keys = install_keys or {}
+    features = _build_runtime_features(provider_set, bool(redeemed_install_keys))
     runtime_commands = {program: InstallKeyFormatRegistry.get_spec(program).command_template for program in redeemed_install_keys}
     return {
         "schema_version": 1,
@@ -772,6 +947,35 @@ def run_install(config: InstallConfig) -> InstallResult:
     )
 
 
+def build_bootstrap_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Install the shared IronClaw security skill and securely provision one paid runtime key.",
+    )
+    parser.add_argument(
+        "--program",
+        required=True,
+        choices=_CANONICAL_RUNTIME_TARGETS,
+        help="Canonical runtime target for this one-time install claim.",
+    )
+    parser.add_argument(
+        "--claim-token",
+        required=True,
+        help="Short-lived, single-use install claim generated by the IronClaw dashboard.",
+    )
+    parser.add_argument(
+        "--config-dir",
+        type=Path,
+        default=_default_config_dir(),
+        help="Directory for private IronClaw user configuration.",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=os.getenv("IRONCLAW_BASE_URL", DEFAULT_BOOTSTRAP_BASE_URL),
+        help=f"Base URL for the claim service, default: {DEFAULT_BOOTSTRAP_BASE_URL}",
+    )
+    return parser
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Install and bootstrap IronClaw-Security for local skill-style use.",
@@ -884,9 +1088,32 @@ def build_install_config(args: argparse.Namespace) -> InstallConfig:
     )
 
 
+def _bootstrap_main(argv: list[str]) -> int:
+    args = build_bootstrap_parser().parse_args(argv)
+    try:
+        result = run_bootstrap(
+            program=args.program,
+            claim_token=args.claim_token,
+            config_dir=args.config_dir,
+            base_url=args.base_url,
+        )
+    except IronClawInstallerError as exc:
+        print(f"[ironclaw-installer] failed: {exc}", file=sys.stderr)
+        return 1
+
+    print("[ironclaw-installer] shared skill installed")
+    print(f"[ironclaw-installer] program: {result.program}")
+    print(f"[ironclaw-installer] config: {result.config_file}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    command_line = list(sys.argv[1:] if argv is None else argv)
+    if command_line and command_line[0] == "bootstrap":
+        return _bootstrap_main(command_line[1:])
+
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(command_line)
 
     try:
         config = build_install_config(args)

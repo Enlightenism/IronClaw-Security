@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -11,7 +12,12 @@ import pytest
 
 from app.api.integrations import router as api_integrations_router
 from app.api.routes.integrations import router as integrations_router
+from app.api.skill_package import router as skill_package_router
 from app.core.auth import get_auth_context
+from app.core.install_key_formats import (
+    SECURITY_GUARDIAN_SKILL_FILE_PATH,
+    SECURITY_GUARDIAN_SKILL_ROUTE,
+)
 from app.routes.integrations.installer import router as installer_router
 from app.services.install_key_handoff import InstallKeySecretUnavailableError
 
@@ -60,6 +66,26 @@ def test_package_integrations_router_registers_hermes_endpoints() -> None:
     route_paths = {route.path for route in app.routes}
     assert "/integrations/hermes/health" in route_paths
     assert "/integrations/hermes/manifest" in route_paths
+
+
+def test_public_security_skill_route_serves_the_canonical_skill_file() -> None:
+    app = FastAPI()
+    app.include_router(skill_package_router)
+
+    source_file = (
+        Path(__file__)
+        .resolve()
+        .parents[1]
+        .joinpath(
+            *SECURITY_GUARDIAN_SKILL_FILE_PATH.split("/"),
+        )
+    )
+    with TestClient(app) as test_client:
+        response = test_client.get(SECURITY_GUARDIAN_SKILL_ROUTE)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/markdown")
+    assert response.text == source_file.read_text(encoding="utf-8")
 
 
 def test_integrations_router_exposes_expected_http_methods(client: TestClient) -> None:
@@ -864,7 +890,7 @@ def test_install_claim_is_owner_bound_short_lived_and_not_a_raw_key(client: Test
     payload = response.json()
     assert payload["key_id"] == record.key_id
     assert payload["claim_token"] == claim.claim_token
-    assert payload["command"].endswith(f"--key {claim.claim_token}")
+    assert payload["command"] == (f"python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\npython -m ironclaw_installer bootstrap --program openclaw --claim-token {claim.claim_token}")
     assert "install_key" not in payload
     assert response.headers["cache-control"] == "no-store, private"
     handoff_service.issue_claim.assert_called_once_with(

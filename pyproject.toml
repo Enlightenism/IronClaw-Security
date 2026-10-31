@@ -111,6 +111,7 @@ Documentation = "https://github.com/Enlightenism/IronClaw-Security#readme"
 
 [project.scripts]
 ironclaw = "app.cli.main:main"
+ironclaw-installer = "ironclaw_installer:main"
 ironclaw-brain = "cli_brain:main"
 ironclaw-skill = "ironclawskill.cli:main"
 ironclaw-smoketest = "smoketestclient:main"
@@ -120,6 +121,7 @@ ironclaw-testclient = "testclient:main"
 include-package-data = true
 py-modules = [
   "cli_brain",
+  "ironclaw_installer",
   "ironclawclient",
   "ironclawshellguard",
   "ironclawtoolrunner",

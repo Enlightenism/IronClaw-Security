@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 import logging
 import math
+import re
 from threading import Lock
 import time
 from typing import Any
@@ -36,6 +37,7 @@ _METERED_USAGE_BUFFER_MAX = 500
 _CHECKOUT_SESSION_TTL_SECONDS = 1800  # 30 min
 _SCHEMA_VERSION = "1.0"
 _INVOICE_CACHE_MAX = 200
+_STRIPE_CHECKOUT_SESSION_ID_PATTERN = re.compile(r"cs_[A-Za-z0-9_]{1,250}\Z")
 
 # ---------------------------------------------------------------------------
 # Billing tier catalogue view derived from app.core.billing.PLAN_DEFINITIONS.
@@ -1022,7 +1024,10 @@ class StripeService:
             )
             return {}
 
-        owner_key = self._resolve_owner_key_for_org(org_id)
+        candidate_owner_key = (metadata or {}).get("owner_key")
+        owner_key = str(candidate_owner_key).strip() if candidate_owner_key else self._resolve_owner_key_for_org(org_id)
+        if not owner_key:
+            raise StripeServiceError("A verified billing owner is required to provision install keys.")
 
         class _CheckoutEntitlementGuard:
             def has_active_subscription(self, candidate_owner_key: str) -> bool:
@@ -1046,6 +1051,7 @@ class StripeService:
         }
         if metadata:
             base_metadata.update(metadata)
+        base_metadata["owner_key"] = owner_key
 
         supported_programs = tuple(InstallKeyFormatRegistry.list_programs())
 
@@ -1500,6 +1506,93 @@ class StripeService:
         with self._lock:
             record = self._checkout_sessions.get(session_id)
         return record.to_dict() if record else None
+
+    def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:
+        normalized_session_id = str(session_id).strip()
+        if not _STRIPE_CHECKOUT_SESSION_ID_PATTERN.fullmatch(normalized_session_id):
+            raise StripeSessionNotFoundError("checkout session not found")
+
+        try:
+            payload = self._get_client().get(
+                f"/checkout/sessions/{normalized_session_id}",
+                params={"expand[]": "line_items"},
+            )
+        except StripeAPIError as exc:
+            if exc.http_status == 404:
+                raise StripeSessionNotFoundError("checkout session not found") from exc
+            raise
+
+        if payload.get("id") != normalized_session_id:
+            raise StripeServiceError("Stripe returned a mismatched checkout session.")
+
+        metadata_value = payload.get("metadata", {})
+        metadata = metadata_value if isinstance(metadata_value, dict) else {}
+        raw_unit_credits = metadata.get("unit_credits", "0")
+        try:
+            unit_credits = int(raw_unit_credits)
+        except (TypeError, ValueError) as exc:
+            raise StripeServiceError("Stripe returned invalid checkout unit metadata.") from exc
+        if unit_credits < 0:
+            raise StripeServiceError("Stripe returned invalid checkout unit metadata.")
+
+        price_id = ""
+        quantity = 0
+        line_items_value = payload.get("line_items")
+        line_items = line_items_value.get("data", []) if isinstance(line_items_value, dict) else []
+        if isinstance(line_items, list) and line_items:
+            first_item = line_items[0]
+            if isinstance(first_item, dict):
+                price_value = first_item.get("price")
+                if isinstance(price_value, dict):
+                    price_id = str(price_value.get("id", ""))
+                raw_quantity = first_item.get("quantity", 0)
+                try:
+                    quantity = int(raw_quantity)
+                except (TypeError, ValueError) as exc:
+                    raise StripeServiceError("Stripe returned invalid checkout line-item metadata.") from exc
+                if quantity < 0:
+                    raise StripeServiceError("Stripe returned invalid checkout line-item metadata.")
+
+        if not price_id or quantity == 0:
+            with self._lock:
+                cached_record = self._checkout_sessions.get(normalized_session_id)
+            if cached_record is not None:
+                price_id = price_id or cached_record.price_id
+                quantity = quantity or cached_record.quantity
+
+        created_at = None
+        raw_created_at = payload.get("created")
+        if raw_created_at is not None:
+            try:
+                created_at = datetime.fromtimestamp(int(raw_created_at), tz=UTC).isoformat().replace("+00:00", "Z")
+            except (OverflowError, OSError, TypeError, ValueError) as exc:
+                raise StripeServiceError("Stripe returned an invalid checkout creation timestamp.") from exc
+
+        expires_at = None
+        raw_expires_at = payload.get("expires_at")
+        if raw_expires_at is not None:
+            try:
+                expires_at = datetime.fromtimestamp(int(raw_expires_at), tz=UTC).isoformat().replace("+00:00", "Z")
+            except (OverflowError, OSError, TypeError, ValueError) as exc:
+                raise StripeServiceError("Stripe returned an invalid checkout expiration timestamp.") from exc
+
+        return {
+            "session_id": normalized_session_id,
+            "org_id": str(metadata.get("org_id", "")),
+            "customer_id": payload.get("customer"),
+            "mode": payload.get("mode"),
+            "price_id": price_id,
+            "quantity": quantity,
+            "unit_credits": unit_credits,
+            "status": payload.get("status", "unknown"),
+            "payment_status": payload.get("payment_status"),
+            "url": payload.get("url"),
+            "success_url": payload.get("success_url"),
+            "cancel_url": payload.get("cancel_url"),
+            "metadata": dict(metadata),
+            "created_at": created_at,
+            "expires_at": expires_at,
+        }
 
     def expire_checkout_session(self, session_id: str) -> bool:
         """Mark a checkout session as expired (from webhook event or manual expiry)."""
@@ -2233,7 +2326,11 @@ class StripeService:
                     customer_id=customer_id,
                     session_id=session_id,
                     unit_credits=unit_credits,
-                    metadata={"mode": mode, "payment_status": payment_status},
+                    metadata={
+                        **(obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}),
+                        "mode": mode,
+                        "payment_status": payment_status,
+                    },
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.error(

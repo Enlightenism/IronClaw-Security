@@ -520,6 +520,62 @@ class TestCheckoutSessionCreation:
     def test_get_checkout_session_missing_returns_none(self, svc: StripeService) -> None:
         assert svc.get_checkout_session("cs_nonexistent") is None
 
+    def test_retrieve_checkout_session_uses_stripe_status_and_metadata(
+        self,
+        svc_with_client: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.get.return_value = {
+            "id": _TEST_SESSION_ID,
+            "status": "complete",
+            "payment_status": "paid",
+            "mode": "payment",
+            "customer": _TEST_CUSTOMER_ID,
+            "url": "https://checkout.stripe.com/pay/test",
+            "success_url": _TEST_SUCCESS_URL,
+            "cancel_url": _TEST_CANCEL_URL,
+            "created": 1_700_000_000,
+            "expires_at": 1_700_000_600,
+            "metadata": {
+                "org_id": _TEST_ORG,
+                "owner_key": "buyer@ironclaw.test",
+                "unit_credits": "5000",
+            },
+            "line_items": {
+                "data": [
+                    {
+                        "price": {"id": _TEST_PRICE_ID},
+                        "quantity": 1,
+                    },
+                ],
+            },
+        }
+
+        record = svc_with_client.retrieve_checkout_session(_TEST_SESSION_ID)
+
+        assert record["session_id"] == _TEST_SESSION_ID
+        assert record["payment_status"] == "paid"
+        assert record["status"] == "complete"
+        assert record["org_id"] == _TEST_ORG
+        assert record["customer_id"] == _TEST_CUSTOMER_ID
+        assert record["unit_credits"] == 5000
+        assert record["price_id"] == _TEST_PRICE_ID
+        assert record["quantity"] == 1
+        assert record["metadata"]["owner_key"] == "buyer@ironclaw.test"
+        mock_client.get.assert_called_once_with(
+            f"/checkout/sessions/{_TEST_SESSION_ID}",
+            params={"expand[]": "line_items"},
+        )
+
+    def test_retrieve_checkout_session_rejects_malformed_session_id(
+        self,
+        svc_with_client: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        with pytest.raises(StripeSessionNotFoundError):
+            svc_with_client.retrieve_checkout_session("not-a-stripe-session")
+        mock_client.get.assert_not_called()
+
     def test_expire_checkout_session(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
         mock_client.post.return_value = _mock_session_resp()
         svc_with_client.create_checkout_session(

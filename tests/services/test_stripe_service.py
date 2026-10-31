@@ -110,7 +110,14 @@ def _build_checkout_completed_event(
     unit_credits: int = 0,
     session_id: str = "cs_svctest_001",
     event_id: str = "evt_co_done",
+    owner_key: str | None = None,
 ) -> dict[str, Any]:
+    metadata = {
+        "org_id": org_id,
+        "unit_credits": str(unit_credits),
+    }
+    if owner_key is not None:
+        metadata["owner_key"] = owner_key
     return {
         "id": event_id,
         "type": StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value,
@@ -120,10 +127,7 @@ def _build_checkout_completed_event(
                 "mode": "payment",
                 "customer": customer_id,
                 "payment_status": "paid",
-                "metadata": {
-                    "org_id": org_id,
-                    "unit_credits": str(unit_credits),
-                },
+                "metadata": metadata,
             }
         },
     }
@@ -606,14 +610,19 @@ class TestHandleCheckoutCompleted:
             lambda *args, **kwargs: MagicMock(provision_for_program=fake_provision),
         )
 
-        event = _build_checkout_completed_event(unit_credits=5_000, org_id="org-install-keys-success")
+        owner_key = "buyer@ironclaw.test"
+        event = _build_checkout_completed_event(
+            unit_credits=5_000,
+            org_id="org-install-keys-success",
+            owner_key=owner_key,
+        )
         result = svc.handle_webhook_event(event)
 
         assert result["action"] == "processed"
         assert svc.get_unit_balance("org-install-keys-success").balance == 5_000
         install_keys = result["detail"]["install_key_issuance"]
-        assert install_keys["openclaw"]["owner_key"] == "ic_org_org-install-keys-success"
-        assert install_keys["claude_code"]["owner_key"] == "ic_org_org-install-keys-success"
+        assert install_keys["openclaw"]["owner_key"] == owner_key
+        assert install_keys["claude_code"]["owner_key"] == owner_key
         assert install_keys["openclaw"]["active"] is True
         assert install_keys["claude_code"]["active"] is True
 

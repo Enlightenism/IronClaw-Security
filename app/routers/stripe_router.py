@@ -12,6 +12,7 @@ from app.core.auth import AuthContext, get_auth_context
 from app.core.billing import (
     PACKAGE_ALIASES,
     PLAN_DEFINITIONS,
+    resolve_authenticated_billing_owner,
     resolve_package_id,
     resolve_plan_code,
 )
@@ -507,7 +508,38 @@ def _get_checkout_session_record_for_auth(
     svc: StripeService,
 ) -> dict[str, Any]:
     org_id = _resolve_org_id(auth)
-    record = svc.get_checkout_session(session_id)
+    if auth is None or getattr(auth, "authenticated", False) is not True:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "authentication_required",
+                "detail": "Authentication is required to verify a checkout session.",
+            },
+        )
+
+    try:
+        record = svc.retrieve_checkout_session(session_id)
+    except StripeSessionNotFoundError as exc:
+        raise _http_404(
+            "Checkout session not found.",
+            code="checkout_session_not_found",
+            extra={"session_id": session_id},
+        ) from exc
+    except StripeServiceError as exc:
+        logger.warning(
+            "stripe_router.checkout_session_lookup_failed session_id=%s error_type=%s",
+            session_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "checkout_session_status_unavailable",
+                "detail": "Stripe checkout status is temporarily unavailable.",
+                "session_id": session_id,
+            },
+        ) from exc
+
     if record is None:
         raise _http_404(
             "Checkout session not found.",
@@ -515,7 +547,21 @@ def _get_checkout_session_record_for_auth(
             extra={"session_id": session_id},
         )
 
-    if org_id and record.get("org_id") != org_id:
+    metadata = record.get("metadata")
+    session_metadata = metadata if isinstance(metadata, dict) else {}
+    if "owner_key" in session_metadata:
+        authenticated_owner = resolve_authenticated_billing_owner(auth)
+        session_owner = session_metadata.get("owner_key")
+        if not authenticated_owner or not isinstance(session_owner, str) or session_owner.strip().lower() != authenticated_owner.strip().lower():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "checkout_session_not_accessible",
+                    "detail": "Checkout session does not belong to the authenticated billing owner.",
+                    "session_id": session_id,
+                },
+            )
+    elif not org_id or record.get("org_id") != org_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -525,7 +571,11 @@ def _get_checkout_session_record_for_auth(
                 "org_id": org_id,
             },
         )
-    return record
+
+    public_record = dict(record)
+    if isinstance(metadata, dict):
+        public_record["metadata"] = {key: value for key, value in metadata.items() if key != "owner_key"}
+    return public_record
 
 
 def _checkout_session_status_payload(session_id: str, record: dict[str, Any]) -> dict[str, Any]:
@@ -981,7 +1031,26 @@ async def create_checkout_session(
     metadata = dict(body.metadata)
     if body.package_id:
         metadata["package_id"] = body.package_id
-    metadata.setdefault("org_id", org_id)
+    metadata["org_id"] = org_id
+    if resolved_unit_credits > 0:
+        if getattr(auth, "authenticated", False) is not True:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "error": "authentication_required",
+                    "detail": "Authentication is required for purchases that provision install keys.",
+                },
+            )
+        owner_key = resolve_authenticated_billing_owner(auth)
+        if not owner_key:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "verified_billing_identity_required",
+                    "detail": "A verified billing identity is required for purchases that provision install keys.",
+                },
+            )
+        metadata["owner_key"] = owner_key
 
     customer_id = body.customer_id
     if not customer_id:
@@ -1104,8 +1173,26 @@ async def complete_checkout_session(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
+    record = _get_checkout_session_record_for_auth(session_id=session_id, auth=auth, svc=svc)
+    if record.get("status") != "complete" or record.get("payment_status") != "paid":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "checkout_payment_not_confirmed",
+                "detail": "Stripe has not confirmed payment for this checkout session.",
+                "session_id": session_id,
+            },
+        )
+
+    stripe_customer_id = record.get("customer_id")
+    if body.customer_id and body.customer_id != stripe_customer_id:
+        raise _http_400(
+            "Customer ID does not match the Stripe checkout session.",
+            code="checkout_customer_mismatch",
+        )
+
     try:
-        result = svc.complete_checkout_session(session_id=session_id, customer_id=body.customer_id)
+        result = svc.complete_checkout_session(session_id=session_id, customer_id=stripe_customer_id)
     except StripeSessionNotFoundError as exc:
         raise _http_404(
             "Checkout session not found.",

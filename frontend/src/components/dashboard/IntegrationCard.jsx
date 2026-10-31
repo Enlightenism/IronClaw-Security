@@ -14,34 +14,33 @@ const TINT_STYLES = {
 
 const DEFAULT_TINT_STYLE = TINT_STYLES.platinum;
 
-const CLAIM_TOKEN_PATTERN = /^ic_claim_[A-Za-z0-9_-]{32,64}$/;
-const SHELL_CONTROL_CHARACTERS = /[\r\n;&|`$<>]/;
-const PLACEHOLDER_TEXT = "Generate a one-time install command after purchase";
+const CLAIM_TOKEN_PATTERN = /^ic_claim_[A-Za-z0-9_-]{20,128}$/;
+const RUNTIME_PROGRAM_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+const INSTALLER_SOURCE_COMMAND =
+  "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git";
+const PLACEHOLDER_TEXT = "Generate a one-time bootstrap command after purchase";
 
 const validateInstallClaim = (claim, program, integrationId) => {
   if (
     !claim ||
     claim.program !== program ||
     claim.integration_id !== integrationId ||
+    typeof program !== "string" ||
+    !RUNTIME_PROGRAM_PATTERN.test(program) ||
     typeof claim.claim_token !== "string" ||
     !CLAIM_TOKEN_PATTERN.test(claim.claim_token) ||
     typeof claim.command !== "string" ||
     claim.command.length > 512 ||
-    SHELL_CONTROL_CHARACTERS.test(claim.command) ||
-    /ic_install_[A-Za-z0-9_./~:-]+/i.test(claim.command)
+    typeof claim.expires_at !== "string"
   ) {
     return null;
   }
 
-  const commandParts = claim.command.trim().split(/\s+/);
-  const keyIndex = commandParts.indexOf("--key");
+  const expectedCommand = `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer bootstrap --program ${program} --claim-token ${claim.claim_token}`;
   const expiresAt = Date.parse(claim.expires_at);
 
   if (
-    !claim.command.trim() ||
-    keyIndex < 0 ||
-    commandParts[keyIndex + 1] !== claim.claim_token ||
-    commandParts.indexOf("--key", keyIndex + 1) !== -1 ||
+    claim.command !== expectedCommand ||
     !Number.isFinite(expiresAt) ||
     expiresAt <= Date.now()
   ) {
@@ -304,9 +303,9 @@ const IntegrationCard = ({
       </div>
 
       <p className="mb-3 text-xs text-[#BFC1C2]">
-        Generate a one-time claim command for this agent host. Each claim can be
-        redeemed once and expires automatically. The token is visible in your
-        command history, so use a trusted terminal.
+        Install the shared IronClaw skill and securely provision this
+        agent&apos;s one-time runtime key. The claim expires automatically and
+        is visible in your command history, so use a trusted terminal.
       </p>
 
       <div className="flex items-stretch gap-2">
