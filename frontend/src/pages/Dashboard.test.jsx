@@ -94,6 +94,14 @@ jest.mock("@/components/dashboard/SecurityAnalysis", () => ({
 // ── IntegrationCard stub ────────────────────────────────────────────────
 let mockCapturedIntegrationProps = {};
 
+jest.mock("@/components/ParticleField", () => {
+  const MockParticleField = () => <div data-testid="particle-field" />;
+
+  MockParticleField.displayName = "MockParticleField";
+
+  return MockParticleField;
+});
+
 jest.mock("@/components/dashboard/IntegrationCard", () => ({
   __esModule: true,
   default: (props) => {
@@ -1210,6 +1218,14 @@ describe("dashboard structure", () => {
     expect(screen.getByTestId("attack-feed-blocked-total")).toHaveTextContent(
       "5",
     );
+  });
+
+  it("lazy-loads the landing particle background after idle callback", async () => {
+    await renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("particle-field")).toBeInTheDocument();
+    });
   });
 });
 
