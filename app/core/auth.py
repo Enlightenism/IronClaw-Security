@@ -854,9 +854,25 @@ def _resolve_bearer_org_id(
     )
 
 
+_SUPABASE_AUDIENCE_ROLE = "authenticated"
+
+
+def _without_supabase_audience_role(claims: dict[str, Any]) -> dict[str, Any]:
+    # Supabase sets top-level role="authenticated" for every signed-in user; it is not an app role.
+    role_values = _clean_claim_strings(claims.get("role"))
+    if _SUPABASE_AUDIENCE_ROLE not in role_values:
+        return claims
+
+    remaining = tuple(value for value in role_values if value != _SUPABASE_AUDIENCE_ROLE)
+    filtered = {key: value for key, value in claims.items() if key != "role"}
+    if remaining:
+        filtered["role"] = list(remaining)
+    return filtered
+
+
 def _resolve_bearer_roles(claims: dict[str, Any]) -> tuple[str, ...]:
     roles = _extract_claim_values(
-        claims,
+        _without_supabase_audience_role(claims),
         "roles",
         "role",
         "permissions_role",

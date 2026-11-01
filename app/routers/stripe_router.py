@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -57,8 +58,7 @@ def _resolve_org_id(auth: AuthContext | None) -> str:
 
 
 def _resolve_customer_id(svc: StripeService, org_id: str) -> str | None:
-    with svc.lock:  # noqa: SLF001
-        return svc.org_customer_map.get(org_id)  # noqa: SLF001
+    return svc.resolve_customer_id(org_id)
 
 
 PACKAGE_PRICE_ENV_MAP: dict[str, str] = {
@@ -1052,9 +1052,10 @@ async def create_checkout_session(
         )
 
     owner_key = resolve_authenticated_billing_owner(auth)
+    owner_fingerprint = hashlib.sha256(owner_key.encode("utf-8")).hexdigest()[:12] if owner_key else None
     logger.info(
-        "stripe_router.create_checkout_session owner_key=%s owner_empty=%s",
-        owner_key or None,
+        "stripe_router.create_checkout_session owner_fingerprint=%s owner_empty=%s",
+        owner_fingerprint,
         not owner_key,
     )
     if not owner_key:

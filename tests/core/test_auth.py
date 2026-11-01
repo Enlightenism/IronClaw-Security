@@ -534,6 +534,17 @@ def test_resolve_bearer_roles_permissions_and_principal_type():
     assert auth._resolve_bearer_principal_type(fallback_claims) == "customer"
 
 
+def test_resolve_bearer_roles_ignores_supabase_audience_role():
+    supabase_claims = {"aud": "authenticated", "role": "authenticated", "sub": "user-1"}
+    assert auth._resolve_bearer_roles(supabase_claims) == ("customer_user",)
+
+    mixed_claims = {"role": ["authenticated", "customer_admin"]}
+    assert auth._resolve_bearer_roles(mixed_claims) == ("customer_admin",)
+
+    app_metadata_claims = {"role": "authenticated", "app_metadata": {"role": "customer_admin"}}
+    assert auth._resolve_bearer_roles(app_metadata_claims) == ("customer_admin",)
+
+
 def test_get_bearer_context_returns_none_without_bearer_token():
     request = make_request()
     assert auth.get_bearer_context(request, None) is None

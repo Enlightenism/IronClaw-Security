@@ -97,11 +97,9 @@ def _obj_with_to_dict(**data: object) -> SimpleNamespace:
 
 def _build_mock_svc() -> MagicMock:
     svc = MagicMock(spec=StripeService)
-    lock = threading.Lock()
-    svc.lock = lock
-    svc._lock = lock
+    svc._lock = threading.Lock()
     svc._org_customer_map = {}
-    svc.org_customer_map = svc._org_customer_map
+    svc.resolve_customer_id.side_effect = lambda org_id: svc._org_customer_map.get(org_id)
     return svc
 
 
@@ -330,11 +328,8 @@ class TestDebitUnits:
 class TestPatchObjectLockAndMap:
     def _bare_svc_with_attrs(self) -> StripeService:
         svc = StripeService.__new__(StripeService)
-        lock = threading.Lock()
-        svc.lock = lock
-        svc._lock = lock
+        svc._lock = threading.Lock()
         svc._org_customer_map = {}
-        svc.org_customer_map = svc._org_customer_map
         return svc
 
     def test_resolve_customer_id_via_patch_object_returns_customer(self) -> None:
@@ -343,7 +338,6 @@ class TestPatchObjectLockAndMap:
 
         from app.routers.stripe_router import _resolve_customer_id
 
-        svc.org_customer_map = real_map
         svc._org_customer_map = real_map
         result = _resolve_customer_id(svc, ORG_ID)
 
@@ -355,7 +349,6 @@ class TestPatchObjectLockAndMap:
 
         from app.routers.stripe_router import _resolve_customer_id
 
-        svc.org_customer_map = real_map
         svc._org_customer_map = real_map
         result = _resolve_customer_id(svc, ORG_ID)
 
