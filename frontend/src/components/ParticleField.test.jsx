@@ -132,6 +132,16 @@ describe("ParticleField", () => {
     expect(context.setTransform).toHaveBeenCalled();
   });
 
+  it("keeps the star field when a viewport event does not change the canvas size", () => {
+    render(<ParticleField density={50} />);
+
+    const randomSpy = jest.spyOn(Math, "random");
+    window.dispatchEvent(new Event("resize"));
+
+    expect(randomSpy).not.toHaveBeenCalled();
+    randomSpy.mockRestore();
+  });
+
   it("pauses while the document is hidden and resumes when visible again", () => {
     render(<ParticleField density={50} />);
 

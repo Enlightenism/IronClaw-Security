@@ -224,13 +224,13 @@ const ParticleField = ({ density = 180, paused = false }) => {
         0,
         pointer.x,
         pointer.y,
-        90,
+        120,
       );
-      halo.addColorStop(0, "rgba(255,215,0,0.10)");
+      halo.addColorStop(0, "rgba(255,215,0,0.18)");
       halo.addColorStop(1, "rgba(255,215,0,0)");
       ctx.fillStyle = halo;
       ctx.beginPath();
-      ctx.arc(pointer.x, pointer.y, 90, 0, Math.PI * 2);
+      ctx.arc(pointer.x, pointer.y, 120, 0, Math.PI * 2);
       ctx.fill();
 
       for (const star of stars) {
@@ -255,6 +255,13 @@ const ParticleField = ({ density = 180, paused = false }) => {
 
     const resize = () => {
       const metrics = getCanvasMetrics();
+      if (
+        metrics.width === width &&
+        metrics.height === height &&
+        stars.length > 0
+      ) {
+        return;
+      }
       width = metrics.width;
       height = metrics.height;
       if (!width || !height) {
