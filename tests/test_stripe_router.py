@@ -805,6 +805,31 @@ class TestCheckoutSessionRoutes:
         assert resp.json()["detail"]["error"] == "verified_billing_identity_required"
         mock_svc.create_checkout_session.assert_not_called()
 
+    def test_create_checkout_session_unexpected_error_returns_json_502(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.create_checkout_session.side_effect = RuntimeError("socket reset")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.routers.stripe_router.vault.get", MagicMock(side_effect=_TEST_PRICE_IDS.get))
+            resp = client.post(
+                _billing_path("/checkout/sessions"),
+                json={
+                    "priceId": "price_pkg5000",
+                    "unitCredits": 42,
+                    "quantity": 2,
+                    "successUrl": _ALLOWED_SUCCESS_URL,
+                    "cancelUrl": _ALLOWED_CANCEL_URL,
+                    "metadata": {"flow": "direct"},
+                },
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == 502
+        assert resp.json()["detail"]["error"] == "stripe_checkout_unavailable"
+
     def test_checkout_session_status_checks_owner_and_redacts_owner_metadata(
         self,
         client: TestClient,

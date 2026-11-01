@@ -428,6 +428,27 @@ def test_install_security_middleware_uses_default_csp_for_blank_custom_value() -
     assert response.headers["Content-Security-Policy"] == _DEFAULT_CSP
 
 
+def test_unhandled_exception_500_keeps_cors_headers_for_allowed_origin() -> None:
+    settings = Settings(
+        ALLOWED_ORIGINS="https://moving-forward.ca",
+        TRUSTED_HOSTS="testserver",
+        CORS_ALLOWED_METHODS="GET,POST,OPTIONS",
+        CORS_ALLOWED_HEADERS="Authorization,Content-Type,X-API-Key",
+    )
+    app = _build_app(settings)
+
+    @app.get("/boom")
+    def boom() -> dict[str, str]:
+        raise RuntimeError("boom")
+
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get("/boom", headers={"Origin": "https://moving-forward.ca"})
+
+    assert response.status_code == 500
+    assert response.json()["error"] == "internal_server_error"
+    assert response.headers["access-control-allow-origin"] == "https://moving-forward.ca"
+
+
 def test_install_security_middleware_sets_cors_headers_for_allowed_origin() -> None:
     settings = Settings(
         ALLOWED_ORIGINS="https://moving-forward.ca,https://www.moving-forward.ca",

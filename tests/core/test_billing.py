@@ -325,6 +325,20 @@ def test_resolve_authenticated_billing_owner_rejects_missing_or_generic_identity
     assert resolve_authenticated_billing_owner(generic) is None
 
 
+def test_resolve_authenticated_billing_owner_falls_back_to_supabase_user_id_without_email() -> None:
+    verified_supabase_user = SimpleNamespace(
+        authenticated=True,
+        auth_source="supabase_jwt",
+        key_type="personal",
+        principal_type="user",
+        org_id=None,
+        metadata={"header": "Authorization"},
+        principal_id="5F2A9C1E-0000-4000-8000-ABCDEF123456",
+    )
+
+    assert resolve_authenticated_billing_owner(verified_supabase_user) == "supabase_user_5f2a9c1e-0000-4000-8000-abcdef123456"
+
+
 # ---------------------------------------------------------------------------
 # BillingUsageError
 # ---------------------------------------------------------------------------

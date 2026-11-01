@@ -58,10 +58,27 @@ const normalizePackageId = (packageId) => {
   return typeof packageId === "string" ? packageId.trim() : "";
 };
 
+const CHECKOUT_ERROR_MESSAGES = {
+  verified_billing_identity_required:
+    "Your account needs a verified email before you can buy a package. Sign out, sign back in, then try again.",
+  authentication_required:
+    "Your session has expired. Please sign in again to buy a package.",
+};
+
 const getErrorMessage = (error) => {
   const rawDetail = error?.response?.data?.detail;
   const rawMessage = error?.response?.data?.message;
   const topError = error?.response?.data?.error;
+
+  if (!error?.response && error?.request) {
+    return "Could not reach the server. Check your connection and try again.";
+  }
+
+  const detailCode =
+    rawDetail && typeof rawDetail === "object" ? rawDetail.error : undefined;
+  if (typeof detailCode === "string" && CHECKOUT_ERROR_MESSAGES[detailCode]) {
+    return CHECKOUT_ERROR_MESSAGES[detailCode];
+  }
 
   if (Array.isArray(rawDetail)) {
     const first = rawDetail[0];

@@ -223,7 +223,15 @@ def resolve_authenticated_billing_owner(auth_ctx: Any) -> str | None:
             buyer_email = principal_id
 
     resolved_owner = resolve_billing_owner(auth_ctx, buyer_email)
-    return resolved_owner or None
+    if resolved_owner:
+        return resolved_owner
+
+    # A verified Supabase user without an email claim is keyed by its stable user ID.
+    if getattr(auth_ctx, "auth_source", None) == "supabase_jwt":
+        principal_id = str(getattr(auth_ctx, "principal_id", "") or "").strip().lower()
+        if principal_id:
+            return resolve_billing_owner(auth_ctx, f"supabase_user_{principal_id}") or None
+    return None
 
 
 PlanCode = Literal["starter-5k", "team-25k", "enterprise-60k"]

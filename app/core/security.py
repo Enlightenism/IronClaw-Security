@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
+import logging
 from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import MutableHeaders
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; script-src 'self'; object-src 'none'; manifest-src 'self'"
 _DEFAULT_ALLOWED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
@@ -438,6 +442,42 @@ def should_allow_credentials(settings: Settings, origins: Sequence[str]) -> bool
     return "*" not in origins
 
 
+class UnhandledErrorMiddleware:
+    """Converts unhandled exceptions into JSON 500 responses inside the CORS layer.
+
+    Starlette's ServerErrorMiddleware sits outside every user middleware, so without this
+    wrapper a crash bypasses CORS and the browser reports a CORS failure instead of the error.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        response_started = False
+
+        async def tracked_send(message: Message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracked_send)
+        except Exception:
+            logger.exception("unhandled_exception method=%s path=%s", scope.get("method"), scope.get("path"))
+            if response_started:
+                raise
+            response = JSONResponse(
+                status_code=500,
+                content={"error": "internal_server_error", "detail": "Internal server error."},
+            )
+            await response(scope, receive, send)
+
+
 def install_security_middleware(app: FastAPI, settings: Settings) -> None:
     if getattr(app.state, _SECURITY_MIDDLEWARE_INSTALLED_FLAG, False):
         return
@@ -465,6 +505,7 @@ def install_security_middleware(app: FastAPI, settings: Settings) -> None:
     )
     normalized_csp = csp.strip() if isinstance(csp, str) and csp.strip() else None
 
+    app.add_middleware(UnhandledErrorMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,

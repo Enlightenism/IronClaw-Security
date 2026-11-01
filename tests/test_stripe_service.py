@@ -1616,6 +1616,18 @@ class TestStripeHTTPClient:
 
         assert exc_info.value.http_status == 404
 
+    def test_post_raises_stripe_api_error_on_network_failure(self) -> None:
+        import urllib.error
+
+        client = _StripeHTTPClient(_TEST_API_KEY)
+
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("connection refused")):
+            with pytest.raises(StripeAPIError) as exc_info:
+                client.post("/charges", {"amount": "100"})
+
+        assert exc_info.value.http_status == 0
+        assert "URLError" in str(exc_info.value)
+
     def test_stripe_api_error_stores_http_status(self) -> None:
         err = StripeAPIError("rate limited", http_status=429, stripe_code="rate_limit")
         assert err.http_status == 429

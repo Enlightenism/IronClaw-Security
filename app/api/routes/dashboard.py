@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -27,6 +28,8 @@ router = APIRouter(
     prefix="/dashboard",
     tags=["dashboard"],
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +204,13 @@ def _coerce_string(value: Any, *, default: str = "") -> str:
 def _resolve_dashboard_owner(auth_ctx: AuthContext, requested_owner_key: str | None = None) -> str:
     resolved_owner = resolve_authenticated_billing_owner(auth_ctx)
     if not resolved_owner:
+        metadata = getattr(auth_ctx, "metadata", None)
+        logger.warning(
+            "dashboard.owner_unresolved principal_type=%s key_type=%s identity_claims=%s",
+            getattr(auth_ctx, "principal_type", None),
+            getattr(auth_ctx, "key_type", None),
+            sorted(metadata.keys()) if isinstance(metadata, dict) else [],
+        )
         raise HTTPException(status_code=403, detail="Dashboard owner could not be resolved from authenticated identity.")
     if requested_owner_key is not None and requested_owner_key.strip().lower() != resolved_owner:
         raise HTTPException(status_code=403, detail="Requested dashboard owner does not match authenticated identity.")

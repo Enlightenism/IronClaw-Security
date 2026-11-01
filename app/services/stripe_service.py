@@ -611,6 +611,13 @@ class _StripeHTTPClient:
                 stripe_code=err_body.get("error", {}).get("code"),
                 raw=err_body,
             ) from exc
+        except (OSError, json.JSONDecodeError) as exc:
+            raise StripeAPIError(
+                message=f"Stripe request failed: {type(exc).__name__}",
+                http_status=0,
+                stripe_code=None,
+                raw=None,
+            ) from exc
 
     def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         import json
@@ -637,6 +644,13 @@ class _StripeHTTPClient:
                 stripe_code=err_body.get("error", {}).get("code"),
                 raw=err_body,
             ) from exc
+        except (OSError, json.JSONDecodeError) as exc:
+            raise StripeAPIError(
+                message=f"Stripe request failed: {type(exc).__name__}",
+                http_status=0,
+                stripe_code=None,
+                raw=None,
+            ) from exc
 
     def delete(self, path: str) -> dict[str, Any]:
         import json
@@ -659,6 +673,13 @@ class _StripeHTTPClient:
                 http_status=exc.code,
                 stripe_code=err_body.get("error", {}).get("code"),
                 raw=err_body,
+            ) from exc
+        except (OSError, json.JSONDecodeError) as exc:
+            raise StripeAPIError(
+                message=f"Stripe request failed: {type(exc).__name__}",
+                http_status=0,
+                stripe_code=None,
+                raw=None,
             ) from exc
 
 

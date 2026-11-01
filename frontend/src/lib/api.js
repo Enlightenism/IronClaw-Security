@@ -47,7 +47,6 @@ const getOrgIdFromSession = (session) => {
     appMeta.org_id ||
     appMeta.organization_id ||
     appMeta.orgId ||
-    user.id ||
     ""
   );
 };

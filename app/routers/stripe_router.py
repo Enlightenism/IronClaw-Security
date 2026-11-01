@@ -1052,6 +1052,11 @@ async def create_checkout_session(
         )
 
     owner_key = resolve_authenticated_billing_owner(auth)
+    logger.info(
+        "stripe_router.create_checkout_session owner_key=%s owner_empty=%s",
+        owner_key or None,
+        not owner_key,
+    )
     if not owner_key:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1077,9 +1082,8 @@ async def create_checkout_session(
     metadata["unit_credits"] = str(resolved_unit_credits)
     metadata["owner_key"] = owner_key
 
-    customer_id = _resolve_customer_id(svc, org_id)
-
     try:
+        customer_id = _resolve_customer_id(svc, org_id)
         logger.info(
             "stripe_router.create_checkout_session org_id=%s package_id=%s price_id=%s",
             org_id,
@@ -1110,6 +1114,23 @@ async def create_checkout_session(
             detail={
                 "error": "stripe_checkout_error",
                 "detail": str(exc),
+                "org_id": org_id,
+                "package_id": canonical_package_id,
+                "price_id": resolved_price_id,
+            },
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "stripe_router.create_checkout_session_unhandled org_id=%s package_id=%s price_id=%s",
+            org_id,
+            canonical_package_id,
+            resolved_price_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "error": "stripe_checkout_unavailable",
+                "detail": "The payment provider could not start checkout. Please try again shortly.",
                 "org_id": org_id,
                 "package_id": canonical_package_id,
                 "price_id": resolved_price_id,
