@@ -65,8 +65,6 @@ const IntegrationCard = ({
   program,
   integrationId,
   available = false,
-  unitsConsumed = 0,
-  blockedAttacks = 0,
   onCreateClaim,
   tint = "gold",
   testid,
@@ -130,14 +128,6 @@ const IntegrationCard = ({
   const normalizedCommand = available === true ? installCommand : "";
   const isLocked = !normalizedCommand;
   const canGenerate = available === true && typeof onCreateClaim === "function";
-  const displayedUnitsConsumed =
-    Number.isSafeInteger(unitsConsumed) && unitsConsumed >= 0
-      ? unitsConsumed
-      : 0;
-  const displayedBlockedAttacks =
-    Number.isSafeInteger(blockedAttacks) && blockedAttacks >= 0
-      ? blockedAttacks
-      : 0;
 
   const { surface, accent } = TINT_STYLES[tint] || DEFAULT_TINT_STYLE;
 
@@ -248,7 +238,7 @@ const IntegrationCard = ({
   return (
     <div
       ref={cardRef}
-      className={`${surface} touch-manipulation rounded-xl p-6 transition-transform duration-200 ease-out will-change-transform ${
+      className={`${surface} touch-manipulation rounded-lg p-3 transition-transform duration-200 ease-out will-change-transform ${
         pressed ? "scale-[0.97]" : "scale-100"
       }`}
       style={{
@@ -264,53 +254,25 @@ const IntegrationCard = ({
       onTouchCancel={handleTouchEnd}
       data-testid={testid}
     >
-      <div className="mb-4 flex items-center gap-2">
-        <Terminal size={16} style={{ color: accent }} />
+      <div className="mb-2 flex items-center gap-1.5">
+        <Terminal size={12} style={{ color: accent }} />
         <h3
-          className="font-tech text-sm font-semibold uppercase tracking-[0.25em]"
+          className="font-tech text-xs font-semibold uppercase tracking-[0.2em]"
           style={{ color: accent }}
         >
           {canonicalTitle}
         </h3>
       </div>
 
-      <div
-        className="mb-3 grid grid-cols-2 gap-3 text-xs text-[#BFC1C2]"
-        data-testid={`${testid}-usage`}
-      >
-        <div>
-          <div className="text-[10px] uppercase tracking-wider">
-            Protection units used
-          </div>
-          <div
-            className="font-tech mt-1 text-sm text-white"
-            data-testid={`${testid}-units-consumed`}
-          >
-            {displayedUnitsConsumed.toLocaleString()}
-          </div>
-        </div>
-        <div>
-          <div className="text-[10px] uppercase tracking-wider">
-            Attacks blocked
-          </div>
-          <div
-            className="font-tech mt-1 text-sm text-white"
-            data-testid={`${testid}-blocked-attacks`}
-          >
-            {displayedBlockedAttacks.toLocaleString()}
-          </div>
-        </div>
-      </div>
-
-      <p className="mb-3 text-xs text-[#BFC1C2]">
-        Install the shared IronClaw skill and securely provision this
-        agent&apos;s one-time runtime key. The claim expires automatically and
-        is visible in your command history, so use a trusted terminal.
+      <p className="mb-2 text-[11px] leading-snug text-[#BFC1C2]">
+        Install commands will be available to generate after purchase, and will
+        have a unique user key embedded into the install command for your
+        account.
       </p>
 
-      <div className="flex items-stretch gap-2">
+      <div className="flex items-stretch gap-1.5">
         <code
-          className={`font-tech flex-1 overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-white/10 bg-black/50 px-4 py-3 text-xs leading-relaxed ${
+          className={`font-tech flex-1 overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-white/10 bg-black/50 px-2 py-1.5 text-[10px] leading-relaxed ${
             isLocked ? "italic text-white/40" : "text-white/90"
           }`}
         >
@@ -321,7 +283,7 @@ const IntegrationCard = ({
           onClick={copy}
           disabled={isLocked}
           data-testid={`${testid}-copy`}
-          className="flex w-12 shrink-0 items-center justify-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex w-7 shrink-0 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-50"
           style={{
             borderColor: `${accent}55`,
             background: `${accent}14`,
@@ -335,11 +297,11 @@ const IntegrationCard = ({
               : `Copy ${canonicalTitle} install command`
           }
         >
-          {copied ? <Check size={18} /> : <Copy size={18} />}
+          {copied ? <Check size={12} /> : <Copy size={12} />}
         </button>
       </div>
       {claimExpiresAt !== null ? (
-        <p className="mt-2 text-xs text-white/50">
+        <p className="mt-1 text-[10px] text-white/50">
           This one-time command expires{" "}
           {new Date(claimExpiresAt).toLocaleTimeString()}.
         </p>
@@ -349,7 +311,7 @@ const IntegrationCard = ({
         onClick={generate}
         disabled={!canGenerate || generating}
         data-testid={`${testid}-generate`}
-        className="mt-3 rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
+        className="mt-2 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
         style={{
           borderColor: `${accent}55`,
           background: `${accent}14`,

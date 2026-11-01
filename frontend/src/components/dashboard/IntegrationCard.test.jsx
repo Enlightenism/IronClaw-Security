@@ -58,15 +58,18 @@ describe("IntegrationCard", () => {
     expect(onCreateClaim).not.toHaveBeenCalled();
   });
 
-  it("displays usage and blocked-attack totals for this runtime", () => {
-    renderCard({ unitsConsumed: 1500, blockedAttacks: 3 });
+  it("does not show per-platform usage stats or the legacy card copy", () => {
+    renderCard();
 
     expect(
-      screen.getByTestId("claude-code-card-units-consumed"),
-    ).toHaveTextContent("1,500");
+      screen.queryByTestId("claude-code-card-units-consumed"),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByTestId("claude-code-card-blocked-attacks"),
-    ).toHaveTextContent("3");
+      screen.queryByTestId("claude-code-card-blocked-attacks"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("claude-code-card")).toHaveTextContent(
+      "Install commands will be available to generate after purchase",
+    );
   });
 
   it("requests and displays a valid one-time claim only after an explicit click", async () => {

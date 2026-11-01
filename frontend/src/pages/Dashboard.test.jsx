@@ -101,12 +101,6 @@ jest.mock("@/components/dashboard/IntegrationCard", () => ({
     return (
       <div data-testid={props.testid || `integration-card-${props.title}`}>
         <div>{props.title}</div>
-        <div data-testid={`${props.testid}-units-consumed`}>
-          {props.unitsConsumed}
-        </div>
-        <div data-testid={`${props.testid}-blocked-attacks`}>
-          {props.blockedAttacks}
-        </div>
         <button
           type="button"
           data-testid={`${props.testid}-generate`}
@@ -1194,13 +1188,6 @@ describe("dashboard structure", () => {
             daily_usage: dailyUsage,
             attacks,
             blocked_activity_total: 5,
-            install_key_slots: [
-              {
-                program: "claude_code",
-                units_consumed: 42,
-                metadata: { usage_summary: { total_blocked_attacks: 3 } },
-              },
-            ],
           }),
         });
       }
@@ -1220,12 +1207,6 @@ describe("dashboard structure", () => {
     expect(mockCapturedSecurityProps.unitsWeek).toBe(77);
     expect(mockCapturedSecurityProps.dailyUsage).toEqual(dailyUsage);
     expect(mockCapturedSecurityProps.attacks).toEqual(attacks);
-    expect(
-      screen.getByTestId("claude-code-card-units-consumed"),
-    ).toHaveTextContent("42");
-    expect(
-      screen.getByTestId("claude-code-card-blocked-attacks"),
-    ).toHaveTextContent("3");
     expect(screen.getByTestId("attack-feed-blocked-total")).toHaveTextContent(
       "5",
     );

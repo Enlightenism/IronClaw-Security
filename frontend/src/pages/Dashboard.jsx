@@ -766,12 +766,6 @@ const Dashboard = () => {
     return INSTALL_KEY_PROGRAMS.map(({ program, label, tint }) => {
       const integrationId = program.replace(/_/g, "-");
       const metadata = tokens?.install_metadata?.[integrationId];
-      const runtimeSlot = Array.isArray(installKeyDashboard.install_key_slots)
-        ? installKeyDashboard.install_key_slots.find(
-            (slot) => slot.program === program,
-          )
-        : null;
-      const usageSummary = runtimeSlot?.metadata?.usage_summary ?? {};
 
       return {
         title: label,
@@ -782,22 +776,12 @@ const Dashboard = () => {
           metadata?.program === program &&
           metadata?.slug === integrationId &&
           Boolean(metadata?.key_id),
-        unitsConsumed: Number.isSafeInteger(runtimeSlot?.units_consumed)
-          ? runtimeSlot.units_consumed
-          : 0,
-        blockedAttacks: Number.isSafeInteger(usageSummary.total_blocked_attacks)
-          ? usageSummary.total_blocked_attacks
-          : 0,
         onCreateClaim: createInstallClaim,
         tint,
         testid: toCardTestId(program),
       };
     });
-  }, [
-    createInstallClaim,
-    installKeyDashboard.install_key_slots,
-    tokens?.install_metadata,
-  ]);
+  }, [createInstallClaim, tokens?.install_metadata]);
 
   const attackFeedItems = securityProps.attacks;
   const blockedActivityTotal = Number.isSafeInteger(
@@ -942,8 +926,8 @@ const Dashboard = () => {
             />
           </div>
 
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 gap-6">
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {integrationCards.map((card) => (
                 <MemoIntegrationCard
                   key={card.testid}
@@ -951,8 +935,6 @@ const Dashboard = () => {
                   program={card.program}
                   integrationId={card.integrationId}
                   available={card.available}
-                  unitsConsumed={card.unitsConsumed}
-                  blockedAttacks={card.blockedAttacks}
                   onCreateClaim={card.onCreateClaim}
                   tint={card.tint}
                   testid={card.testid}
