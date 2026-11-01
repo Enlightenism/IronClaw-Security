@@ -165,7 +165,7 @@ def _coerce_provider_targets(value: Any) -> tuple[str, ...]:
 
     if isinstance(value, str):
         items = [part.strip() for part in value.split(",") if part.strip()]
-    elif isinstance(value, (list, tuple)):
+    elif isinstance(value, list | tuple):
         items = [str(item).strip() for item in value if str(item).strip()]
     else:
         raise IronClawSkillConfigError("provider_targets must be a list, tuple, or comma-separated string")

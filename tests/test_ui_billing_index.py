@@ -168,7 +168,7 @@ def test_billing_index_each_package_id_is_string(test_client: TestClient) -> Non
 
 def test_billing_index_each_package_price_usd_is_float(test_client: TestClient) -> None:
     for i, pkg in enumerate(_get_body(test_client)["packages"]):
-        assert isinstance(pkg["price_usd"], (int, float)), f"packages[{i}].price_usd must be numeric"
+        assert isinstance(pkg["price_usd"], int | float), f"packages[{i}].price_usd must be numeric"
         assert pkg["price_usd"] > 0, f"packages[{i}].price_usd must be > 0"
 
 
@@ -290,7 +290,7 @@ def test_billing_index_each_package_metadata_has_units_display(test_client: Test
 def test_billing_index_each_package_metadata_has_effective_price_per_1k(test_client: TestClient) -> None:
     for i, pkg in enumerate(_get_body(test_client)["packages"]):
         assert "effective_price_per_1k_units" in pkg["metadata"], f"packages[{i}].metadata missing effective_price_per_1k_units"
-        assert isinstance(pkg["metadata"]["effective_price_per_1k_units"], (int, float)), f"packages[{i}].metadata.effective_price_per_1k_units must be numeric"
+        assert isinstance(pkg["metadata"]["effective_price_per_1k_units"], int | float), f"packages[{i}].metadata.effective_price_per_1k_units must be numeric"
         assert pkg["metadata"]["effective_price_per_1k_units"] > 0, f"packages[{i}].metadata.effective_price_per_1k_units must be > 0"
 
 

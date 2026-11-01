@@ -158,7 +158,7 @@ class TestGetAuthService:
 class TestGetStore:
     def test_returns_valid_store_type(self):
         result = get_store()
-        assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
+        assert isinstance(result, SupabasePersistenceStore | InMemoryPersistenceStore)
 
     def test_satisfies_store_type_union(self):
         result: StoreType = get_store()

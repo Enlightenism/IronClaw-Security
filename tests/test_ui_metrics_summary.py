@@ -191,7 +191,7 @@ def test_metrics_summary_kpi_label_is_nonempty_string(
 def test_metrics_summary_kpi_value_is_number(test_client: TestClient) -> None:
     data = _fetch(test_client)
     for entry in data["kpis"]:
-        assert isinstance(entry["value"], (int, float))
+        assert isinstance(entry["value"], int | float)
 
 
 def test_metrics_summary_kpi_unit_is_string(test_client: TestClient) -> None:
@@ -256,7 +256,7 @@ def test_metrics_summary_service_request_rate_is_number(
 ) -> None:
     data = _fetch(test_client)
     for entry in data["services"]:
-        assert isinstance(entry["request_rate"], (int, float))
+        assert isinstance(entry["request_rate"], int | float)
         assert entry["request_rate"] >= 0.0
 
 
@@ -265,7 +265,7 @@ def test_metrics_summary_service_error_rate_is_number(
 ) -> None:
     data = _fetch(test_client)
     for entry in data["services"]:
-        assert isinstance(entry["error_rate"], (int, float))
+        assert isinstance(entry["error_rate"], int | float)
         assert entry["error_rate"] >= 0.0
 
 
@@ -274,7 +274,7 @@ def test_metrics_summary_service_p95_latency_is_number(
 ) -> None:
     data = _fetch(test_client)
     for entry in data["services"]:
-        assert isinstance(entry["p95_latency_ms"], (int, float))
+        assert isinstance(entry["p95_latency_ms"], int | float)
         assert entry["p95_latency_ms"] >= 0.0
 
 

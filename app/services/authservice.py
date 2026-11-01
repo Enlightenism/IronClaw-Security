@@ -193,14 +193,14 @@ class AuthService:
         permissions: tuple[str, ...] = ()
         for attr in ("permissions", "scopes", "allowed_actions"):
             val = getattr(record, attr, None)
-            if isinstance(val, (list, tuple, set)):
+            if isinstance(val, list | tuple | set):
                 permissions = tuple(str(s).strip() for s in val if str(s).strip())
                 break
 
         roles: tuple[str, ...] = ()
         for attr in ("roles", "role_names", "grants"):
             val = getattr(record, attr, None)
-            if isinstance(val, (list, tuple, set)):
+            if isinstance(val, list | tuple | set):
                 roles = tuple(str(s).strip() for s in val if str(s).strip())
                 break
 

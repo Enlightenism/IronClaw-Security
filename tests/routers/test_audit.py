@@ -240,7 +240,7 @@ def test_list_events_total_is_integer(client: TestClient) -> None:
     r = client.get(_AUDIT_EVENTS_ROUTE)
     assert r.status_code == 200
     body = r.json()
-    assert isinstance(body["total"], (int, type(None)))
+    assert isinstance(body["total"], int | type(None))
 
 
 # ---------------------------------------------------------------------------

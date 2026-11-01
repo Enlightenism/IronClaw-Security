@@ -95,7 +95,7 @@ def _select_paid_install_key_records(owner_key: str) -> dict[str, Any]:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Install-key records are temporarily unavailable.",
         ) from exc
-    if not isinstance(records, (list, tuple)):
+    if not isinstance(records, list | tuple):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Install-key records returned an invalid response.",

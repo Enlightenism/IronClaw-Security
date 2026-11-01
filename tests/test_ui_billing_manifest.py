@@ -148,7 +148,7 @@ def test_billing_manifest_each_package_id_is_string(test_client: TestClient) -> 
 def test_billing_manifest_each_package_price_usd_is_number(test_client: TestClient) -> None:
     response = test_client.get("/billing-manifest")
     for i, pkg in enumerate(response.json()["pricing"]["packages"]):
-        assert isinstance(pkg["price_usd"], (int, float)), f"pricing.packages[{i}].price_usd must be numeric"
+        assert isinstance(pkg["price_usd"], int | float), f"pricing.packages[{i}].price_usd must be numeric"
         assert pkg["price_usd"] > 0, f"pricing.packages[{i}].price_usd must be positive"
 
 
@@ -258,7 +258,7 @@ def test_billing_manifest_each_package_metadata_has_effective_price_per_1k(test_
     for i, pkg in enumerate(response.json()["pricing"]["packages"]):
         meta = pkg.get("metadata", {})
         assert "effective_price_per_1k_units" in meta, f"pricing.packages[{i}].metadata missing effective_price_per_1k_units"
-        assert isinstance(meta["effective_price_per_1k_units"], (int, float))
+        assert isinstance(meta["effective_price_per_1k_units"], int | float)
         assert meta["effective_price_per_1k_units"] > 0
 
 

@@ -72,6 +72,15 @@ describe("IntegrationCard", () => {
     );
   });
 
+  it("renders decorative glass cracks as a hidden, non-interactive layer", () => {
+    renderCard();
+
+    const cracks = screen.getByTestId("claude-code-card-cracks");
+    expect(cracks.tagName.toLowerCase()).toBe("svg");
+    expect(cracks).toHaveAttribute("aria-hidden", "true");
+    expect(cracks).toHaveClass("pointer-events-none");
+  });
+
   it("requests and displays a valid one-time claim only after an explicit click", async () => {
     const user = userEvent.setup();
     const claim = makeClaim();

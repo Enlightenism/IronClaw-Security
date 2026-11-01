@@ -396,7 +396,7 @@ def evaluate_guard_security_request(
                 threshold=GUARD_THRESHOLD,
             )
             raw_guard_score = guard_result.malicious_score
-            if isinstance(raw_guard_score, bool) or not isinstance(raw_guard_score, (int, float)) or not math.isfinite(raw_guard_score) or not 0.0 <= raw_guard_score <= 1.0:
+            if isinstance(raw_guard_score, bool) or not isinstance(raw_guard_score, int | float) or not math.isfinite(raw_guard_score) or not 0.0 <= raw_guard_score <= 1.0:
                 raise ValueError("Prompt Guard returned an invalid malicious score.")
             if not isinstance(guard_result.label, str) or not guard_result.label:
                 raise ValueError("Prompt Guard returned an invalid label.")

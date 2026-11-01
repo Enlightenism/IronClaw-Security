@@ -242,7 +242,7 @@ def test_health_snapshot_dependency_latency_ms_is_number(
 ) -> None:
     data = _fetch(test_client)
     for entry in data["dependencies"]:
-        assert isinstance(entry["latency_ms"], (int, float))
+        assert isinstance(entry["latency_ms"], int | float)
         assert entry["latency_ms"] >= 0.0
 
 

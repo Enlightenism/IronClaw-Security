@@ -1,13 +1,4 @@
-import {
-  lazy,
-  memo,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -21,8 +12,6 @@ import api from "@/lib/api";
 const ATTACKS_PAGE_SIZE = 25;
 const DASHBOARD_LOGO_SRC = "/images/logo128pxl.svg";
 const DASHBOARD_KNIGHT_SRC = "/images/Golden%20Knight%204k%202gb.png";
-const PARTICLE_FIELD_DENSITY = 180;
-const ParticleField = lazy(() => import("@/components/ParticleField"));
 const INSTALL_KEY_PROGRAMS = [
   {
     program: "openclaw",
@@ -287,21 +276,6 @@ const Dashboard = () => {
   const [pointerGlow, setPointerGlow] = useState({ x: 50, y: 25 });
   const [scrollShift, setScrollShift] = useState(0);
   const [_paymentState, setPaymentState] = useState("idle");
-  const [showParticleField, setShowParticleField] = useState(false);
-
-  useEffect(() => {
-    const enableParticleField = () => setShowParticleField(true);
-
-    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      const idleId = window.requestIdleCallback(enableParticleField, {
-        timeout: 1200,
-      });
-      return () => window.cancelIdleCallback?.(idleId);
-    }
-
-    const timeoutId = setTimeout(enableParticleField, 300);
-    return () => clearTimeout(timeoutId);
-  }, []);
   const polledRef = useRef(false);
   const paymentPollTimeoutRef = useRef(null);
 
@@ -866,14 +840,6 @@ const Dashboard = () => {
         />
       </div>
 
-      <div className="pointer-events-none fixed inset-0 z-0 bg-transparent">
-        <Suspense fallback={null}>
-          {showParticleField ? (
-            <ParticleField density={PARTICLE_FIELD_DENSITY} />
-          ) : null}
-        </Suspense>
-      </div>
-
       <nav className="sticky top-0 z-40 border-b border-white/10 bg-[#050607]/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <button
@@ -916,7 +882,7 @@ const Dashboard = () => {
         </div>
       </nav>
 
-      <main className="relative z-10 mx-auto max-w-7xl px-6 py-8">
+      <main className="mx-auto max-w-7xl px-6 py-8">
         <div className="mb-8">
           <img
             src={DASHBOARD_KNIGHT_SRC}

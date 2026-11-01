@@ -138,7 +138,7 @@ def test_single_scan_verdict_is_string():
 def test_single_scan_risk_score_is_numeric():
     resp = client.post("/scan/", json=SAFE_PAYLOAD)
     score = resp.json()["risk_score"]
-    assert isinstance(score, (int, float))
+    assert isinstance(score, int | float)
 
 
 def test_single_scan_target_type_echoed():
@@ -827,7 +827,7 @@ def test_sdk_benign_response_matches_scan_response_schema(sdk_client):
     result = sdk_client.scan(req)
     assert isinstance(result, ScanResponse)
     assert isinstance(result.verdict, str)
-    assert isinstance(result.risk_score, (int, float))
+    assert isinstance(result.risk_score, int | float)
     assert isinstance(result.matched_patterns, list)
     assert isinstance(result.summary, str)
     assert result.target_type == "prompt"

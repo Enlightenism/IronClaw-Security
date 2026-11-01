@@ -29,7 +29,7 @@ def _clean_string_list(value: object) -> tuple[str, ...]:
         cleaned = _clean_optional_string(value)
         return (cleaned,) if cleaned is not None else ()
 
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, list | tuple | set):
         normalized: list[str] = []
         seen: set[str] = set()
 

@@ -367,7 +367,7 @@ class IronClawRuntime:
     def _coerce_str_list(value: Any) -> list[str]:
         if value is None:
             return []
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, list | tuple):
             return [str(v) for v in value]
         return [str(value)]
 

@@ -323,7 +323,7 @@ class TestDDLRegistrySyncGuard:
 class TestGetPersistenceStore:
     def test_returns_valid_store_type_memory_mode(self):
         result = get_persistence_store(mode=MEMORY_MODE)
-        assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
+        assert isinstance(result, SupabasePersistenceStore | InMemoryPersistenceStore)
 
     def test_returns_in_memory_store_when_mode_memory(self):
         result = get_persistence_store(mode=MEMORY_MODE)
@@ -481,7 +481,7 @@ class TestInMemoryPersistenceStoreTables:
 class TestRateLimitStoreFactories:
     def test_get_rate_limit_store_returns_store_type(self):
         result = get_rate_limit_store(mode=MEMORY_MODE)
-        assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
+        assert isinstance(result, SupabasePersistenceStore | InMemoryPersistenceStore)
 
     def test_get_rate_limit_store_memory_returns_in_memory(self):
         result = get_rate_limit_store(mode=MEMORY_MODE)
@@ -498,7 +498,7 @@ class TestRateLimitStoreFactories:
 
     def test_build_rate_limit_store_returns_store_type(self):
         result = build_rate_limit_store(mode=MEMORY_MODE)
-        assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
+        assert isinstance(result, SupabasePersistenceStore | InMemoryPersistenceStore)
 
     def test_build_rate_limit_store_memory_returns_in_memory(self):
         result = build_rate_limit_store(mode=MEMORY_MODE)
@@ -510,7 +510,7 @@ class TestRateLimitStoreFactories:
 
     def test_create_rate_limit_store_returns_store_type(self):
         result = create_rate_limit_store(mode=MEMORY_MODE)
-        assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
+        assert isinstance(result, SupabasePersistenceStore | InMemoryPersistenceStore)
 
     def test_create_rate_limit_store_memory_returns_in_memory(self):
         result = create_rate_limit_store(mode=MEMORY_MODE)
@@ -554,31 +554,31 @@ class TestRateLimitStoreFactories:
 class TestFactoryAliases:
     def test_get_store_returns_store_type(self):
         result = get_store(mode=MEMORY_MODE)
-        assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
+        assert isinstance(result, SupabasePersistenceStore | InMemoryPersistenceStore)
 
     def test_create_store_returns_store_type(self):
         result = create_store(mode=MEMORY_MODE)
-        assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
+        assert isinstance(result, SupabasePersistenceStore | InMemoryPersistenceStore)
 
     def test_get_organization_store_returns_store_type(self):
         result = get_organization_store(mode=MEMORY_MODE)
-        assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
+        assert isinstance(result, SupabasePersistenceStore | InMemoryPersistenceStore)
 
     def test_get_telemetry_store_returns_store_type(self):
         result = get_telemetry_store(mode=MEMORY_MODE)
-        assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
+        assert isinstance(result, SupabasePersistenceStore | InMemoryPersistenceStore)
 
     def test_get_runtime_state_store_returns_store_type(self):
         result = get_runtime_state_store(mode=MEMORY_MODE)
-        assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
+        assert isinstance(result, SupabasePersistenceStore | InMemoryPersistenceStore)
 
     def test_get_review_state_store_returns_store_type(self):
         result = get_review_state_store(mode=MEMORY_MODE)
-        assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
+        assert isinstance(result, SupabasePersistenceStore | InMemoryPersistenceStore)
 
     def test_get_checkpoint_store_returns_store_type(self):
         result = get_checkpoint_store(mode=MEMORY_MODE)
-        assert isinstance(result, (SupabasePersistenceStore, InMemoryPersistenceStore))
+        assert isinstance(result, SupabasePersistenceStore | InMemoryPersistenceStore)
 
     def test_get_store_ready_true(self):
         assert get_store(mode=MEMORY_MODE).ready is True

@@ -104,7 +104,7 @@ def coerce_str_list(value: Any) -> list[str]:
         return []
 
     # Preserve order for list/tuple
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         out: list[str] = []
         for item in value:
             s = _string_or_none(item)

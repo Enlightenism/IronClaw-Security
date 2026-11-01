@@ -155,7 +155,7 @@ class APIKey(BaseModel):
     @field_validator("scopes", mode="before")
     @classmethod
     def _coerce_scopes(cls, v: Any) -> list[Any]:
-        if isinstance(v, (list, tuple, set)):
+        if isinstance(v, list | tuple | set):
             result: list[Any] = []
             for item in v:
                 try:

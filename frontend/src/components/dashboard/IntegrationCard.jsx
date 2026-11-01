@@ -19,6 +19,31 @@ const RUNTIME_PROGRAM_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const INSTALLER_SOURCE_COMMAND =
   "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git";
 const PLACEHOLDER_TEXT = "Generate a one-time bootstrap command after purchase";
+const CRACK_PATHS = [
+  "M74 34 L62 22 L48 14",
+  "M62 22 L56 10",
+  "M48 14 L40 6",
+  "M74 34 L88 27 L97 19",
+  "M88 27 L92 14",
+  "M74 34 L82 50 L94 60",
+  "M82 50 L70 58",
+  "M74 34 L56 42 L40 40 L26 47 L14 42",
+  "M56 42 L52 30",
+  "M40 40 L34 26",
+  "M26 47 L24 62",
+  "M74 34 L60 56 L52 74 L56 92",
+  "M52 74 L38 80",
+  "M60 56 L72 62",
+  "M96 96 L88 80 L84 70",
+  "M88 80 L78 84",
+  "M84 70 L92 62",
+];
+const CRACK_LINE_PROPS = {
+  fill: "none",
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  vectorEffect: "non-scaling-stroke",
+};
 
 const validateInstallClaim = (claim, program, integrationId) => {
   if (
@@ -238,7 +263,7 @@ const IntegrationCard = ({
   return (
     <div
       ref={cardRef}
-      className={`${surface} touch-manipulation rounded-lg p-3 transition-transform duration-200 ease-out will-change-transform ${
+      className={`${surface} relative isolate touch-manipulation rounded-lg p-3 transition-transform duration-200 ease-out will-change-transform ${
         pressed ? "scale-[0.97]" : "scale-100"
       }`}
       style={{
@@ -254,6 +279,35 @@ const IntegrationCard = ({
       onTouchCancel={handleTouchEnd}
       data-testid={testid}
     >
+      {/* Sits under the content: `isolate` scopes -z-10 above the card background. */}
+      <svg
+        aria-hidden="true"
+        data-testid={`${testid}-cracks`}
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+        className="pointer-events-none absolute inset-0 -z-10 h-full w-full"
+      >
+        <g transform="translate(0.5 0.5)">
+          {CRACK_PATHS.map((d) => (
+            <path
+              key={`shadow-${d}`}
+              d={d}
+              {...CRACK_LINE_PROPS}
+              stroke="rgba(0,0,0,0.5)"
+              strokeWidth="1"
+            />
+          ))}
+        </g>
+        {CRACK_PATHS.map((d) => (
+          <path
+            key={`light-${d}`}
+            d={d}
+            {...CRACK_LINE_PROPS}
+            stroke="rgba(255,255,255,0.45)"
+            strokeWidth="0.6"
+          />
+        ))}
+      </svg>
       <div className="mb-2 flex items-center gap-1.5">
         <Terminal size={12} style={{ color: accent }} />
         <h3

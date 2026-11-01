@@ -290,7 +290,7 @@ class TestBuildActionUsageDetail:
             if key == "metadata":
                 assert isinstance(value, dict)
             else:
-                assert value is None or isinstance(value, (str, int, float, bool, list, dict))
+                assert value is None or isinstance(value, str | int | float | bool | list | dict)
 
     def test_as_dict_key_set_is_stable(self) -> None:
         d1 = build_action_usage_detail(units=1, unit_cost=1).as_dict()

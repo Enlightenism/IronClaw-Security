@@ -199,7 +199,7 @@ def _record_is_paid_entitled(rec: Any) -> bool:
             return False
         if isinstance(value, str):
             return bool(value.strip())
-        if isinstance(value, (bool, int, float)):
+        if isinstance(value, bool | int | float):
             return True
         return False
 

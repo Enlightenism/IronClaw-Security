@@ -568,7 +568,7 @@ class _StripeHTTPClient:
             if isinstance(obj, dict):
                 for k, v in obj.items():
                     _flatten(v, f"{prefix}[{k}]" if prefix else k)
-            elif isinstance(obj, (list, tuple)):
+            elif isinstance(obj, list | tuple):
                 for i, v in enumerate(obj):
                     _flatten(v, f"{prefix}[{i}]")
             else:

@@ -209,7 +209,7 @@ def main() -> None:
 
     final_action = decision.get("final_action")
     raw_confidence = decision.get("confidence")
-    confidence_str = f"{raw_confidence:.2f}" if isinstance(raw_confidence, (int, float)) else str(raw_confidence)
+    confidence_str = f"{raw_confidence:.2f}" if isinstance(raw_confidence, int | float) else str(raw_confidence)
     reason = (decision.get("reason") or "").strip()
     risk_score = scan.get("risk_score")
     sandbox_lane = scan.get("sandbox_lane")

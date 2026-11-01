@@ -192,7 +192,7 @@ def _coerce_string(value: Any, *, default: str = "") -> str:
         return default
     if isinstance(value, str):
         return value
-    if isinstance(value, (int, float, bool)):
+    if isinstance(value, int | float | bool):
         return str(value)
     if isinstance(value, datetime):
         return value.isoformat().replace("+00:00", "Z")

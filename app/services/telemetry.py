@@ -48,7 +48,7 @@ def _coerce_json_safe(value: Any, _depth: int = 0) -> Any:
     if _depth > _COERCE_MAX_DEPTH:
         return str(value)
 
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if value is None or isinstance(value, str | int | float | bool):
         return value
 
     if isinstance(value, datetime):
@@ -60,7 +60,7 @@ def _coerce_json_safe(value: Any, _depth: int = 0) -> Any:
     if isinstance(value, dict):
         return {str(k): _coerce_json_safe(v, _depth + 1) for k, v in value.items()}
 
-    if isinstance(value, (list, tuple, set, frozenset)):
+    if isinstance(value, list | tuple | set | frozenset):
         return [_coerce_json_safe(item, _depth + 1) for item in value]
 
     if _is_pydantic_model(value):

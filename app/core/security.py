@@ -59,7 +59,7 @@ class SecurityHeadersMiddleware:
 
         method = str(scope.get("method", "")).upper()
         scheme = str(scope.get("scheme", "")).lower()
-        header_names = {key.decode("latin-1").lower() for key, _ in scope.get("headers", []) if isinstance(key, (bytes, bytearray))}
+        header_names = {key.decode("latin-1").lower() for key, _ in scope.get("headers", []) if isinstance(key, bytes | bytearray)}
         is_preflight = method == "OPTIONS" and "origin" in header_names and "access-control-request-method" in header_names
 
         async def send_with_security_headers(message: Message) -> None:
