@@ -12,6 +12,16 @@ const FEEDS = {
     rss: "https://feeds.feedburner.com/TheHackersNews",
     color: "#8a8f98",
   },
+  cisa: {
+    label: "CISA OFFICIAL ALERTS",
+    rss: "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+    color: "#d4af37",
+  },
+  bleepingComputer: {
+    label: "BREAKING SECURITY NEWS",
+    rss: "https://www.bleepingcomputer.com/feed/",
+    color: "#c0c4c9",
+  },
 };
 
 function Ticker({ feed }) {
@@ -99,6 +109,8 @@ export default function CyberNewsTickers() {
     <div className="cyber-news-tickers">
       <Ticker feed={FEEDS.attacks} />
       <Ticker feed={FEEDS.hackerNews} />
+      <Ticker feed={FEEDS.cisa} />
+      <Ticker feed={FEEDS.bleepingComputer} />
     </div>
   );
 }
