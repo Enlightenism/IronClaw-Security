@@ -55,6 +55,7 @@ OPTIONAL_API_MODULES: Final[tuple[str, ...]] = _dedupe_api_modules(
         "app.api.routes.scan",
         "app.api.routes.usage",
         "app.api.threat_feed",
+        "app.api.cyber_news",
         "app.api.billing",
     )
 )

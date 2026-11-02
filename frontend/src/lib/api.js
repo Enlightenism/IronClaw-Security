@@ -328,6 +328,10 @@ export const audit = {
   getLogs: (params) => api.get("/audit/logs", { params }),
 };
 
+export const cyberNews = {
+  get: () => api.get("/cyber-news", { timeout: 20000 }),
+};
+
 export const tools = {
   inspect: (payload) => api.post("/tools/inspect", payload),
 };

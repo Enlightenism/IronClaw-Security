@@ -98,6 +98,12 @@ jest.mock("@/lib/supabase", () => ({
   supabase: { rpc: jest.fn() },
 }));
 
+jest.mock("@/lib/api", () => ({
+  cyberNews: {
+    get: jest.fn(() => new Promise(() => {})),
+  },
+}));
+
 jest.mock("@/lib/landingCounters", () => ({
   ...jest.requireActual("@/lib/landingCounters"),
   useLandingCounter: jest.fn(),

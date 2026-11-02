@@ -1,99 +1,64 @@
 import { useEffect, useState } from "react";
+import { cyberNews } from "@/lib/api";
 import "./CyberNewsTickers.css";
 
-const FEEDS = {
-  attacks: {
+const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+
+const TICKERS = [
+  {
+    key: "attacks",
     label: "GLOBAL CYBER ATTACKS",
-    rss: "https://www.cshub.com/rss-feeds/attacks",
     color: "#c9a227",
   },
-  hackerNews: {
+  {
+    key: "hacker_news",
     label: "THE HACKER NEWS",
-    rss: "https://feeds.feedburner.com/TheHackersNews",
     color: "#8a8f98",
   },
-  cisa: {
+  {
+    key: "cisa",
     label: "CISA OFFICIAL ALERTS",
-    rss: "https://www.cisa.gov/cybersecurity-advisories/all.xml",
     color: "#d4af37",
   },
-  bleepingComputer: {
+  {
+    key: "bleeping_computer",
     label: "BREAKING SECURITY NEWS",
-    rss: "https://www.bleepingcomputer.com/feed/",
     color: "#c0c4c9",
   },
-};
+];
 
-function Ticker({ feed }) {
-  const [items, setItems] = useState([]);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    let isActive = true;
-
-    async function loadNews() {
-      try {
-        const apiUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(
-          feed.rss,
-        )}&count=15`;
-
-        const response = await fetch(apiUrl);
-        const data = await response.json();
-
-        if (!isActive) {
-          return;
-        }
-
-        if (data.status === "ok" && Array.isArray(data.items)) {
-          setItems(data.items);
-          setError(false);
-        } else {
-          setItems([]);
-          setError(true);
-        }
-      } catch {
-        if (isActive) {
-          setItems([]);
-          setError(true);
-        }
-      }
-    }
-
-    loadNews();
-
-    const refreshInterval = setInterval(loadNews, 15 * 60 * 1000);
-
-    return () => {
-      isActive = false;
-      clearInterval(refreshInterval);
-    };
-  }, [feed.rss]);
-
+function Ticker({ label, color, items, status }) {
   return (
     <div className="cyber-ticker">
-      <span
-        className="cyber-ticker-label"
-        style={{ backgroundColor: feed.color }}
-      >
-        {feed.label}
+      <span className="cyber-ticker-label" style={{ backgroundColor: color }}>
+        {label}
       </span>
 
       <div className="cyber-ticker-track">
-        {error && (
+        {status === "error" && (
           <span className="cyber-ticker-item">
             News feed temporarily unavailable.
           </span>
         )}
 
-        {!error && items.length === 0 && (
+        {status === "loading" && (
           <span className="cyber-ticker-item">
             Loading cybersecurity updates…
           </span>
         )}
 
-        {!error &&
+        {status === "ready" && items.length === 0 && (
+          <span className="cyber-ticker-item">
+            No current updates available.
+          </span>
+        )}
+
+        {status === "ready" &&
           items.map((item) => (
-            <span className="cyber-ticker-item" key={item.link || item.title}>
+            <span
+              className="cyber-ticker-item"
+              key={`${item.link}-${item.title}`}
+            >
               <a href={item.link} target="_blank" rel="noopener noreferrer">
                 {item.title}
               </a>
@@ -105,12 +70,52 @@ function Ticker({ feed }) {
 }
 
 export default function CyberNewsTickers() {
+  const [news, setNews] = useState({ status: "loading", feeds: {} });
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadNews() {
+      try {
+        const { data } = await cyberNews.get();
+
+        if (!isActive) {
+          return;
+        }
+
+        if (data?.feeds && typeof data.feeds === "object") {
+          setNews({ status: "ready", feeds: data.feeds });
+        } else {
+          setNews({ status: "error", feeds: {} });
+        }
+      } catch {
+        if (isActive) {
+          setNews({ status: "error", feeds: {} });
+        }
+      }
+    }
+
+    loadNews();
+
+    const refreshInterval = setInterval(loadNews, REFRESH_INTERVAL_MS);
+
+    return () => {
+      isActive = false;
+      clearInterval(refreshInterval);
+    };
+  }, []);
+
   return (
     <div className="cyber-news-tickers">
-      <Ticker feed={FEEDS.attacks} />
-      <Ticker feed={FEEDS.hackerNews} />
-      <Ticker feed={FEEDS.cisa} />
-      <Ticker feed={FEEDS.bleepingComputer} />
+      {TICKERS.map((ticker) => (
+        <Ticker
+          key={ticker.key}
+          label={ticker.label}
+          color={ticker.color}
+          items={news.feeds[ticker.key] ?? []}
+          status={news.status}
+        />
+      ))}
     </div>
   );
 }
