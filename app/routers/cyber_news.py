@@ -1,13 +1,16 @@
 import asyncio
-from datetime import UTC, datetime
+import logging
 import re
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
 import feedparser
 import httpx
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/api", tags=["cyber-news"])
+
+logger = logging.getLogger(__name__)
 
 FEEDS = {
     "attacks": {
@@ -47,7 +50,13 @@ def clean_text(value):
 
 
 def parse_published(entry):
-    published = entry.get("published") or entry.get("updated") or entry.get("dc:date") or entry.get("published_parsed") or entry.get("updated_parsed")
+    published = (
+        entry.get("published")
+        or entry.get("updated")
+        or entry.get("dc:date")
+        or entry.get("published_parsed")
+        or entry.get("updated_parsed")
+    )
 
     if not published:
         return None
@@ -56,12 +65,12 @@ def parse_published(entry):
         if isinstance(published, str):
             parsed = feedparser._parse_date(published)
             if parsed:
-                return datetime.fromtimestamp(parsed, tz=UTC).isoformat()
+                return datetime.fromtimestamp(parsed, tz=timezone.utc).isoformat()
             return None
 
         return datetime.fromtimestamp(
             published.timestamp() if hasattr(published, "timestamp") else published,
-            tz=UTC,
+            tz=timezone.utc,
         ).isoformat()
     except Exception:
         return None
@@ -69,8 +78,15 @@ def parse_published(entry):
 
 def parse_feed(feed_key, feed_config, xml_text):
     parsed = feedparser.parse(xml_text)
-    entries = parsed.entries[:MAX_ITEMS_PER_FEED]
 
+    if parsed.bozo and not parsed.entries:
+        logger.warning(
+            "cyber_news: feed parse failed for %s: %s",
+            feed_key,
+            getattr(parsed, "bozo_exception", "unknown parse error"),
+        )
+
+    entries = parsed.entries[:MAX_ITEMS_PER_FEED]
     items = []
 
     for entry in entries:
@@ -101,25 +117,58 @@ async def fetch_feed(client, feed_key, feed_config):
     try:
         response = await client.get(
             feed_config["url"],
-            headers={"User-Agent": ("Mozilla/5.0 (compatible; IronClawSecurityNewsTicker/1.0)")},
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0 Safari/537.36"
+                ),
+                "Accept": (
+                    "application/rss+xml, application/xml, text/xml, */*"
+                ),
+            },
         )
-        response.raise_for_status()
+
+        if response.status_code != 200:
+            logger.warning(
+                "cyber_news: feed request failed for %s: status=%s body=%s",
+                feed_key,
+                response.status_code,
+                response.text[:300],
+            )
+            return feed_key, []
+
+        content_type = response.headers.get("content-type", "")
+        logger.info(
+            "cyber_news: feed fetched for %s: status=%s content_type=%s bytes=%s",
+            feed_key,
+            response.status_code,
+            content_type,
+            len(response.content),
+        )
+
         return parse_feed(feed_key, feed_config, response.text)
-    except Exception:
+    except Exception as exc:
+        logger.exception("cyber_news: feed fetch failed for %s: %s", feed_key, exc)
         return feed_key, []
 
 
 async def get_cyber_news():
-    now = datetime.now(UTC).timestamp()
+    now = datetime.now(timezone.utc).timestamp()
 
     if _cache["data"] and _cache["expires_at"] > now:
         return _cache["data"]
 
     async with httpx.AsyncClient(
-        timeout=10.0,
+        timeout=15.0,
         follow_redirects=True,
     ) as client:
-        results = await asyncio.gather(*(fetch_feed(client, feed_key, feed_config) for feed_key, feed_config in FEEDS.items()))
+        results = await asyncio.gather(
+            *(
+                fetch_feed(client, feed_key, feed_config)
+                for feed_key, feed_config in FEEDS.items()
+            )
+        )
 
     feeds = {
         "attacks": [],
@@ -138,7 +187,7 @@ async def get_cyber_news():
         )
 
     response_data = {
-        "updated_at": datetime.now(UTC).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
         "feeds": feeds,
     }
 
