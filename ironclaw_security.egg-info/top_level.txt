@@ -1,5 +1,6 @@
 app
 cli_brain
+ironclaw_installer
 ironclaw_sdk
 ironclawclient
 ironclawshellguard
