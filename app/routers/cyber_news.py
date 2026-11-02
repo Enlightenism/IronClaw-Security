@@ -1,12 +1,12 @@
 import asyncio
+from datetime import UTC, datetime
 import logging
 import re
-from datetime import datetime, timezone
 
-import feedparser
-import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
+import feedparser
+import httpx
 
 router = APIRouter(prefix="/api", tags=["cyber-news"])
 
@@ -50,13 +50,7 @@ def clean_text(value):
 
 
 def parse_published(entry):
-    published = (
-        entry.get("published")
-        or entry.get("updated")
-        or entry.get("dc:date")
-        or entry.get("published_parsed")
-        or entry.get("updated_parsed")
-    )
+    published = entry.get("published") or entry.get("updated") or entry.get("dc:date") or entry.get("published_parsed") or entry.get("updated_parsed")
 
     if not published:
         return None
@@ -65,12 +59,12 @@ def parse_published(entry):
         if isinstance(published, str):
             parsed = feedparser._parse_date(published)
             if parsed:
-                return datetime.fromtimestamp(parsed, tz=timezone.utc).isoformat()
+                return datetime.fromtimestamp(parsed, tz=UTC).isoformat()
             return None
 
         return datetime.fromtimestamp(
             published.timestamp() if hasattr(published, "timestamp") else published,
-            tz=timezone.utc,
+            tz=UTC,
         ).isoformat()
     except Exception:
         return None
@@ -118,14 +112,8 @@ async def fetch_feed(client, feed_key, feed_config):
         response = await client.get(
             feed_config["url"],
             headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0 Safari/537.36"
-                ),
-                "Accept": (
-                    "application/rss+xml, application/xml, text/xml, */*"
-                ),
+                "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
+                "Accept": ("application/rss+xml, application/xml, text/xml, */*"),
             },
         )
 
@@ -154,7 +142,7 @@ async def fetch_feed(client, feed_key, feed_config):
 
 
 async def get_cyber_news():
-    now = datetime.now(timezone.utc).timestamp()
+    now = datetime.now(UTC).timestamp()
 
     if _cache["data"] and _cache["expires_at"] > now:
         return _cache["data"]
@@ -163,12 +151,7 @@ async def get_cyber_news():
         timeout=15.0,
         follow_redirects=True,
     ) as client:
-        results = await asyncio.gather(
-            *(
-                fetch_feed(client, feed_key, feed_config)
-                for feed_key, feed_config in FEEDS.items()
-            )
-        )
+        results = await asyncio.gather(*(fetch_feed(client, feed_key, feed_config) for feed_key, feed_config in FEEDS.items()))
 
     feeds = {
         "attacks": [],
@@ -187,7 +170,7 @@ async def get_cyber_news():
         )
 
     response_data = {
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
         "feeds": feeds,
     }
 
