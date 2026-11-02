@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import IntegrationCard from "./IntegrationCard.jsx";
@@ -43,6 +43,10 @@ const getDisplayedCommand = () =>
 describe("IntegrationCard", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    delete window.IntersectionObserver;
   });
 
   it("does not request or expose a claim until the user generates one", async () => {
@@ -219,5 +223,63 @@ describe("IntegrationCard", () => {
       expect(mockToastError).toHaveBeenCalled();
     });
     expect(screen.getByTestId("claude-code-card-copy")).toBeDisabled();
+  });
+
+  it("gives each card a different, repeatable crack pattern", () => {
+    const { unmount } = render(
+      <>
+        <IntegrationCard
+          title="Claude Code"
+          program="claude_code"
+          integrationId="claude-code"
+          available
+          onCreateClaim={jest.fn()}
+          testid="card-a"
+        />
+        <IntegrationCard
+          title="Codex"
+          program="codex"
+          integrationId="codex"
+          available
+          onCreateClaim={jest.fn()}
+          testid="card-b"
+        />
+      </>,
+    );
+    const fracturePaths = (testid) =>
+      Array.from(
+        screen.getByTestId(`${testid}-cracks`).querySelectorAll("path"),
+      ).map((path) => path.getAttribute("d"));
+
+    const first = fracturePaths("card-a");
+    expect(first.length).toBeGreaterThan(0);
+    expect(first).not.toEqual(fracturePaths("card-b"));
+    unmount();
+
+    renderCard();
+    expect(fracturePaths("claude-code-card")).toEqual(first);
+  });
+
+  it("keeps cracks hidden until the card scrolls into view", () => {
+    let onIntersect;
+    window.IntersectionObserver = jest.fn((callback) => {
+      onIntersect = callback;
+      return {
+        observe: jest.fn(),
+        disconnect: jest.fn(),
+        unobserve: jest.fn(),
+      };
+    });
+
+    renderCard();
+    const firstPath = screen
+      .getByTestId("claude-code-card-cracks")
+      .querySelector("path");
+    expect(firstPath.style.strokeDashoffset).toBe("1");
+
+    act(() => {
+      onIntersect([{ isIntersecting: true }]);
+    });
+    expect(firstPath.style.strokeDashoffset).toBe("0");
   });
 });

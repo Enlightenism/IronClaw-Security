@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Check, Terminal } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,31 +19,156 @@ const RUNTIME_PROGRAM_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const INSTALLER_SOURCE_COMMAND =
   "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git";
 const PLACEHOLDER_TEXT = "Generate a one-time bootstrap command after purchase";
-const CRACK_PATHS = [
-  "M74 34 L62 22 L48 14",
-  "M62 22 L56 10",
-  "M48 14 L40 6",
-  "M74 34 L88 27 L97 19",
-  "M88 27 L92 14",
-  "M74 34 L82 50 L94 60",
-  "M82 50 L70 58",
-  "M74 34 L56 42 L40 40 L26 47 L14 42",
-  "M56 42 L52 30",
-  "M40 40 L34 26",
-  "M26 47 L24 62",
-  "M74 34 L60 56 L52 74 L56 92",
-  "M52 74 L38 80",
-  "M60 56 L72 62",
-  "M96 96 L88 80 L84 70",
-  "M88 80 L78 84",
-  "M84 70 L92 62",
-];
-const CRACK_LINE_PROPS = {
-  fill: "none",
-  strokeLinecap: "round",
-  strokeLinejoin: "round",
-  vectorEffect: "non-scaling-stroke",
+const hashSeed = (text) => {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
 };
+
+const createRandom = (seed) => {
+  let state = seed;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let value = Math.imul(state ^ (state >>> 15), state | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+const buildCrackNetwork = (seed, width, height) => {
+  const random = createRandom(seed);
+  const between = (min, max) => min + (max - min) * random();
+  const scale = Math.max(width, height);
+  const diagonal = Math.hypot(width, height);
+  const impact = [width * between(0.28, 0.72), height * between(0.3, 0.7)];
+  const fractures = [];
+
+  const addFracture = (points, kind, strokeWidth) => {
+    const middle = points[Math.floor(points.length / 2)];
+    const distance = Math.min(
+      1,
+      Math.hypot(middle[0] - impact[0], middle[1] - impact[1]) /
+        (diagonal * 0.6),
+    );
+    fractures.push({
+      id: fractures.length,
+      d: points
+        .map(
+          ([x, y], index) =>
+            `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`,
+        )
+        .join(" "),
+      kind,
+      strokeWidth,
+      delay: 0.1 + distance * 1.3 + random() * 0.15,
+      duration: 0.9 + random() * 0.6,
+    });
+  };
+
+  const grow = (start, heading, length, steps) => {
+    const points = [start];
+    let cursor = start;
+    let direction = heading;
+    for (let step = 0; step < steps; step += 1) {
+      direction += between(-0.25, 0.25);
+      cursor = [
+        cursor[0] + (Math.cos(direction) * length) / steps,
+        cursor[1] + (Math.sin(direction) * length) / steps,
+      ];
+      points.push(cursor);
+    }
+    return points;
+  };
+
+  const spokeCount = 6 + Math.floor(random() * 5);
+  const baseAngle = random() * Math.PI * 2;
+  for (let spoke = 0; spoke < spokeCount; spoke += 1) {
+    const heading =
+      baseAngle + (spoke / spokeCount) * Math.PI * 2 + between(-0.22, 0.22);
+    const spokeLength = diagonal * between(0.55, 0.95);
+    const points = grow(
+      impact,
+      heading,
+      spokeLength,
+      4 + Math.floor(random() * 3),
+    );
+    addFracture(points, "spoke", 1.1);
+    for (const point of points.slice(2)) {
+      if (random() < 0.5) {
+        const side = random() < 0.5 ? -1 : 1;
+        addFracture(
+          grow(
+            point,
+            heading + side * between(0.5, 0.9),
+            spokeLength * between(0.12, 0.22),
+            2 + Math.floor(random() * 2),
+          ),
+          "branch",
+          0.7,
+        );
+      }
+    }
+  }
+
+  for (let ring = 0; ring < 2; ring += 1) {
+    const radius = scale * (0.1 + ring * 0.11 + between(0, 0.04));
+    const start = random() * Math.PI * 2;
+    const span = between(1.4, 2.6);
+    const segments = 6 + Math.floor(random() * 4);
+    const points = [];
+    for (let segment = 0; segment <= segments; segment += 1) {
+      const angle = start + (span * segment) / segments;
+      const offset = radius * between(0.92, 1.08);
+      points.push([
+        impact[0] + Math.cos(angle) * offset,
+        impact[1] + Math.sin(angle) * offset,
+      ]);
+    }
+    addFracture(points, "ring", 0.6);
+  }
+
+  const edgeCount = 2 + Math.floor(random() * 2);
+  for (let edge = 0; edge < edgeCount; edge += 1) {
+    const along = between(0, 1);
+    const origins = [
+      [0, along * height],
+      [width, along * height],
+      [along * width, 0],
+      [along * width, height],
+    ];
+    const origin = origins[Math.floor(random() * origins.length)];
+    const steps = 4 + Math.floor(random() * 3);
+    const points = [origin];
+    for (let step = 1; step < steps; step += 1) {
+      const progress = step / steps;
+      points.push([
+        origin[0] +
+          (impact[0] - origin[0]) * progress +
+          between(-scale * 0.03, scale * 0.03),
+        origin[1] +
+          (impact[1] - origin[1]) * progress +
+          between(-scale * 0.03, scale * 0.03),
+      ]);
+    }
+    addFracture(points, "edge", 0.9);
+  }
+
+  return { impact, fractures };
+};
+
+const crackStyle = (fracture, revealed) => ({
+  strokeDasharray: 1,
+  strokeDashoffset: revealed ? 0 : 1,
+  transition: `stroke-dashoffset ${fracture.duration.toFixed(2)}s cubic-bezier(0.22, 0.61, 0.36, 1) ${fracture.delay.toFixed(2)}s`,
+});
+
+const impactStyle = (revealed) => ({
+  opacity: revealed ? 1 : 0,
+  transition: "opacity 0.6s ease-out 0.05s",
+});
 
 const validateInstallClaim = (claim, program, integrationId) => {
   if (
@@ -102,11 +227,64 @@ const IntegrationCard = ({
   const cardRef = useRef(null);
   const reducedMotionRef = useRef(false);
   const finePointerRef = useRef(false);
+  const crackRef = useRef(null);
+  const [revealed, setRevealed] = useState(false);
+  const [size, setSize] = useState({ width: 320, height: 140 });
+  const seed = hashSeed(`${String(program)}:${String(integrationId)}`);
+  const crackNetwork = useMemo(
+    () => buildCrackNetwork(seed, size.width, size.height),
+    [seed, size.width, size.height],
+  );
 
   useEffect(() => {
     reducedMotionRef.current = prefersReducedMotion();
     finePointerRef.current = supportsFinePointer();
   }, []);
+
+  useEffect(() => {
+    const node = cardRef.current;
+    if (!node || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver(() => {
+      const width = node.offsetWidth;
+      const height = node.offsetHeight;
+      if (width > 0 && height > 0) {
+        setSize((previous) =>
+          previous.width === width && previous.height === height
+            ? previous
+            : { width, height },
+        );
+      }
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const node = cardRef.current;
+    if (revealed || !node) {
+      return undefined;
+    }
+
+    if (prefersReducedMotion() || typeof IntersectionObserver === "undefined") {
+      setRevealed(true);
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setRevealed(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.35 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [revealed]);
 
   useEffect(() => {
     if (available) {
@@ -174,7 +352,10 @@ const IntegrationCard = ({
 
     node.style.setProperty("--mx", `${x}%`);
     node.style.setProperty("--my", `${y}%`);
-    node.style.transform = `perspective(800px) rotateX(${tiltX}deg) rotateY(${tiltY}deg) translateZ(0)`;
+    node.style.transform = `perspective(800px) rotateX(${tiltX}deg) rotateY(${tiltY}deg) translateZ(10px)`;
+    if (crackRef.current) {
+      crackRef.current.style.transform = `translate3d(${(-tiltY * 0.9).toFixed(2)}px, ${(tiltX * 0.9).toFixed(2)}px, 0)`;
+    }
   };
 
   const handlePointerLeave = () => {
@@ -185,6 +366,9 @@ const IntegrationCard = ({
 
     node.style.transform =
       "perspective(800px) rotateX(0deg) rotateY(0deg) translateZ(0)";
+    if (crackRef.current) {
+      crackRef.current.style.transform = "translate3d(0px, 0px, 0)";
+    }
     node.style.setProperty("--mx", "50%");
     node.style.setProperty("--my", "50%");
   };
@@ -281,32 +465,56 @@ const IntegrationCard = ({
     >
       {/* Sits under the content: `isolate` scopes -z-10 above the card background. */}
       <svg
+        ref={crackRef}
         aria-hidden="true"
         data-testid={`${testid}-cracks`}
-        viewBox="0 0 100 100"
-        preserveAspectRatio="none"
-        className="pointer-events-none absolute inset-0 -z-10 h-full w-full"
+        viewBox={`0 0 ${size.width} ${size.height}`}
+        className="pointer-events-none absolute inset-0 -z-10 h-full w-full transition-transform duration-200 ease-out"
       >
-        <g transform="translate(0.5 0.5)">
-          {CRACK_PATHS.map((d) => (
+        <g transform="translate(1 1)">
+          {crackNetwork.fractures.map((fracture) => (
             <path
-              key={`shadow-${d}`}
-              d={d}
-              {...CRACK_LINE_PROPS}
+              key={`shadow-${fracture.id}`}
+              d={fracture.d}
+              pathLength={1}
+              fill="none"
+              strokeLinecap="round"
+              strokeLinejoin="round"
               stroke="rgba(0,0,0,0.5)"
-              strokeWidth="1"
+              strokeWidth={fracture.strokeWidth}
+              style={crackStyle(fracture, revealed)}
             />
           ))}
         </g>
-        {CRACK_PATHS.map((d) => (
+        {crackNetwork.fractures.map((fracture) => (
           <path
-            key={`light-${d}`}
-            d={d}
-            {...CRACK_LINE_PROPS}
+            key={`light-${fracture.id}`}
+            d={fracture.d}
+            pathLength={1}
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
             stroke="rgba(255,255,255,0.45)"
-            strokeWidth="0.6"
+            strokeWidth={fracture.strokeWidth * 0.6}
+            style={crackStyle(fracture, revealed)}
           />
         ))}
+        <g style={impactStyle(revealed)}>
+          <circle
+            cx={crackNetwork.impact[0]}
+            cy={crackNetwork.impact[1]}
+            r={6}
+            fill="none"
+            stroke="rgba(255,255,255,0.35)"
+            strokeWidth={0.8}
+          />
+          <circle
+            cx={crackNetwork.impact[0]}
+            cy={crackNetwork.impact[1]}
+            r={2.2}
+            fill="rgba(255,255,255,0.7)"
+          />
+        </g>
       </svg>
       <div className="mb-2 flex items-center gap-1.5">
         <Terminal size={12} style={{ color: accent }} />
