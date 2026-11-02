@@ -1,0 +1,99 @@
+.cyber-news-tickers {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin-top: 2.5rem;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.cyber-ticker {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  background-color: #000000;
+  border-top: 1px solid #2a2a2a;
+  overflow: hidden;
+}
+
+.cyber-ticker:first-child {
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.cyber-ticker-label {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 16px;
+  color: #000000;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.cyber-ticker-track {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  white-space: nowrap;
+  animation: cyber-ticker-scroll 75s linear infinite;
+}
+
+.cyber-ticker-item {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 28px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.cyber-ticker-item a {
+  color: #ffffff;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.cyber-ticker-item a:hover {
+  color: #c9a227;
+  text-decoration: underline;
+}
+
+@keyframes cyber-ticker-scroll {
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@media (max-width: 768px) {
+  .cyber-ticker {
+    height: 34px;
+  }
+
+  .cyber-ticker-label {
+    padding: 0 10px;
+    font-size: 10px;
+  }
+
+  .cyber-ticker-item {
+    padding: 0 18px;
+    font-size: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cyber-ticker-track {
+    animation: none;
+    overflow-x: auto;
+  }
+}

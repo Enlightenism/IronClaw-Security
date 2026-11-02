@@ -480,8 +480,8 @@ const IntegrationCard = ({
               fill="none"
               strokeLinecap="round"
               strokeLinejoin="round"
-              stroke="rgba(0,0,0,0.5)"
-              strokeWidth={fracture.strokeWidth}
+              stroke="rgba(0,0,0,0.16)"
+              strokeWidth={fracture.strokeWidth * 0.8}
               style={crackStyle(fracture, revealed)}
             />
           ))}
@@ -494,8 +494,8 @@ const IntegrationCard = ({
             fill="none"
             strokeLinecap="round"
             strokeLinejoin="round"
-            stroke="rgba(255,255,255,0.45)"
-            strokeWidth={fracture.strokeWidth * 0.6}
+            stroke="rgba(214,234,255,0.22)"
+            strokeWidth={fracture.strokeWidth * 0.5}
             style={crackStyle(fracture, revealed)}
           />
         ))}
@@ -505,14 +505,14 @@ const IntegrationCard = ({
             cy={crackNetwork.impact[1]}
             r={6}
             fill="none"
-            stroke="rgba(255,255,255,0.35)"
-            strokeWidth={0.8}
+            stroke="rgba(214,234,255,0.18)"
+            strokeWidth={0.6}
           />
           <circle
             cx={crackNetwork.impact[0]}
             cy={crackNetwork.impact[1]}
             r={2.2}
-            fill="rgba(255,255,255,0.7)"
+            fill="rgba(214,234,255,0.35)"
           />
         </g>
       </svg>

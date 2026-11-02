@@ -575,15 +575,50 @@ describe("Landing", () => {
     });
   });
 
-  it("describes binary verdicts and quarantine as operational isolation", async () => {
+  it("renders free learning resources above the existing footer info", async () => {
+    await renderLanding();
+
+    await act(async () => {
+      fireEvent.scroll(window);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("footer-resources")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Cyber Security")).toBeInTheDocument();
+
+    const expectedHrefs = [
+      "https://tryhackme.com",
+      "https://www.netacad.com",
+      "https://portswigger.net/web-security",
+      "https://overthewire.org",
+      "https://owasp.org",
+    ];
+    expectedHrefs.forEach((href, i) => {
+      const link = screen.getByTestId(`footer-resource-link-${i}`);
+      expect(link).toHaveAttribute("href", href);
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    });
+
+    const resources = screen.getByTestId("footer-resources");
+    const powered = screen.getByTestId("powered-by");
+    expect(
+      resources.compareDocumentPosition(powered) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("describes binary verdicts and full block as sandbox termination", async () => {
     await renderLanding();
 
     expect(
       screen.getByText(/returning only allow or block verdicts/),
     ).toBeInTheDocument();
+    expect(screen.getByText(/Full Block/)).toBeInTheDocument();
     expect(
       screen.getByText(
-        /operational isolation and review workflow, not a final verdict/,
+        /Any information returning with the agent that is even slightly suspicious is terminated/,
       ),
     ).toBeInTheDocument();
   });

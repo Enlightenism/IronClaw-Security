@@ -153,6 +153,7 @@ function App() {
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
+
             <Toaster
               theme="dark"
               position="top-right"
