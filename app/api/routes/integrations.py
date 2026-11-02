@@ -273,6 +273,9 @@ async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[
         payload["command_metadata"][platform_slug] = ""
         if record is not None:
             payload["status"] = "ok"
+            generic_command = InstallKeyFormatRegistry.get_spec(program).generic_command
+            payload[f"{platform_slug.replace('-', '_')}_command"] = generic_command
+            payload["command_metadata"][platform_slug] = generic_command
 
     return payload
 
@@ -322,7 +325,6 @@ def create_integration_install_claim(
         "program": spec.program,
         "key_id": record.key_id,
         "claim_token": claim.claim_token,
-        "expires_at": claim.expires_at.isoformat(),
         "command": spec.format_command(claim.claim_token),
     }
 

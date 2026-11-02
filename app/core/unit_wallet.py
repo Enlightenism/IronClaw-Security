@@ -666,11 +666,14 @@ class SupabaseUnitWalletRepository:
         self,
         owner_key: str | None = None,
         limit: int = 100,
+        checkout_session_id: str | None = None,
     ) -> list[RegistryUnitLedgerEntry]:
         safe_limit = max(1, min(int(limit), 500))
         query = self._client.table(self._LEDGER_TABLE).select("*").order("created_at", desc=True).limit(safe_limit)
         if owner_key is not None:
             query = query.eq("owner_key", owner_key)
+        if checkout_session_id is not None:
+            query = query.eq("checkout_session_id", checkout_session_id)
         result = query.execute()
         entries: list[RegistryUnitLedgerEntry] = []
         for row in result.data or []:
@@ -746,10 +749,13 @@ class MemoryUnitWalletRepository:
         self,
         owner_key: str | None = None,
         limit: int = 100,
+        checkout_session_id: str | None = None,
     ) -> list[RegistryUnitLedgerEntry]:
         safe_limit = max(1, min(int(limit), 500))
         with self._lock:
             entries = self._ledger if owner_key is None else [e for e in self._ledger if e.owner_key == owner_key]
+            if checkout_session_id is not None:
+                entries = [e for e in entries if e.checkout_session_id == checkout_session_id]
             return list(entries[-safe_limit:])
 
     def fetch_ledger_entry_by_event_id(self, event_id: str) -> RegistryUnitLedgerEntry | None:
@@ -1396,8 +1402,9 @@ class UnitWalletRegistry:
         self,
         owner_key: str | None = None,
         limit: int = 100,
+        checkout_session_id: str | None = None,
     ) -> list[RegistryUnitLedgerEntry]:
-        return self._repo.fetch_ledger_entries(owner_key=owner_key, limit=limit)
+        return self._repo.fetch_ledger_entries(owner_key=owner_key, limit=limit, checkout_session_id=checkout_session_id)
 
     def get_key_usage_summary(
         self,

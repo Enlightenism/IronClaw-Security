@@ -575,7 +575,7 @@ def _build_bootstrap_config_payload(
     if not isinstance(runtime_commands_value, dict) or any(not isinstance(key, str) or not isinstance(value, str) for key, value in runtime_commands_value.items()):
         raise IronClawInstallerError("User configuration contains an invalid runtime-command map.")
     runtime_commands = dict(runtime_commands_value)
-    runtime_commands[program] = InstallKeyFormatRegistry.get_spec(program).command_template
+    runtime_commands[program] = InstallKeyFormatRegistry.get_spec(program).generic_command
 
     existing_targets = existing.get("provider_targets", [])
     if not isinstance(existing_targets, list) or any(not isinstance(value, str) for value in existing_targets):
@@ -618,7 +618,7 @@ def _build_bootstrap_config_payload(
 def _runtime_skill_install_command(program: str) -> list[str]:
     spec = InstallKeyFormatRegistry.get_spec(program)
     if program == "hermes":
-        return ["hermes", "skills", "install", SECURITY_GUARDIAN_SKILL_URL]
+        return ["hermes", "skills", "install", SECURITY_GUARDIAN_SKILL_URL, "--name", SECURITY_GUARDIAN_SKILL_NAME]
     if spec.agent_cli_id is None:
         raise IronClawInstallerError(f"No supported skill installer is configured for {program}.")
     return [
@@ -676,13 +676,28 @@ def _install_openclaw_plugin(plugin_dir: Path, config_file: Path) -> None:
         raise IronClawInstallerError("The OpenClaw enforcement plugin could not be installed or enabled.") from exc
 
 
-def run_bootstrap(
+def _configure_openclaw_plugin(target_config_dir: Path, config_file: Path) -> None:
+    plugin_dir = target_config_dir / "openclaw-plugin"
+    try:
+        plugin_dir = _stage_openclaw_plugin(target_config_dir)
+        _install_openclaw_plugin(plugin_dir, config_file)
+    except IronClawInstallerError as exc:
+        config_path_setting = f"plugins.entries.{OPENCLAW_PLUGIN_ID}.config.configFile"
+        raise IronClawInstallerError(
+            f"OpenClaw enforcement setup failed: {exc} The paid key was securely saved to {config_file}. "
+            f'Complete setup with `openclaw plugins install --link "{plugin_dir}" --force`, '
+            f'`openclaw config set {config_path_setting} "{config_file.resolve()}"`, and '
+            f"`openclaw plugins enable {OPENCLAW_PLUGIN_ID}`.",
+        ) from exc
+
+
+def _redeem_claim_into_config(
     *,
     program: str,
     claim_token: str,
-    config_dir: Path | None = None,
-    base_url: str = DEFAULT_BOOTSTRAP_BASE_URL,
-) -> BootstrapResult:
+    config_dir: Path | None,
+    base_url: str,
+) -> tuple[str, Path, Path]:
     runtime_program = _canonical_program_name(program)
     if runtime_program is None or runtime_program not in _CANONICAL_RUNTIME_TARGETS:
         raise IronClawInstallerError(f"Unsupported runtime target for install-claim redemption: {program!r}")
@@ -707,6 +722,22 @@ def run_bootstrap(
         base_url=normalized_base_url,
     )
     _write_json_file(config_file, payload, overwrite=True, private=True)
+    return runtime_program, target_config_dir, config_file
+
+
+def run_bootstrap(
+    *,
+    program: str,
+    claim_token: str,
+    config_dir: Path | None = None,
+    base_url: str = DEFAULT_BOOTSTRAP_BASE_URL,
+) -> BootstrapResult:
+    runtime_program, target_config_dir, config_file = _redeem_claim_into_config(
+        program=program,
+        claim_token=claim_token,
+        config_dir=config_dir,
+        base_url=base_url,
+    )
 
     command = _runtime_skill_install_command(runtime_program)
     try:
@@ -721,18 +752,32 @@ def run_bootstrap(
         ) from exc
 
     if runtime_program == "openclaw":
-        plugin_dir = target_config_dir / "openclaw-plugin"
-        try:
-            plugin_dir = _stage_openclaw_plugin(target_config_dir)
-            _install_openclaw_plugin(plugin_dir, config_file)
-        except IronClawInstallerError as exc:
-            config_path_setting = f"plugins.entries.{OPENCLAW_PLUGIN_ID}.config.configFile"
-            raise IronClawInstallerError(
-                f"OpenClaw enforcement setup failed: {exc} The paid key was securely saved to {config_file}. "
-                f'Complete setup with `openclaw plugins install --link "{plugin_dir}" --force`, '
-                f'`openclaw config set {config_path_setting} "{config_file.resolve()}"`, and '
-                f"`openclaw plugins enable {OPENCLAW_PLUGIN_ID}`.",
-            ) from exc
+        _configure_openclaw_plugin(target_config_dir, config_file)
+
+    return BootstrapResult(
+        program=runtime_program,
+        config_file=config_file,
+        skill_name=SECURITY_GUARDIAN_SKILL_NAME,
+    )
+
+
+def run_redeem(
+    *,
+    program: str,
+    claim_token: str,
+    config_dir: Path | None = None,
+    base_url: str = DEFAULT_BOOTSTRAP_BASE_URL,
+) -> BootstrapResult:
+    """Redeem a claim and store the key. The generic skill-install command shown next to it installs the skill."""
+    runtime_program, target_config_dir, config_file = _redeem_claim_into_config(
+        program=program,
+        claim_token=claim_token,
+        config_dir=config_dir,
+        base_url=base_url,
+    )
+
+    if runtime_program == "openclaw":
+        _configure_openclaw_plugin(target_config_dir, config_file)
 
     return BootstrapResult(
         program=runtime_program,
@@ -765,7 +810,7 @@ def _build_runtime_config(config: InstallConfig, install_keys: dict[str, str] | 
     provider_set = set(config.provider_targets)
     redeemed_install_keys = install_keys or {}
     features = _build_runtime_features(provider_set, bool(redeemed_install_keys))
-    runtime_commands = {program: InstallKeyFormatRegistry.get_spec(program).command_template for program in redeemed_install_keys}
+    runtime_commands = {program: InstallKeyFormatRegistry.get_spec(program).generic_command for program in redeemed_install_keys}
     return {
         "schema_version": 1,
         "product": "IronClaw-Security",
@@ -1024,7 +1069,7 @@ def build_bootstrap_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--claim-token",
         required=True,
-        help="Short-lived, single-use install claim generated by the IronClaw dashboard.",
+        help="Single-use install claim generated by the IronClaw dashboard. Claims do not expire.",
     )
     parser.add_argument(
         "--config-dir",
@@ -1171,10 +1216,31 @@ def _bootstrap_main(argv: list[str]) -> int:
     return 0
 
 
+def _redeem_main(argv: list[str]) -> int:
+    args = build_bootstrap_parser().parse_args(argv)
+    try:
+        result = run_redeem(
+            program=args.program,
+            claim_token=args.claim_token,
+            config_dir=args.config_dir,
+            base_url=args.base_url,
+        )
+    except IronClawInstallerError as exc:
+        print(f"[ironclaw-installer] failed: {exc}", file=sys.stderr)
+        return 1
+
+    print("[ironclaw-installer] install key redeemed")
+    print(f"[ironclaw-installer] program: {result.program}")
+    print(f"[ironclaw-installer] config: {result.config_file}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     command_line = list(sys.argv[1:] if argv is None else argv)
     if command_line and command_line[0] == "bootstrap":
         return _bootstrap_main(command_line[1:])
+    if command_line and command_line[0] == "redeem":
+        return _redeem_main(command_line[1:])
 
     parser = build_parser()
     args = parser.parse_args(command_line)

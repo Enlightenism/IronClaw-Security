@@ -15,12 +15,16 @@ jest.mock("sonner", () => ({
   },
 }));
 
+const INSTALLER_SOURCE_COMMAND =
+  "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git";
+const CLAUDE_CODE_GENERIC_COMMAND =
+  "gh skill install Enlightenism/IronClaw-Security skills/ironclaw-security --agent claude-code --scope user";
+
 const makeClaim = (overrides = {}) => ({
   integration_id: "claude-code",
   program: "claude_code",
   claim_token: CLAIM_TOKEN,
-  expires_at: new Date(Date.now() + 60_000).toISOString(),
-  command: `python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ${CLAIM_TOKEN}`,
+  command: `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer redeem --program claude_code --claim-token ${CLAIM_TOKEN}\n${CLAUDE_CODE_GENERIC_COMMAND}`,
   ...overrides,
 });
 
@@ -30,6 +34,7 @@ const renderCard = (props = {}) =>
       title="Claude Code"
       program="claude_code"
       integrationId="claude-code"
+      agentId="claude-code"
       available
       onCreateClaim={jest.fn()}
       testid="claude-code-card"
@@ -55,7 +60,7 @@ describe("IntegrationCard", () => {
     renderCard({ onCreateClaim });
 
     expect(screen.getByTestId("claude-code-card")).toHaveTextContent(
-      "Generate a one-time bootstrap command after purchase",
+      "Generate a one-time install command after purchase",
     );
     expect(screen.getByTestId("claude-code-card-generate")).toBeEnabled();
     expect(screen.getByTestId("claude-code-card-copy")).toBeDisabled();
@@ -72,7 +77,7 @@ describe("IntegrationCard", () => {
       screen.queryByTestId("claude-code-card-blocked-attacks"),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("claude-code-card")).toHaveTextContent(
-      "Install commands will be available to generate after purchase",
+      "generate a one-time install command for this platform",
     );
   });
 
@@ -99,31 +104,70 @@ describe("IntegrationCard", () => {
     });
     expect(onCreateClaim).toHaveBeenCalledWith("claude-code");
     expect(screen.getByTestId("claude-code-card-copy")).toBeEnabled();
+    expect(screen.queryByText(/expires/i)).not.toBeInTheDocument();
     expect(mockToastSuccess).toHaveBeenCalledWith(
       "One-time install command generated",
     );
   });
 
-  it("rejects long-lived install keys and malformed claim commands", async () => {
+  it("rejects the legacy pip bootstrap template and --key install commands", async () => {
     const user = userEvent.setup();
-    const invalidClaim = makeClaim({
-      claim_token: "ic_install_claude_code_...masked",
-      command:
-        "gh skill install Enlightenism/IronClaw-Security ironclaw-security --agent claude-code --scope user --key ic_install_claude_code_...masked",
+    const legacyClaim = makeClaim({
+      command: `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ${CLAIM_TOKEN}`,
     });
-    const onCreateClaim = jest.fn().mockResolvedValue(invalidClaim);
+    const keyClaim = makeClaim({
+      command: `gh skill install Enlightenism/IronClaw-Security skills/ironclaw-security --agent claude-code --scope user --key ${CLAIM_TOKEN}`,
+    });
+    const onCreateClaim = jest
+      .fn()
+      .mockResolvedValueOnce(legacyClaim)
+      .mockResolvedValueOnce(keyClaim);
 
     renderCard({ onCreateClaim });
 
     await user.click(screen.getByTestId("claude-code-card-generate"));
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.queryByText(legacyClaim.command)).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("claude-code-card-generate"));
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.queryByText(keyClaim.command)).not.toBeInTheDocument();
+    expect(screen.getByTestId("claude-code-card-copy")).toBeDisabled();
+  });
+
+  it("accepts the Hermes command contract without an agent id", async () => {
+    const user = userEvent.setup();
+    const hermesToken = `ic_claim_${"B".repeat(43)}`;
+    const hermesCommand = `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer redeem --program hermes --claim-token ${hermesToken}\nhermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security`;
+    const onCreateClaim = jest.fn().mockResolvedValue(
+      makeClaim({
+        integration_id: "hermes",
+        program: "hermes",
+        claim_token: hermesToken,
+        command: hermesCommand,
+      }),
+    );
+
+    renderCard({
+      title: "Hermes",
+      program: "hermes",
+      integrationId: "hermes",
+      agentId: null,
+      testid: "hermes-card",
+      onCreateClaim,
+    });
+
+    await user.click(screen.getByTestId("hermes-card-generate"));
 
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith(
-        "Unable to generate a secure install command. Please try again.",
-      );
+      expect(
+        screen.getByTestId("hermes-card").querySelector("code")?.textContent,
+      ).toBe(hermesCommand);
     });
-    expect(screen.queryByText(invalidClaim.command)).not.toBeInTheDocument();
-    expect(screen.getByTestId("claude-code-card-copy")).toBeDisabled();
   });
 
   it("rejects claims for another runtime and shell command injection", async () => {
@@ -209,7 +253,7 @@ describe("IntegrationCard", () => {
     });
   });
 
-  it("rejects an expired claim instead of leaving its command available", async () => {
+  it("does not block a claim based on a legacy expires_at field", async () => {
     const user = userEvent.setup();
     const claim = makeClaim({
       expires_at: new Date(Date.now() - 60_000).toISOString(),
@@ -220,9 +264,9 @@ describe("IntegrationCard", () => {
     await user.click(screen.getByTestId("claude-code-card-generate"));
 
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalled();
+      expect(getDisplayedCommand()).toBe(claim.command);
     });
-    expect(screen.getByTestId("claude-code-card-copy")).toBeDisabled();
+    expect(screen.getByTestId("claude-code-card-copy")).toBeEnabled();
   });
 
   it("gives each card a different, repeatable crack pattern", () => {

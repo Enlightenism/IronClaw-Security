@@ -100,6 +100,7 @@ def _build_mock_svc() -> MagicMock:
     svc._lock = threading.Lock()
     svc._org_customer_map = {}
     svc.resolve_customer_id.side_effect = lambda org_id: svc._org_customer_map.get(org_id)
+    svc.get_checkout_units_credited.return_value = 0
     return svc
 
 
@@ -854,6 +855,30 @@ class TestCheckoutSessionRoutes:
         assert payload["payment_status"] == "paid"
         assert payload["metadata"] == {"package_id": "pkg_5000"}
         mock_svc.retrieve_checkout_session.assert_called_once_with(SESSION_ID)
+
+    def test_checkout_session_status_reports_ledger_units_credited(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.retrieve_checkout_session.return_value = {
+            "session_id": SESSION_ID,
+            "status": "complete",
+            "payment_status": "paid",
+            "org_id": ORG_ID,
+            "unit_credits": 5000,
+            "metadata": {"owner_key": "buyer@ironclaw.test"},
+        }
+        mock_svc.get_checkout_units_credited.return_value = 5000
+
+        response = client.get(
+            _billing_path(f"/checkout/sessions/{SESSION_ID}/status"),
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 200
+        assert response.json()["units_credited"] == 5000
+        assert mock_svc.get_checkout_units_credited.call_args.args[0] == SESSION_ID
 
     def test_checkout_session_status_rejects_another_billing_owner(
         self,

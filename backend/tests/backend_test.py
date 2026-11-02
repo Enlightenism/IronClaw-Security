@@ -120,8 +120,6 @@ class TestDashboard:
         r = requests.get(f"{API}/integrations/token", headers=auth_headers)
         assert r.status_code == 200
         d = r.json()
-        token = d["user_token"]
-        assert token == signup_user["user"]["user_token"]
         supported_platforms = d.get("supported_platforms", [])
         assert supported_platforms
         assert "security-guardian" not in supported_platforms
@@ -130,18 +128,18 @@ class TestDashboard:
         for platform in supported_platforms:
             command_field = f"{platform.replace('-', '_')}_command"
             command = d.get(command_field, "")
-            install_key = str(d.get("install_metadata", {}).get(platform, {}).get("install_key") or "").strip()
+            metadata = d.get("install_metadata", {}).get(platform, {})
+
+            assert "install_key" not in metadata, f"install_key must not be exposed for {platform}"
+            if d.get("status") == "locked":
+                assert not command, f"command must be empty without a verified paid key for {platform}"
+                assert metadata.get("available") is False
+                continue
 
             assert command, f"missing command for {platform}"
-            assert "--key" in command, f"missing --key flag for {platform}"
-            assert install_key, f"missing install_key metadata for {platform}"
-            assert install_key in command, f"command for {platform} does not embed the install key"
+            assert "--key" not in command, f"command for {platform} must not use --key"
             assert platform.lower() in command.lower(), f"platform marker missing for {platform}"
-
-        assert token in d["claude_code_command"]
-        assert token in d["openclaw_command"]
-        assert "claude-code" in d["claude_code_command"]
-        assert "openclaw" in d["openclaw_command"]
+            assert command.startswith(("gh skill install ", "hermes skills install ")), f"non-generic command for {platform}"
 
 
 # --- events simulate ---

@@ -14,7 +14,16 @@ SECURITY_GUARDIAN_SKILL_FILE_PATH: Final[str] = f"{SECURITY_GUARDIAN_SKILL_REPOS
 SECURITY_GUARDIAN_SKILL_ROUTE: Final[str] = f"/{SECURITY_GUARDIAN_SKILL_FILE_PATH}"
 SECURITY_GUARDIAN_SKILL_URL: Final[str] = f"{IRONCLAW_PUBLIC_BASE_URL}{SECURITY_GUARDIAN_SKILL_ROUTE}"
 
-_INSTALL_BOOTSTRAP_COMMAND_TEMPLATE: Final[str] = f"python -m pip install --no-deps --upgrade {IRONCLAW_INSTALLER_SOURCE_URL}\npython -m ironclaw_installer bootstrap --program {{program}} --claim-token {{claim_token}}"
+_INSTALL_CLAIM_PREFIX_TEMPLATE: Final[str] = f"python -m pip install --no-deps --upgrade {IRONCLAW_INSTALLER_SOURCE_URL}\npython -m ironclaw_installer redeem --program {{program}} --claim-token {{claim_token}}"
+
+
+def _generic_install_command(agent_cli_id: str | None, program: str) -> str:
+    if program == "hermes":
+        return f"hermes skills install {SECURITY_GUARDIAN_SKILL_URL} --name {SECURITY_GUARDIAN_SKILL_NAME}"
+    if agent_cli_id is None:
+        return ""
+    return f"gh skill install {IRONCLAW_GITHUB_REPOSITORY} {SECURITY_GUARDIAN_SKILL_REPOSITORY_PATH} --agent {agent_cli_id} --scope user"
+
 
 RuntimeInstallKeyProgram = Literal[
     "openclaw",
@@ -86,6 +95,11 @@ class InstallKeyFormatSpec:
     def canonical_slug(self) -> str:
         return self.program.replace("_", "-")
 
+    @property
+    def generic_command(self) -> str:
+        """Per-platform skill-install command with no claim embedded."""
+        return _generic_install_command(self.agent_cli_id, self.program)
+
     def __post_init__(self) -> None:
         if not self.prefix:
             raise ValueError("prefix is required")
@@ -97,7 +111,10 @@ class InstallKeyFormatSpec:
             object.__setattr__(self, "command_template", self._default_command_template())
 
     def _default_command_template(self) -> str:
-        return _INSTALL_BOOTSTRAP_COMMAND_TEMPLATE
+        generic = self.generic_command
+        if not generic:
+            return _INSTALL_CLAIM_PREFIX_TEMPLATE
+        return f"{_INSTALL_CLAIM_PREFIX_TEMPLATE}\n{generic}"
 
     def format_command(self, install_key: str | None) -> str:
         normalized_key = str(install_key).strip() if install_key is not None else ""

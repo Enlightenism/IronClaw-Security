@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
 import hashlib
 import secrets
 from threading import RLock
@@ -17,7 +16,6 @@ from app.core.install_keys import InstallKeyRecord, InstallKeyRegistry, get_inst
 from app.core.settings import get_settings
 from app.persistencebootstrap import InMemoryPersistenceStore, SupabasePersistenceStore, get_persistence_store
 
-_CLAIM_TTL = timedelta(minutes=5)
 _KEY_VERSION = "v1"
 _MEMORY_LOCK = RLock()
 
@@ -28,7 +26,6 @@ class _MemorySecret:
     program: str
     encrypted_key: bytes
     claim_token_hash: str | None = None
-    claim_expires_at: datetime | None = None
 
 
 _MEMORY_SECRETS: dict[str, _MemorySecret] = {}
@@ -40,7 +37,6 @@ class InstallKeyClaim:
     owner_key: str
     program: str
     claim_token: str = field(repr=False)
-    expires_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,8 +223,6 @@ class InstallKeyHandoffService:
         if record is None or record.owner_key != normalized_owner or record.program != normalized_program or not record.active or record.payment_status != "paid" or record.entitlements_status != "active" or not record.issued_after_payment:
             raise InstallKeySecretUnavailableError("No active paid install key is available for this owner and runtime.")
 
-        now = datetime.now(UTC)
-        expires_at = now + _CLAIM_TTL
         claim_token = f"ic_claim_{secrets.token_urlsafe(32)}"
         token_hash = hashlib.sha256(claim_token.encode("utf-8")).hexdigest()
 
@@ -239,7 +233,6 @@ class InstallKeyHandoffService:
                 if secret is None or secret.owner_key != normalized_owner or secret.program != normalized_program:
                     raise InstallKeySecretUnavailableError("This install key has no recoverable secret; it must be reissued before installation.")
                 secret.claim_token_hash = token_hash
-                secret.claim_expires_at = expires_at
         else:
             issued = store.rpc(
                 "issue_install_key_claim",
@@ -248,7 +241,7 @@ class InstallKeyHandoffService:
                     "p_owner_key": normalized_owner,
                     "p_program": normalized_program,
                     "p_claim_token_hash": token_hash,
-                    "p_claim_expires_at": expires_at.isoformat(),
+                    "p_claim_expires_at": None,
                 },
                 schema="public",
             )
@@ -260,24 +253,21 @@ class InstallKeyHandoffService:
             owner_key=normalized_owner,
             program=normalized_program,
             claim_token=claim_token,
-            expires_at=expires_at,
         )
 
     def redeem_claim(self, claim_token: str) -> InstallKeyRedemption:
         token_hash = self._claim_hash(claim_token)
         store = self._store()
         if isinstance(store, InMemoryPersistenceStore):
-            now = datetime.now(UTC)
             with _MEMORY_LOCK:
                 match = next(
-                    ((key_id, secret) for key_id, secret in _MEMORY_SECRETS.items() if secret.claim_token_hash == token_hash and secret.claim_expires_at is not None and secret.claim_expires_at > now),
+                    ((key_id, secret) for key_id, secret in _MEMORY_SECRETS.items() if secret.claim_token_hash == token_hash),
                     None,
                 )
                 if match is None:
-                    raise InvalidInstallKeyClaimError("Install claim is invalid, expired, or already redeemed.")
+                    raise InvalidInstallKeyClaimError("Install claim is invalid or already redeemed.")
                 key_id, secret = match
                 secret.claim_token_hash = None
-                secret.claim_expires_at = None
                 row = {
                     "key_id": key_id,
                     "owner_key": secret.owner_key,

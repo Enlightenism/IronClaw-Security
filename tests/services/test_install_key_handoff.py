@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -78,7 +77,7 @@ def test_secret_is_encrypted_and_claim_can_only_be_redeemed_once() -> None:
         owner_key=record.owner_key,
         program=record.program,
     )
-    assert claim.expires_at > datetime.now(UTC)
+    assert not hasattr(claim, "expires_at")
     assert claim.claim_token not in repr(claim)
 
     redemption = service.redeem_claim(claim.claim_token)
@@ -150,7 +149,7 @@ def test_new_claim_invalidates_previous_claim() -> None:
     assert service.redeem_claim(second_claim.claim_token).install_key == _RAW_KEY
 
 
-def test_expired_claim_cannot_be_redeemed() -> None:
+def test_claim_has_no_expiry_and_stays_redeemable_until_used() -> None:
     record = _make_record()
     service = _build_service(record=record)
     service.store_secret(
@@ -164,10 +163,9 @@ def test_expired_claim_cannot_be_redeemed() -> None:
         owner_key=record.owner_key,
         program=record.program,
     )
-    install_key_handoff._MEMORY_SECRETS[record.key_id].claim_expires_at = datetime.now(UTC) - timedelta(seconds=1)
 
-    with pytest.raises(InvalidInstallKeyClaimError):
-        service.redeem_claim(claim.claim_token)
+    assert not hasattr(install_key_handoff._MEMORY_SECRETS[record.key_id], "claim_expires_at")
+    assert service.redeem_claim(claim.claim_token).install_key == _RAW_KEY
 
 
 def test_secret_cannot_be_stored_for_an_unsupported_runtime() -> None:

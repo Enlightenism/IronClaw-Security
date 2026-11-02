@@ -1178,6 +1178,7 @@ class InstallKeyRegistry:
         customer_id: str | None = None,
         purchase_reference: str | None = None,
         checkout_session_id: str | None = None,
+        secure_record_persistor: Callable[[InstallKeyRecord], None] | None = None,
     ) -> InstallKeyRecord:
         """
         Compatibility wrapper for the old call signature.
@@ -1248,6 +1249,7 @@ class InstallKeyRegistry:
             checkout_session_id=checkout_session_id,
             label=label,
             metadata=metadata,
+            secure_record_persistor=secure_record_persistor,
         )
 
     # ------------------------------------------------------------------

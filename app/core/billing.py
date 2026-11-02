@@ -964,6 +964,9 @@ class BillingRegistry:
             raise ValueError(f"Cannot provision install keys: no active subscription found for owner {normalized_owner!r}")
 
         registry = self._get_install_key_registry()
+        from app.services.install_key_handoff import get_install_key_handoff_service  # local import to avoid circular
+
+        persist_record = get_install_key_handoff_service().persist_new_record
         result: dict[str, Any] = {}
         for program in InstallKeyFormatRegistry.list_programs():
             metadata = {
@@ -990,6 +993,7 @@ class BillingRegistry:
                     checkout_session_id=subscription_id,
                     label="auto-provisioned",
                     metadata=metadata,
+                    secure_record_persistor=persist_record,
                 )
             elif hasattr(registry, "generate_install_key"):
                 record = registry.generate_install_key(
@@ -998,6 +1002,7 @@ class BillingRegistry:
                     program,
                     label="auto-provisioned",
                     metadata=metadata,
+                    secure_record_persistor=persist_record,
                 )
             else:
                 raise AttributeError("Install key registry must expose generate_for_paid_customer() or generate_install_key().")

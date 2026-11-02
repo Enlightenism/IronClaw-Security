@@ -297,6 +297,12 @@ class TestCreditDebitHappyPath:
         assert resp.balance == 500
         assert resp.org_id == _ORG
 
+    def test_checkout_units_credited_sums_only_matching_session(self, svc: StripeService) -> None:
+        svc.credit_units(_ORG, 500, StripeUnitEventReason.CHECKOUT_COMPLETE, reference_id="cs_test_units")
+        svc.credit_units(_ORG, 200, StripeUnitEventReason.CHECKOUT_COMPLETE, reference_id="cs_test_other")
+        assert svc.get_checkout_units_credited("cs_test_units", _ORG) == 500
+        assert svc.get_checkout_units_credited("cs_test_missing", _ORG) == 0
+
     def test_credit_units_accumulates_correctly(self, svc: StripeService) -> None:
         svc.credit_units(_ORG, 200, StripeUnitEventReason.MANUAL_CREDIT)
         resp = svc.credit_units(_ORG, 300, StripeUnitEventReason.MANUAL_CREDIT)

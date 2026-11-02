@@ -593,6 +593,9 @@ def _provision_install_keys(
         return []
 
     registry = get_install_key_registry()
+    from app.services.install_key_handoff import get_install_key_handoff_service  # local import to avoid circular
+
+    persist_record = get_install_key_handoff_service().persist_new_record
     results: list[InstallKeyDeliveryView] = []
     normalized_entitlement = _normalize_entitlement_status(entitlement_status)
 
@@ -611,6 +614,7 @@ def _provision_install_keys(
                     "issued_after_payment": True,
                     "auto_provisioned": True,
                 },
+                secure_record_persistor=persist_record,
             )
         except InstallKeyAlreadyExistsError:
             existing = next(

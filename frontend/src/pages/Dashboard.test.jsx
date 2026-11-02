@@ -541,7 +541,11 @@ describe("session_id payment polling", () => {
       }
       if (url === "/billing/checkout/sessions/cs_test_abc/status") {
         return Promise.resolve({
-          data: { payment_status: "paid", unit_credits: 5000 },
+          data: {
+            payment_status: "paid",
+            units_credited: 5000,
+            unit_credits: 5000,
+          },
         });
       }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
@@ -568,7 +572,11 @@ describe("session_id payment polling", () => {
       }
       if (url === "/billing/checkout/sessions/cs_test_abc/status") {
         return Promise.resolve({
-          data: { payment_status: "paid", unit_credits: 5000 },
+          data: {
+            payment_status: "paid",
+            units_credited: 5000,
+            unit_credits: 5000,
+          },
         });
       }
       return Promise.reject(new Error(`Unexpected GET ${url}`));
@@ -589,7 +597,11 @@ describe("session_id payment polling", () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/billing/checkout/sessions/cs_test_abc/status") {
         return Promise.resolve({
-          data: { payment_status: "paid", unit_credits: 5000 },
+          data: {
+            payment_status: "paid",
+            units_credited: 5000,
+            unit_credits: 5000,
+          },
         });
       }
       if (url === "/dashboard/overview") {
@@ -1062,7 +1074,7 @@ describe("dashboard structure", () => {
           data: {
             status: "ok",
             claude_code_command:
-              "gh skill install --agent claude-code --key ic_install_claude_code_...masked",
+              "gh skill install Enlightenism/IronClaw-Security skills/ironclaw-security --agent claude-code --scope user",
             install_metadata: {},
           },
         });

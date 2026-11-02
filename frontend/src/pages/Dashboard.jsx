@@ -16,36 +16,43 @@ const INSTALL_KEY_PROGRAMS = [
   {
     program: "openclaw",
     label: "OpenClaw",
+    agentId: "openclaw",
     tint: "platinum",
   },
   {
     program: "claude_code",
     label: "Claude Code",
+    agentId: "claude-code",
     tint: "gold",
   },
   {
     program: "cursor",
     label: "Cursor",
+    agentId: "cursor",
     tint: "cyan",
   },
   {
     program: "goose",
     label: "Goose",
+    agentId: "goose",
     tint: "violet",
   },
   {
     program: "gemini_cli",
     label: "Gemini CLI",
+    agentId: "gemini-cli",
     tint: "emerald",
   },
   {
     program: "copilot",
     label: "GitHub Copilot",
+    agentId: "github-copilot",
     tint: "indigo",
   },
   {
     program: "hermes",
     label: "Hermes",
+    agentId: null,
     tint: "amber",
   },
 ];
@@ -489,7 +496,7 @@ const Dashboard = () => {
 
   const pollPayment = useCallback(
     async (sessionId, attempts = 0) => {
-      const maxAttempts = 6;
+      const maxAttempts = 15;
       const scheduleRetry = () => {
         paymentPollTimeoutRef.current = globalThis.setTimeout(() => {
           paymentPollTimeoutRef.current = null;
@@ -515,19 +522,25 @@ const Dashboard = () => {
         );
 
         if (String(status?.payment_status || "").toLowerCase() === "paid") {
-          setPaymentState("paid");
-          toast.dismiss("pay");
-          const units = Number(status?.unit_credits ?? status?.units);
-          if (!Number.isSafeInteger(units) || units <= 0) {
+          const credited = Number(status?.units_credited ?? 0);
+          if (!Number.isSafeInteger(credited) || credited <= 0) {
+            // Stripe reports paid before the webhook credits the wallet; keep polling.
+            if (attempts + 1 < maxAttempts) {
+              scheduleRetry();
+              return;
+            }
+            toast.dismiss("pay");
             toast.error(
-              "Payment is confirmed, but the credited unit amount could not be verified.",
+              "Payment is confirmed, but units have not been added yet. Refresh in a moment.",
             );
             await fetchDashboard();
             setPurchasingId(null);
             return;
           }
+          setPaymentState("paid");
+          toast.dismiss("pay");
           toast.success(
-            `Payment confirmed — ${units.toLocaleString()} units added!`,
+            `Payment confirmed — ${credited.toLocaleString()} units added!`,
           );
           await fetchDashboard();
           setPurchasingId(null);
@@ -763,7 +776,7 @@ const Dashboard = () => {
       }
     };
 
-    return INSTALL_KEY_PROGRAMS.map(({ program, label, tint }) => {
+    return INSTALL_KEY_PROGRAMS.map(({ program, label, agentId, tint }) => {
       const integrationId = program.replace(/_/g, "-");
       const metadata = tokens?.install_metadata?.[integrationId];
 
@@ -771,6 +784,7 @@ const Dashboard = () => {
         title: label,
         program,
         integrationId,
+        agentId,
         available:
           metadata?.available === true &&
           metadata?.program === program &&
@@ -934,6 +948,7 @@ const Dashboard = () => {
                   title={card.title}
                   program={card.program}
                   integrationId={card.integrationId}
+                  agentId={card.agentId}
                   available={card.available}
                   onCreateClaim={card.onCreateClaim}
                   tint={card.tint}

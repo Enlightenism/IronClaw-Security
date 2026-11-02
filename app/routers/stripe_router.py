@@ -579,7 +579,24 @@ def _get_checkout_session_record_for_auth(
     return public_record
 
 
-def _checkout_session_status_payload(session_id: str, record: dict[str, Any]) -> dict[str, Any]:
+def _units_credited_for_checkout(
+    svc: StripeService,
+    session_id: str,
+    record: dict[str, Any],
+    auth: AuthContext,
+) -> int:
+    owner_key = resolve_authenticated_billing_owner(auth) or None
+    org_id = str(record.get("org_id") or _resolve_org_id(auth) or owner_key or "").strip()
+    if not org_id:
+        return 0
+    return svc.get_checkout_units_credited(session_id, org_id, owner_key=owner_key)
+
+
+def _checkout_session_status_payload(
+    session_id: str,
+    record: dict[str, Any],
+    units_credited: int = 0,
+) -> dict[str, Any]:
     return {
         "session_id": session_id,
         "status": record.get("status", "unknown"),
@@ -588,7 +605,7 @@ def _checkout_session_status_payload(session_id: str, record: dict[str, Any]) ->
         "org_id": record.get("org_id"),
         "customer_id": record.get("customer_id"),
         "unit_credits": record.get("unit_credits", 0),
-        "units_credited": record.get("units_credited", False),
+        "units_credited": units_credited,
         "checkout_url": record.get("url"),
         "success_url": record.get("success_url"),
         "cancel_url": record.get("cancel_url"),
@@ -786,8 +803,9 @@ async def get_unit_balance(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth=auth, request=request)
-    result = svc.get_unit_balance(org_id)
+    owner_key = resolve_authenticated_billing_owner(auth) or None
+    org_id = _resolve_org_id_from_request(auth=auth, request=request) or owner_key or _require_org_id(auth=auth, request=request)
+    result = svc.get_unit_balance(org_id, owner_key=owner_key)
     return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
 
 
@@ -934,8 +952,9 @@ async def get_unit_ledger(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    org_id = _require_org_id(auth=auth, request=request)
-    result = svc.get_unit_balance(org_id)
+    owner_key = resolve_authenticated_billing_owner(auth) or None
+    org_id = _resolve_org_id_from_request(auth=auth, request=request) or owner_key or _require_org_id(auth=auth, request=request)
+    result = svc.get_unit_balance(org_id, owner_key=owner_key)
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content={"org_id": org_id, "balance": result.balance, "ledger": result.ledger_entries},
@@ -1179,7 +1198,11 @@ async def get_checkout_session_status(
     record = _get_checkout_session_record_for_auth(session_id=session_id, auth=auth, svc=svc)
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content=_checkout_session_status_payload(session_id=session_id, record=record),
+        content=_checkout_session_status_payload(
+            session_id=session_id,
+            record=record,
+            units_credited=_units_credited_for_checkout(svc, session_id, record, auth),
+        ),
     )
 
 
@@ -1201,7 +1224,11 @@ async def get_checkout_status_by_query(
     record = _get_checkout_session_record_for_auth(session_id=session_id, auth=auth, svc=svc)
     return JSONResponse(
         status_code=status.HTTP_200_OK,
-        content=_checkout_session_status_payload(session_id=session_id, record=record),
+        content=_checkout_session_status_payload(
+            session_id=session_id,
+            record=record,
+            units_credited=_units_credited_for_checkout(svc, session_id, record, auth),
+        ),
     )
 
 

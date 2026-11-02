@@ -52,6 +52,7 @@ class _StubInstallKeyRegistry:
         checkout_session_id: str | None = None,
         label: str = "",
         metadata: dict[str, Any] | None = None,
+        secure_record_persistor: Any | None = None,
     ) -> Any:
         record = MagicMock()
         record.key_id = f"ik_stub_{program}_{len(self.calls)}"

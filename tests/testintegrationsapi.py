@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -869,7 +868,6 @@ def test_install_claim_is_owner_bound_short_lived_and_not_a_raw_key(client: Test
     registry = SimpleNamespace(get_keys_for_owner=lambda _owner: [record])
     claim = SimpleNamespace(
         claim_token="ic_claim_single_use_0123456789",
-        expires_at=datetime(2030, 1, 1, tzinfo=UTC),
     )
     handoff_service = SimpleNamespace(issue_claim=MagicMock(return_value=claim))
 
@@ -890,7 +888,12 @@ def test_install_claim_is_owner_bound_short_lived_and_not_a_raw_key(client: Test
     payload = response.json()
     assert payload["key_id"] == record.key_id
     assert payload["claim_token"] == claim.claim_token
-    assert payload["command"] == (f"python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\npython -m ironclaw_installer bootstrap --program openclaw --claim-token {claim.claim_token}")
+    assert payload["command"] == (
+        "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\n"
+        f"python -m ironclaw_installer redeem --program openclaw --claim-token {claim.claim_token}\n"
+        "gh skill install Enlightenism/IronClaw-Security skills/ironclaw-security --agent openclaw --scope user"
+    )
+    assert "expires_at" not in payload
     assert "install_key" not in payload
     assert response.headers["cache-control"] == "no-store, private"
     handoff_service.issue_claim.assert_called_once_with(

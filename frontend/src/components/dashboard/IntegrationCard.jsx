@@ -16,9 +16,14 @@ const DEFAULT_TINT_STYLE = TINT_STYLES.platinum;
 
 const CLAIM_TOKEN_PATTERN = /^ic_claim_[A-Za-z0-9_-]{20,128}$/;
 const RUNTIME_PROGRAM_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+const COMMAND_MAX_LENGTH = 1024;
 const INSTALLER_SOURCE_COMMAND =
   "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git";
-const PLACEHOLDER_TEXT = "Generate a one-time bootstrap command after purchase";
+const SKILL_REPOSITORY = "Enlightenism/IronClaw-Security";
+const SKILL_REPOSITORY_PATH = "skills/ironclaw-security";
+const HERMES_SKILL_URL =
+  "https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md";
+const PLACEHOLDER_TEXT = "Generate a one-time install command after purchase";
 const hashSeed = (text) => {
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
@@ -170,7 +175,17 @@ const impactStyle = (revealed) => ({
   transition: "opacity 0.6s ease-out 0.05s",
 });
 
-const validateInstallClaim = (claim, program, integrationId) => {
+const buildGenericInstallCommand = (program, agentId) => {
+  if (program === "hermes") {
+    return `hermes skills install ${HERMES_SKILL_URL} --name ironclaw-security`;
+  }
+  if (typeof agentId !== "string" || !agentId) {
+    return null;
+  }
+  return `gh skill install ${SKILL_REPOSITORY} ${SKILL_REPOSITORY_PATH} --agent ${agentId} --scope user`;
+};
+
+const validateInstallClaim = (claim, program, integrationId, agentId) => {
   if (
     !claim ||
     claim.program !== program ||
@@ -180,24 +195,22 @@ const validateInstallClaim = (claim, program, integrationId) => {
     typeof claim.claim_token !== "string" ||
     !CLAIM_TOKEN_PATTERN.test(claim.claim_token) ||
     typeof claim.command !== "string" ||
-    claim.command.length > 512 ||
-    typeof claim.expires_at !== "string"
+    claim.command.length > COMMAND_MAX_LENGTH
   ) {
     return null;
   }
 
-  const expectedCommand = `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer bootstrap --program ${program} --claim-token ${claim.claim_token}`;
-  const expiresAt = Date.parse(claim.expires_at);
-
-  if (
-    claim.command !== expectedCommand ||
-    !Number.isFinite(expiresAt) ||
-    expiresAt <= Date.now()
-  ) {
+  const genericCommand = buildGenericInstallCommand(program, agentId);
+  if (!genericCommand) {
     return null;
   }
 
-  return { command: claim.command.trim(), expiresAt };
+  const expectedCommand = `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer redeem --program ${program} --claim-token ${claim.claim_token}\n${genericCommand}`;
+  if (claim.command !== expectedCommand) {
+    return null;
+  }
+
+  return { command: claim.command.trim() };
 };
 
 const prefersReducedMotion = () =>
@@ -214,6 +227,7 @@ const IntegrationCard = ({
   title,
   program,
   integrationId,
+  agentId,
   available = false,
   onCreateClaim,
   tint = "gold",
@@ -223,7 +237,6 @@ const IntegrationCard = ({
   const [pressed, setPressed] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [installCommand, setInstallCommand] = useState("");
-  const [claimExpiresAt, setClaimExpiresAt] = useState(null);
   const cardRef = useRef(null);
   const reducedMotionRef = useRef(false);
   const finePointerRef = useRef(false);
@@ -292,29 +305,8 @@ const IntegrationCard = ({
     }
 
     setInstallCommand("");
-    setClaimExpiresAt(null);
     return undefined;
   }, [available]);
-
-  useEffect(() => {
-    if (claimExpiresAt === null) {
-      return undefined;
-    }
-
-    const delay = claimExpiresAt - Date.now();
-    if (delay <= 0) {
-      setInstallCommand("");
-      setClaimExpiresAt(null);
-      return undefined;
-    }
-
-    const timeout = globalThis.setTimeout(() => {
-      setInstallCommand("");
-      setClaimExpiresAt(null);
-    }, delay);
-
-    return () => globalThis.clearTimeout(timeout);
-  }, [claimExpiresAt]);
 
   const canonicalTitle = typeof title === "string" ? title.trim() : "";
   if (
@@ -396,13 +388,13 @@ const IntegrationCard = ({
         claim,
         program,
         integrationId,
+        agentId,
       );
       if (!validatedClaim) {
         throw new Error("The install claim response is invalid.");
       }
 
       setInstallCommand(validatedClaim.command);
-      setClaimExpiresAt(validatedClaim.expiresAt);
       setCopied(false);
       toast.success("One-time install command generated");
     } catch {
@@ -527,9 +519,10 @@ const IntegrationCard = ({
       </div>
 
       <p className="mb-2 text-[11px] leading-snug text-[#BFC1C2]">
-        Install commands will be available to generate after purchase, and will
-        have a unique user key embedded into the install command for your
-        account.
+        After your purchase is verified, generate a one-time install command for
+        this platform. The command installs the shared IronClaw security skill
+        and embeds a single-use key for your account. The key is cleared once it
+        is redeemed.
       </p>
 
       <div className="flex items-stretch gap-1.5">
@@ -562,12 +555,6 @@ const IntegrationCard = ({
           {copied ? <Check size={12} /> : <Copy size={12} />}
         </button>
       </div>
-      {claimExpiresAt !== null ? (
-        <p className="mt-1 text-[10px] text-white/50">
-          This one-time command expires{" "}
-          {new Date(claimExpiresAt).toLocaleTimeString()}.
-        </p>
-      ) : null}
       <button
         type="button"
         onClick={generate}

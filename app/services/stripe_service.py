@@ -1505,6 +1505,10 @@ class StripeService:
         if mode == StripeCheckoutMode.PAYMENT:
             params["payment_method_types[0]"] = "card"
 
+        # Carry the buyer's owner key onto the subscription so renewal credits land in the same wallet.
+        if mode == StripeCheckoutMode.SUBSCRIPTION and session_meta.get("owner_key"):
+            params["subscription_data[metadata][owner_key]"] = str(session_meta["owner_key"])
+
         if customer_id:
             params["customer"] = customer_id
 
@@ -1889,8 +1893,24 @@ class StripeService:
             return UnitBalanceResponse(org_id=org_id, balance=balance, ledger_entries=ledger)
         return self.debit_units(org_id, units_needed, reason, reference_id)
 
-    def get_unit_balance(self, org_id: str) -> UnitBalanceResponse:
-        return self._sync_balances_from_wallet(org_id)
+    def get_unit_balance(self, org_id: str, *, owner_key: str | None = None) -> UnitBalanceResponse:
+        return self._sync_balances_from_wallet(org_id, owner_key=owner_key)
+
+    def get_checkout_units_credited(
+        self,
+        session_id: str,
+        org_id: str,
+        *,
+        owner_key: str | None = None,
+    ) -> int:
+        """Return units actually credited to the wallet for a checkout session."""
+        wallet_owner_key = self._resolve_wallet_owner_key(org_id, owner_key)
+        entries = self._wallet_registry.list_ledger_entries(
+            owner_key=wallet_owner_key,
+            limit=500,
+            checkout_session_id=session_id,
+        )
+        return sum(int(entry.units) for entry in entries if entry.entry_type == "credit")
 
     def adjust_unit_balance(
         self,
@@ -2720,11 +2740,13 @@ class StripeService:
                             break
 
                 if org_id and renewal_units > 0:
+                    renewal_owner_key = str((record.metadata or {}).get("owner_key") or "").strip() or None
                     self.credit_units(
                         org_id,
                         renewal_units,
                         StripeUnitEventReason.SUBSCRIPTION_RENEWED,
                         reference_id=invoice_id,
+                        owner_key=renewal_owner_key,
                     )
                     renewal_units_credited = renewal_units
                     logger.info(
