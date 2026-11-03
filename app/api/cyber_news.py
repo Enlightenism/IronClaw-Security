@@ -39,8 +39,8 @@ class _FeedSource:
 _FEED_SOURCES: Final[tuple[_FeedSource, ...]] = (
     _FeedSource(
         key="attacks",
-        source="Global Cyber Attack News",
-        url=("https://news.google.com/rss/search?q=cyber+attack+OR+ransomware+OR+data+breach&hl=en-US&gl=US&ceid=US:en"),
+        source="Krebs on Security",
+        url="https://krebsonsecurity.com/feed/",
     ),
     _FeedSource(
         key="hacker_news",
@@ -49,8 +49,8 @@ _FEED_SOURCES: Final[tuple[_FeedSource, ...]] = (
     ),
     _FeedSource(
         key="cisa",
-        source="CISA News",
-        url=("https://news.google.com/rss/search?q=CISA+cybersecurity+when:7d&hl=en-US&gl=US&ceid=US:en"),
+        source="CISA & Government Cyber News",
+        url="https://therecord.media/feed",
     ),
     _FeedSource(
         key="bleeping_computer",
