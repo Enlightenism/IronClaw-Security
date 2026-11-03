@@ -50,7 +50,7 @@ _FEED_SOURCES: Final[tuple[_FeedSource, ...]] = (
     _FeedSource(
         key="cisa",
         source="CISA News",
-        url=("https://news.google.com/rss/search?q=CISA+OR+%22Cybersecurity+and+Infrastructure+Security+Agency%22+OR+%22CISA+KEV%22+when:7d&hl=en-US&gl=US&ceid=US:en"),
+        url=("https://news.google.com/rss/search?q=CISA+cybersecurity+when:7d&hl=en-US&gl=US&ceid=US:en"),
     ),
     _FeedSource(
         key="bleeping_computer",
