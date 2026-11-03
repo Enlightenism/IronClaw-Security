@@ -37,8 +37,8 @@ class _FeedSource:
 _FEED_SOURCES: Final[tuple[_FeedSource, ...]] = (
     _FeedSource(
         key="attacks",
-        source="CISA Known Exploited Vulnerabilities",
-        url="https://www.cisa.gov/cybersecurity-advisories/all.xml",
+        source="Global Cyber Attack News",
+        url=("https://news.google.com/rss/search?q=cyber+attack+OR+ransomware+OR+data+breach&hl=en-US&gl=US&ceid=US:en"),
     ),
     _FeedSource(
         key="hacker_news",
@@ -47,8 +47,8 @@ _FEED_SOURCES: Final[tuple[_FeedSource, ...]] = (
     ),
     _FeedSource(
         key="cisa",
-        source="CISA",
-        url="https://www.cisa.gov/cybersecurity-advisories/all.xml",
+        source="CISA News",
+        url=("https://news.google.com/rss/search?q=when:2d+allinurl:cisa.gov&hl=en-US&gl=US&ceid=US:en"),
     ),
     _FeedSource(
         key="bleeping_computer",
