@@ -16,7 +16,9 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+
 router = APIRouter(tags=["cyber-news"])
+
 
 REQUEST_TIMEOUT_SECONDS: Final[float] = 15.0
 CACHE_TTL_SECONDS: Final[float] = 600.0
@@ -48,7 +50,7 @@ _FEED_SOURCES: Final[tuple[_FeedSource, ...]] = (
     _FeedSource(
         key="cisa",
         source="CISA News",
-        url=("https://news.google.com/rss/search?q=when:2d+allinurl:cisa.gov&hl=en-US&gl=US&ceid=US:en"),
+        url=("https://news.google.com/rss/search?q=CISA+OR+%22Cybersecurity+and+Infrastructure+Security+Agency%22+OR+%22CISA+KEV%22+when:7d&hl=en-US&gl=US&ceid=US:en"),
     ),
     _FeedSource(
         key="bleeping_computer",
