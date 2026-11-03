@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["cyber-news"])
 
-REQUEST_TIMEOUT_SECONDS: Final[float] = 10.0
+REQUEST_TIMEOUT_SECONDS: Final[float] = 15.0
 CACHE_TTL_SECONDS: Final[float] = 600.0
 MAX_ITEMS_PER_FEED: Final[int] = 15
 USER_AGENT: Final[str] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
@@ -35,10 +35,26 @@ class _FeedSource:
 
 
 _FEED_SOURCES: Final[tuple[_FeedSource, ...]] = (
-    _FeedSource("attacks", "Cyber Security Hub", "https://www.cshub.com/rss-feeds/attacks"),
-    _FeedSource("hacker_news", "The Hacker News", "https://feeds.feedburner.com/TheHackersNews"),
-    _FeedSource("cisa", "CISA", "https://www.cisa.gov/cybersecurity-advisories/all.xml"),
-    _FeedSource("bleeping_computer", "BleepingComputer", "https://www.bleepingcomputer.com/feed/"),
+    _FeedSource(
+        key="attacks",
+        source="CISA Known Exploited Vulnerabilities",
+        url="https://www.cisa.gov/cybersecurity-advisories/all.xml",
+    ),
+    _FeedSource(
+        key="hacker_news",
+        source="The Hacker News",
+        url="https://feeds.feedburner.com/TheHackersNews",
+    ),
+    _FeedSource(
+        key="cisa",
+        source="CISA",
+        url="https://www.cisa.gov/cybersecurity-advisories/all.xml",
+    ),
+    _FeedSource(
+        key="bleeping_computer",
+        source="BleepingComputer",
+        url="https://www.bleepingcomputer.com/feed/",
+    ),
 )
 
 
@@ -78,19 +94,28 @@ def _sanitize_title(raw: object) -> str:
 
 def _entry_datetime(entry: Any) -> datetime | None:
     struct = entry.get("published_parsed") or entry.get("updated_parsed")
+
     if not struct:
         return None
+
     return datetime(*struct[:6], tzinfo=UTC)
 
 
-def _parse_entries(parsed: Any, source: str) -> list[tuple[datetime | None, CyberNewsItem]]:
+def _parse_entries(
+    parsed: Any,
+    source: str,
+) -> list[tuple[datetime | None, CyberNewsItem]]:
     items: list[tuple[datetime | None, CyberNewsItem]] = []
+
     for entry in parsed.entries:
         title = _sanitize_title(entry.get("title"))
         link = str(entry.get("link") or "").strip()
+
         if not title or not link.startswith(("https://", "http://")):
             continue
+
         published = _entry_datetime(entry)
+
         items.append(
             (
                 published,
@@ -102,23 +127,46 @@ def _parse_entries(parsed: Any, source: str) -> list[tuple[datetime | None, Cybe
                 ),
             )
         )
+
     items.sort(key=lambda pair: pair[0] or _MIN_DATETIME, reverse=True)
     return items[:MAX_ITEMS_PER_FEED]
 
 
-async def _fetch_feed(client: httpx.AsyncClient, feed: _FeedSource) -> list[tuple[datetime | None, CyberNewsItem]]:
-    response = await client.get(feed.url)
-    response.raise_for_status()
-    parsed = await asyncio.to_thread(feedparser.parse, response.content)
-    if parsed.bozo and not parsed.entries:
-        raise ValueError(f"{feed.source} returned an unreadable feed")
-    return _parse_entries(parsed, feed.source)
+async def _fetch_feed(
+    client: httpx.AsyncClient,
+    feed: _FeedSource,
+) -> list[tuple[datetime | None, CyberNewsItem]]:
+    try:
+        response = await client.get(feed.url)
+        response.raise_for_status()
+
+        parsed = await asyncio.to_thread(feedparser.parse, response.content)
+
+        if parsed.bozo and not parsed.entries:
+            logger.warning(
+                "cyber_news: unreadable feed %s: %s",
+                feed.key,
+                getattr(parsed, "bozo_exception", "unknown parse error"),
+            )
+            return []
+
+        return _parse_entries(parsed, feed.source)
+    except Exception as exc:
+        logger.exception(
+            "cyber_news: feed failed %s: %s",
+            feed.key,
+            exc,
+        )
+        return []
 
 
 async def _build_payload() -> CyberNewsResponse:
     async with httpx.AsyncClient(
         timeout=REQUEST_TIMEOUT_SECONDS,
-        headers={"User-Agent": USER_AGENT, "Accept": ACCEPT_HEADER},
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": ACCEPT_HEADER,
+        },
         follow_redirects=True,
     ) as client:
         results = await asyncio.gather(
@@ -133,9 +181,14 @@ async def _build_payload() -> CyberNewsResponse:
         )
 
     collected: dict[str, list[CyberNewsItem]] = {}
+
     for feed, result in zip(_FEED_SOURCES, results, strict=True):
         if isinstance(result, BaseException):
-            logger.warning("Cyber news feed %s failed: %s", feed.source, type(result).__name__)
+            logger.warning(
+                "cyber_news: feed %s failed: %s",
+                feed.key,
+                type(result).__name__,
+            )
             collected[feed.key] = []
         else:
             collected[feed.key] = [item for _, item in result]
