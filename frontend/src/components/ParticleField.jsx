@@ -28,13 +28,6 @@ const ParticleField = ({ density = 180, paused = false }) => {
       "255, 255, 255",
     ];
 
-    const prefersReducedMotion = () => {
-      if (typeof window === "undefined" || !window.matchMedia) {
-        return false;
-      }
-      return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    };
-
     const getCanvasMetrics = () => {
       const rect = canvas.getBoundingClientRect();
       const nextWidth = Math.max(
@@ -98,7 +91,7 @@ const ParticleField = ({ density = 180, paused = false }) => {
     };
 
     const renderConstellation = () => {
-      if (prefersReducedMotion() || stars.length < 2) {
+      if (stars.length < 2) {
         return;
       }
 
@@ -214,7 +207,7 @@ const ParticleField = ({ density = 180, paused = false }) => {
     };
 
     const renderPointerAttraction = () => {
-      if (prefersReducedMotion() || !pointer.active || stars.length === 0) {
+      if (!pointer.active || stars.length === 0) {
         return;
       }
 
@@ -315,12 +308,7 @@ const ParticleField = ({ density = 180, paused = false }) => {
     };
 
     const startLoop = () => {
-      if (
-        prefersReducedMotion() ||
-        paused ||
-        document.hidden ||
-        rafRef.current !== null
-      ) {
+      if (paused || document.hidden || rafRef.current !== null) {
         return;
       }
       lastFrameTimeRef.current = 0;
@@ -383,7 +371,7 @@ const ParticleField = ({ density = 180, paused = false }) => {
     const onTouchRelease = () => {};
 
     const handleVisibilityChange = () => {
-      isPaused = document.hidden || paused || prefersReducedMotion();
+      isPaused = document.hidden || paused;
       if (isPaused) {
         clearPointer();
         stopLoop();
@@ -397,7 +385,7 @@ const ParticleField = ({ density = 180, paused = false }) => {
 
     const handleViewportResize = () => {
       resize();
-      if (prefersReducedMotion() || paused || document.hidden) {
+      if (paused || document.hidden) {
         renderFrame();
         return;
       }
@@ -406,7 +394,7 @@ const ParticleField = ({ density = 180, paused = false }) => {
 
     resize();
     renderFrame();
-    if (!paused && !document.hidden && !prefersReducedMotion()) {
+    if (!paused && !document.hidden) {
       startLoop();
     }
     window.addEventListener("resize", handleViewportResize);

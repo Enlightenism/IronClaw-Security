@@ -146,12 +146,14 @@
   }
 }
 
+/* index.css freezes all animations under reduced motion; re-assert these with !important so the ticker keeps moving on every device. */
 @media (prefers-reduced-motion: reduce) {
-  .cyber-ticker-track {
-    animation: none;
+  .cyber-ticker-label,
+  .cyber-ticker-box {
+    animation: text-shimmer 4s linear infinite !important;
   }
 
-  .cyber-ticker-box {
-    overflow-x: auto;
+  .cyber-ticker-track.is-scrolling {
+    animation: cyber-ticker-scroll 100s linear infinite !important;
   }
 }

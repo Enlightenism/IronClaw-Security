@@ -284,7 +284,7 @@ describe("ParticleField", () => {
     expect(movedCallCount).toBe(stickyCallCount);
   });
 
-  it("respects reduced motion and subscribes to viewport resizing on mobile layouts", () => {
+  it("keeps the animation running and subscribes to viewport resizing on mobile layouts even when reduced motion is requested", () => {
     window.matchMedia.mockImplementation((query) => ({
       matches: query === "(prefers-reduced-motion: reduce)",
       media: query,
@@ -297,9 +297,7 @@ describe("ParticleField", () => {
 
     render(<ParticleField density={50} />);
 
-    expect(window.matchMedia).toHaveBeenCalledWith(
-      "(prefers-reduced-motion: reduce)",
-    );
+    expect(window.requestAnimationFrame).toHaveBeenCalled();
     expect(window.visualViewport.addEventListener).toHaveBeenCalledWith(
       "resize",
       expect.any(Function),
