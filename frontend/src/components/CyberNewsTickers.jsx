@@ -32,7 +32,12 @@ function TickerItems({ items, hidden = false }) {
     <div className="cyber-ticker-group" aria-hidden={hidden || undefined}>
       {items.map((item) => (
         <span className="cyber-ticker-item" key={`${item.link}-${item.title}`}>
-          <a href={item.link} target="_blank" rel="noopener noreferrer">
+          <a
+            href={item.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            tabIndex={hidden ? -1 : undefined}
+          >
             {item.title}
           </a>
         </span>

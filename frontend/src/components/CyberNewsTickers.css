@@ -52,6 +52,7 @@
   min-width: 0;
   min-height: 52px;
   overflow: hidden;
+  overflow: clip;
   border: 1px solid transparent;
   border-radius: 0 6px 6px 6px;
   background:
@@ -78,6 +79,7 @@
 
 .cyber-ticker-track.is-scrolling {
   animation: cyber-ticker-scroll 100s linear infinite;
+  will-change: transform;
 }
 
 .cyber-ticker-group {
