@@ -269,6 +269,22 @@ describe("IntegrationCard", () => {
     expect(screen.getByTestId("claude-code-card-copy")).toBeEnabled();
   });
 
+  it("restores a saved command from the dashboard and flags a redeemed key", () => {
+    const savedCommand = makeClaim().command;
+
+    renderCard({ savedCommand, savedCommandClaimed: true });
+
+    expect(getDisplayedCommand()).toBe(savedCommand);
+    expect(screen.getByTestId("claude-code-card-claimed-note")).toBeTruthy();
+  });
+
+  it("keeps the card locked when a saved command fails validation", () => {
+    renderCard({ savedCommand: `${makeClaim().command} && rm -rf /` });
+
+    expect(screen.getByTestId("claude-code-card-copy").disabled).toBe(true);
+    expect(screen.queryByTestId("claude-code-card-claimed-note")).toBeNull();
+  });
+
   it("gives each card a different, repeatable crack pattern", () => {
     const { unmount } = render(
       <>

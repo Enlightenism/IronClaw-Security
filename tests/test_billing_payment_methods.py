@@ -70,14 +70,6 @@ def make_method(
     )
 
 
-class DummyLock:
-    def __enter__(self) -> DummyLock:
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        return None
-
-
 class DummyRequest:
     def __init__(self, query_params: dict[str, str] | None = None) -> None:
         self.query_params = query_params or {}
@@ -493,8 +485,7 @@ class TestOrgResolutionHelpers:
 class TestFetchPaymentMethodsFromStripe:
     def test_returns_none_and_empty_when_no_customer_mapping(self) -> None:
         svc = SimpleNamespace(
-            _lock=DummyLock(),
-            _org_customer_map={},
+            resolve_customer_id=lambda _org_id: None,
             list_payment_methods=MagicMock(),
         )
         customer_id, methods = _fetch_payment_methods_from_stripe(svc=svc, organizationid="org-001")
@@ -529,8 +520,7 @@ class TestFetchPaymentMethodsFromStripe:
         ]
         list_payment_methods = MagicMock(return_value=raw_methods)
         svc = SimpleNamespace(
-            _lock=DummyLock(),
-            _org_customer_map={"org-001": "cus-123"},
+            resolve_customer_id=lambda org_id: {"org-001": "cus-123"}.get(org_id),
             list_payment_methods=list_payment_methods,
         )
 

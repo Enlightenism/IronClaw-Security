@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Generator
 import os
-import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -53,8 +52,8 @@ def _override_get_auth_context() -> AuthContext:
 
 def _build_mock_svc() -> MagicMock:
     svc = MagicMock(spec=StripeService)
-    svc._lock = threading.Lock()
     svc._org_customer_map = {}
+    svc.resolve_customer_id.side_effect = lambda org_id: svc._org_customer_map.get(org_id)
     svc.list_payment_methods.return_value = []
     svc.set_default_payment_method.return_value = {"status": "updated"}
     svc.detach_payment_method.return_value = {"status": "deleted"}

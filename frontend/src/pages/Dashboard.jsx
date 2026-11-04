@@ -790,6 +790,11 @@ const Dashboard = () => {
           metadata?.program === program &&
           metadata?.slug === integrationId &&
           Boolean(metadata?.key_id),
+        savedCommand:
+          typeof metadata?.saved_command === "string"
+            ? metadata.saved_command
+            : "",
+        savedCommandClaimed: metadata?.saved_command_claimed === true,
         onCreateClaim: createInstallClaim,
         tint,
         testid: toCardTestId(program),
@@ -951,6 +956,8 @@ const Dashboard = () => {
                   agentId={card.agentId}
                   available={card.available}
                   onCreateClaim={card.onCreateClaim}
+                  savedCommand={card.savedCommand}
+                  savedCommandClaimed={card.savedCommandClaimed}
                   tint={card.tint}
                   testid={card.testid}
                 />

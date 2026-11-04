@@ -230,6 +230,8 @@ const IntegrationCard = ({
   agentId,
   available = false,
   onCreateClaim,
+  savedCommand = "",
+  savedCommandClaimed = false,
   tint = "gold",
   testid,
 }) => {
@@ -237,6 +239,7 @@ const IntegrationCard = ({
   const [pressed, setPressed] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [installCommand, setInstallCommand] = useState("");
+  const [installClaimed, setInstallClaimed] = useState(false);
   const cardRef = useRef(null);
   const reducedMotionRef = useRef(false);
   const finePointerRef = useRef(false);
@@ -299,14 +302,41 @@ const IntegrationCard = ({
     return () => observer.disconnect();
   }, [revealed]);
 
-  useEffect(() => {
-    if (available) {
-      return undefined;
+  const restoredClaim = useMemo(() => {
+    if (typeof savedCommand !== "string" || !savedCommand) {
+      return null;
     }
 
-    setInstallCommand("");
-    return undefined;
-  }, [available]);
+    const tokenMatch = /--claim-token (ic_claim_[A-Za-z0-9_-]+)/.exec(
+      savedCommand,
+    );
+    if (!tokenMatch) {
+      return null;
+    }
+
+    return validateInstallClaim(
+      {
+        program,
+        integration_id: integrationId,
+        claim_token: tokenMatch[1],
+        command: savedCommand,
+      },
+      program,
+      integrationId,
+      agentId,
+    );
+  }, [savedCommand, program, integrationId, agentId]);
+
+  useEffect(() => {
+    if (available !== true || !restoredClaim) {
+      setInstallCommand("");
+      setInstallClaimed(false);
+      return;
+    }
+
+    setInstallCommand(restoredClaim.command);
+    setInstallClaimed(savedCommandClaimed === true);
+  }, [available, restoredClaim, savedCommandClaimed]);
 
   const canonicalTitle = typeof title === "string" ? title.trim() : "";
   if (
@@ -395,6 +425,7 @@ const IntegrationCard = ({
       }
 
       setInstallCommand(validatedClaim.command);
+      setInstallClaimed(false);
       setCopied(false);
       toast.success("One-time install command generated");
     } catch {
@@ -555,6 +586,15 @@ const IntegrationCard = ({
           {copied ? <Check size={12} /> : <Copy size={12} />}
         </button>
       </div>
+      {installClaimed && normalizedCommand ? (
+        <p
+          className="text-[10px] leading-relaxed text-white/50"
+          data-testid={`${testid}-claimed-note`}
+        >
+          This key was already redeemed. Generate a new command to install on
+          another machine.
+        </p>
+      ) : null}
       <button
         type="button"
         onClick={generate}

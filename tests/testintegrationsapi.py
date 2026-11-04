@@ -869,7 +869,7 @@ def test_install_claim_is_owner_bound_short_lived_and_not_a_raw_key(client: Test
     claim = SimpleNamespace(
         claim_token="ic_claim_single_use_0123456789",
     )
-    handoff_service = SimpleNamespace(issue_claim=MagicMock(return_value=claim))
+    handoff_service = SimpleNamespace(issue_claim=MagicMock(return_value=claim), save_command=MagicMock())
 
     client.app.dependency_overrides[get_auth_context] = lambda: auth_context
     try:
@@ -900,6 +900,12 @@ def test_install_claim_is_owner_bound_short_lived_and_not_a_raw_key(client: Test
         key_id=record.key_id,
         owner_key=owner_key,
         program="openclaw",
+    )
+    handoff_service.save_command.assert_called_once_with(
+        key_id=record.key_id,
+        owner_key=owner_key,
+        program="openclaw",
+        command=payload["command"],
     )
 
 

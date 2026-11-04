@@ -80,8 +80,8 @@ const LAYERS = [
   },
   {
     icon: UserCheck,
-    title: "Review Queue & Human-in-the-Loop",
-    body: "Provides human review for blocked activity — separate from its allow/block verdict — with full context and an audit trail before any action is reconsidered.",
+    title: "Malicious Install Skills Blocked",
+    body: "Install IronClaw-Security before using any other install skill, and that skill will be scanned before installed. One of the major issues for coding platforms today.",
   },
   {
     icon: FileClock,

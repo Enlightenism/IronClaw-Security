@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -16,6 +17,7 @@ from app.services.install_key_handoff import (
     get_install_key_handoff_service,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["integration-routes"])
 
 _PAID_PAYMENT_STATUSES = {"paid", "success", "succeeded", "complete", "completed", "active", "authorized"}
@@ -240,6 +242,12 @@ def get_integration_observability(integration_id: str) -> dict[str, object]:
 async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[str, Any]:
     owner_key = _resolve_install_owner(auth)
     install_keys = _select_paid_install_key_records(owner_key) if owner_key else {}
+    saved_commands: dict[str, Any] = {}
+    if owner_key and install_keys:
+        try:
+            saved_commands = get_install_key_handoff_service().get_saved_commands(owner_key=owner_key)
+        except Exception:
+            logger.warning("integrations.saved_commands_unavailable", exc_info=True)
 
     payload: dict[str, Any] = {
         "status": "locked",
@@ -269,7 +277,13 @@ async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[
             "shared_package": metadata.get("shared_package", False),
             "shared_install_key_family": metadata.get("shared_install_key_family", False),
             "package_type": metadata.get("package_type", "runtime-install"),
+            "saved_command": "",
+            "saved_command_claimed": False,
         }
+        saved = saved_commands.get(program)
+        if record is not None and saved is not None and saved.key_id == record.key_id:
+            payload["install_metadata"][platform_slug]["saved_command"] = saved.command
+            payload["install_metadata"][platform_slug]["saved_command_claimed"] = saved.claimed
         payload["command_metadata"][platform_slug] = ""
         if record is not None:
             payload["status"] = "ok"
@@ -305,10 +319,18 @@ def create_integration_install_claim(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No active paid install key is available.")
 
     try:
-        claim = get_install_key_handoff_service().issue_claim(
+        handoff_service = get_install_key_handoff_service()
+        claim = handoff_service.issue_claim(
             key_id=record.key_id,
             owner_key=owner_key,
             program=spec.program,
+        )
+        command = spec.format_command(claim.claim_token)
+        handoff_service.save_command(
+            key_id=record.key_id,
+            owner_key=owner_key,
+            program=spec.program,
+            command=command,
         )
     except InstallKeySecretUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -325,7 +347,7 @@ def create_integration_install_claim(
         "program": spec.program,
         "key_id": record.key_id,
         "claim_token": claim.claim_token,
-        "command": spec.format_command(claim.claim_token),
+        "command": command,
     }
 
 

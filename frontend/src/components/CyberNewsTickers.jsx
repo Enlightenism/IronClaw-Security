@@ -27,43 +27,54 @@ const TICKERS = [
   },
 ];
 
-function Ticker({ label, color, items, status }) {
+function TickerItems({ items, hidden = false }) {
   return (
-    <div className="cyber-ticker">
-      <span className="cyber-ticker-label" style={{ backgroundColor: color }}>
-        {label}
-      </span>
+    <div className="cyber-ticker-group" aria-hidden={hidden || undefined}>
+      {items.map((item) => (
+        <span className="cyber-ticker-item" key={`${item.link}-${item.title}`}>
+          <a href={item.link} target="_blank" rel="noopener noreferrer">
+            {item.title}
+          </a>
+        </span>
+      ))}
+    </div>
+  );
+}
 
-      <div className="cyber-ticker-track">
-        {status === "error" && (
-          <span className="cyber-ticker-item">
-            News feed temporarily unavailable.
-          </span>
-        )}
+function Ticker({ label, color, items, status }) {
+  const hasItems = status === "ready" && items.length > 0;
 
-        {status === "loading" && (
-          <span className="cyber-ticker-item">
-            Loading cybersecurity updates…
-          </span>
-        )}
+  return (
+    <div className="cyber-ticker" style={{ "--ticker-color": color }}>
+      <span className="cyber-ticker-label">{label}</span>
 
-        {status === "ready" && items.length === 0 && (
-          <span className="cyber-ticker-item">
-            No current updates available.
-          </span>
-        )}
-
-        {status === "ready" &&
-          items.map((item) => (
-            <span
-              className="cyber-ticker-item"
-              key={`${item.link}-${item.title}`}
-            >
-              <a href={item.link} target="_blank" rel="noopener noreferrer">
-                {item.title}
-              </a>
+      <div className="cyber-ticker-box">
+        <div className={`cyber-ticker-track${hasItems ? " is-scrolling" : ""}`}>
+          {status === "error" && (
+            <span className="cyber-ticker-item">
+              News feed temporarily unavailable.
             </span>
-          ))}
+          )}
+
+          {status === "loading" && (
+            <span className="cyber-ticker-item">
+              Loading cybersecurity updates…
+            </span>
+          )}
+
+          {status === "ready" && items.length === 0 && (
+            <span className="cyber-ticker-item">
+              No current updates available.
+            </span>
+          )}
+
+          {hasItems && (
+            <>
+              <TickerItems items={items} />
+              <TickerItems items={items} hidden />
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

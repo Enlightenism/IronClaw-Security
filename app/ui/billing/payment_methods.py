@@ -537,12 +537,7 @@ def _fetch_payment_methods_from_stripe(
     svc: StripeService,
     organizationid: str,
 ) -> tuple[str | None, list[BillingPaymentMethodView]]:
-    customer_id = None
-    try:
-        with svc._lock:  # noqa: SLF001
-            customer_id = svc._org_customer_map.get(organizationid)  # noqa: SLF001
-    except Exception:
-        customer_id = None
+    customer_id = svc.resolve_customer_id(organizationid)
 
     if not customer_id:
         return None, []

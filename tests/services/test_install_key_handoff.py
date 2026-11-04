@@ -214,3 +214,84 @@ def test_memory_storage_is_rejected_in_production(monkeypatch: pytest.MonkeyPatc
             program=_PROGRAM,
             install_key=_RAW_KEY,
         )
+
+
+def test_saved_command_is_encrypted_and_survives_until_redeemed() -> None:
+    record = _make_record()
+    service = _build_service(record=record)
+    service.store_secret(
+        key_id=record.key_id,
+        owner_key=record.owner_key,
+        program=record.program,
+        install_key=_RAW_KEY,
+    )
+    claim = service.issue_claim(
+        key_id=record.key_id,
+        owner_key=record.owner_key,
+        program=record.program,
+    )
+    command = f"python -m ironclaw_installer redeem --program openclaw --claim-token {claim.claim_token}"
+
+    service.save_command(
+        key_id=record.key_id,
+        owner_key=record.owner_key,
+        program=record.program,
+        command=command,
+    )
+
+    stored_secret = install_key_handoff._MEMORY_SECRETS[record.key_id]
+    assert command.encode("utf-8") not in stored_secret.encrypted_command
+
+    saved = service.get_saved_commands(owner_key=record.owner_key)
+    assert set(saved) == {_PROGRAM}
+    assert saved[_PROGRAM].command == command
+    assert saved[_PROGRAM].key_id == record.key_id
+    assert saved[_PROGRAM].claimed is False
+
+    service.redeem_claim(claim.claim_token)
+    assert service.get_saved_commands(owner_key=record.owner_key)[_PROGRAM].claimed is True
+
+
+def test_saved_commands_are_scoped_to_the_owner() -> None:
+    record = _make_record()
+    service = _build_service(record=record)
+    service.store_secret(
+        key_id=record.key_id,
+        owner_key=record.owner_key,
+        program=record.program,
+        install_key=_RAW_KEY,
+    )
+    service.save_command(
+        key_id=record.key_id,
+        owner_key=record.owner_key,
+        program=record.program,
+        command="python -m ironclaw_installer redeem --program openclaw --claim-token ic_claim_x",
+    )
+
+    assert service.get_saved_commands(owner_key="someone-else@ironclaw.test") == {}
+
+
+def test_save_command_requires_recoverable_secret_and_non_empty_command() -> None:
+    service = _build_service(record=_make_record())
+
+    with pytest.raises(InstallKeySecretUnavailableError, match="No recoverable install key"):
+        service.save_command(
+            key_id=_KEY_ID,
+            owner_key=_OWNER_KEY,
+            program=_PROGRAM,
+            command="python -m ironclaw_installer redeem --program openclaw --claim-token ic_claim_x",
+        )
+
+    service.store_secret(
+        key_id=_KEY_ID,
+        owner_key=_OWNER_KEY,
+        program=_PROGRAM,
+        install_key=_RAW_KEY,
+    )
+    with pytest.raises(ValueError, match="Install command is required"):
+        service.save_command(
+            key_id=_KEY_ID,
+            owner_key=_OWNER_KEY,
+            program=_PROGRAM,
+            command="   ",
+        )

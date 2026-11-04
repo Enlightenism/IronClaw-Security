@@ -18,7 +18,8 @@ from uuid import uuid4
 
 from app.core.billing import PLAN_DEFINITIONS, TOKENS_PER_UNIT
 from app.core.install_key_formats import InstallKeyFormatRegistry
-from app.core.install_keys import _read_event_ledger_record, _write_event_ledger_record
+from app.core.install_keys import _read_event_ledger_record, _should_use_memory_fallback, _write_event_ledger_record
+from app.core.supabase import get_supabase_service_client
 from app.core.unit_wallet import get_unit_wallet_registry
 from app.services.install_key_provisioning import InstallKeyProvisioningService
 from app.services.secrets_vault import vault
@@ -36,8 +37,39 @@ logger = logging.getLogger(__name__)
 
 _STRIPE_API_BASE = "https://api.stripe.com/v1"
 _STRIPE_TIMEOUT_SECONDS = 15
+_STRIPE_CUSTOMER_LINKS_TABLE = "stripe_customer_links"
 _METERED_USAGE_BUFFER_MAX = 500
 _CHECKOUT_SESSION_TTL_SECONDS = 1800  # 30 min
+
+
+def _load_customer_link(*, org_id: str | None = None, customer_id: str | None = None) -> dict[str, Any] | None:
+    if _should_use_memory_fallback() or not (org_id or customer_id):
+        return None
+    try:
+        query = get_supabase_service_client().table(_STRIPE_CUSTOMER_LINKS_TABLE).select("org_id,customer_id")
+        query = query.eq("org_id", org_id) if org_id else query.eq("customer_id", customer_id)
+        rows = query.limit(1).execute().data or []
+        if isinstance(rows, dict):
+            rows = [rows]
+        return dict(rows[0]) if rows else None
+    except Exception:
+        logger.warning("stripe.customer_link_load_failed org=%s", org_id or "", exc_info=True)
+        return None
+
+
+def _persist_customer_link(org_id: str, customer_id: str) -> None:
+    if _should_use_memory_fallback():
+        return
+    try:
+        get_supabase_service_client().table(_STRIPE_CUSTOMER_LINKS_TABLE).upsert(
+            {"org_id": org_id, "customer_id": customer_id},
+            on_conflict="org_id",
+            returning="minimal",
+        ).execute()
+    except Exception:
+        logger.warning("stripe.customer_link_persist_failed org=%s", org_id, exc_info=True)
+
+
 _SCHEMA_VERSION = "1.0"
 _INVOICE_CACHE_MAX = 200
 _STRIPE_CHECKOUT_SESSION_ID_PATTERN = re.compile(r"cs_[A-Za-z0-9_]{1,250}\Z")
@@ -994,8 +1026,7 @@ class StripeService:
         Return existing Stripe customer_id for org_id, or create a new one.
         Thread-safe; creates only once per org.
         """
-        with self._lock:
-            existing = self._org_customer_map.get(org_id)
+        existing = self.resolve_customer_id(org_id)
         if existing:
             return existing
 
@@ -1017,6 +1048,7 @@ class StripeService:
         with self._lock:
             self._org_customer_map[org_id] = customer_id
             self._customer_org_map[customer_id] = org_id
+        _persist_customer_link(org_id, customer_id)
 
         logger.info("stripe.customer_created org=%s customer=%s", org_id, customer_id)
         return customer_id
@@ -1030,6 +1062,7 @@ class StripeService:
         with self._lock:
             self._org_customer_map[org_id] = customer_id
             self._customer_org_map[customer_id] = org_id
+        _persist_customer_link(org_id, customer_id)
 
     @staticmethod
     def _is_successful_payment_status(value: Any) -> bool:
@@ -1130,11 +1163,32 @@ class StripeService:
 
     def resolve_org_from_customer(self, customer_id: str) -> str | None:
         with self._lock:
-            return self._customer_org_map.get(customer_id)
+            org_id = self._customer_org_map.get(customer_id)
+        if org_id:
+            return org_id
+        row = _load_customer_link(customer_id=customer_id)
+        org_id = str(row.get("org_id") or "").strip() if row else ""
+        if not org_id:
+            return None
+        self._remember_customer_link(org_id, customer_id)
+        return org_id
 
     def resolve_customer_id(self, org_id: str) -> str | None:
         with self._lock:
-            return self._org_customer_map.get(org_id)
+            customer_id = self._org_customer_map.get(org_id)
+        if customer_id:
+            return customer_id
+        row = _load_customer_link(org_id=org_id)
+        customer_id = str(row.get("customer_id") or "").strip() if row else ""
+        if not customer_id:
+            return None
+        self._remember_customer_link(org_id, customer_id)
+        return customer_id
+
+    def _remember_customer_link(self, org_id: str, customer_id: str) -> None:
+        with self._lock:
+            self._org_customer_map.setdefault(org_id, customer_id)
+            self._customer_org_map.setdefault(customer_id, org_id)
 
     # ------------------------------------------------------------------
     # Payment methods
@@ -1306,13 +1360,11 @@ class StripeService:
                 cached = None
 
         if cached is not None:
-            with self._lock:
-                customer_id = self._org_customer_map.get(org_id, "")
+            customer_id = self.resolve_customer_id(org_id) or ""
             normalized = [_normalize_stripe_invoice(r, org_id, customer_id) for r in cached]
             return [InvoiceResponse(**_filter_to_dataclass_fields(InvoiceResponse, r)) for r in normalized]
 
-        with self._lock:
-            customer_id = self._org_customer_map.get(org_id, "")
+        customer_id = self.resolve_customer_id(org_id) or ""
         if not customer_id:
             logger.warning("stripe.get_invoices_for_org no customer mapping org=%s", org_id)
             return []
@@ -1501,9 +1553,12 @@ class StripeService:
             "line_items[0][quantity]": str(quantity),
         }
 
-        # New: explicitly request card collection for payment mode.
+        # Save the buyer's card for future purchases so Stripe can auto-fill it on checkout.
         if mode == StripeCheckoutMode.PAYMENT:
             params["payment_method_types[0]"] = "card"
+            params["payment_intent_data[setup_future_usage]"] = "off_session"
+            if not customer_id:
+                params["customer_creation"] = "always"
 
         # Carry the buyer's owner key onto the subscription so renewal credits land in the same wallet.
         if mode == StripeCheckoutMode.SUBSCRIPTION and session_meta.get("owner_key"):
@@ -1983,8 +2038,9 @@ class StripeService:
                 updated_at=now,
             )
             self._subscriptions[subscription_id] = record
-            self._org_customer_map.setdefault(org_id, customer_id)
+            effective_customer_id = self._org_customer_map.setdefault(org_id, customer_id)
             self._customer_org_map.setdefault(customer_id, org_id)
+        _persist_customer_link(org_id, effective_customer_id)
 
         logger.info(
             "stripe.subscription_upserted id=%s org=%s status=%s",

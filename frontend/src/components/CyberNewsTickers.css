@@ -3,46 +3,87 @@
   z-index: 10;
   display: flex;
   flex-direction: column;
-  width: 100%;
+  gap: 1.25rem;
+  width: 100vw;
+  max-width: 100vw;
   margin-top: 2.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: left;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 .cyber-ticker {
   display: flex;
-  align-items: stretch;
+  flex-direction: column;
+  align-items: flex-start;
   width: 100%;
-  min-height: 52px;
-  background-color: #000000;
-  border-top: 1px solid #2a2a2a;
-  overflow: hidden;
-}
-
-.cyber-ticker:first-child {
-  border-bottom: 1px solid #2a2a2a;
+  min-width: 0;
 }
 
 .cyber-ticker-label {
-  flex: 0 0 auto;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  padding: 0 16px;
+  min-height: 28px;
+  padding: 4px 16px;
+  border-radius: 6px 6px 0 0;
+  background: linear-gradient(
+    135deg,
+    #fff6c2 0%,
+    var(--ticker-color) 35%,
+    #ffffff 50%,
+    var(--ticker-color) 65%,
+    #fff6c2 100%
+  );
+  background-size: 200% auto;
   color: #000000;
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   white-space: nowrap;
-  z-index: 2;
+  animation: text-shimmer 4s linear infinite;
+}
+
+.cyber-ticker-box {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 0 6px 6px 6px;
+  background:
+    linear-gradient(#000000, #000000) padding-box,
+    linear-gradient(
+      135deg,
+      #fff6c2 0%,
+      var(--ticker-color) 35%,
+      #ffffff 50%,
+      var(--ticker-color) 65%,
+      #fff6c2 100%
+    ) border-box;
+  background-size: auto, 200% auto;
+  animation: text-shimmer 4s linear infinite;
 }
 
 .cyber-ticker-track {
-  flex: 1 1 0;
-  min-width: 0;
   display: flex;
   align-items: center;
+  width: max-content;
+  min-height: 52px;
   white-space: nowrap;
-  animation: cyber-ticker-scroll 75s linear infinite;
+}
+
+.cyber-ticker-track.is-scrolling {
+  animation: cyber-ticker-scroll 100s linear infinite;
+}
+
+.cyber-ticker-group {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .cyber-ticker-item {
@@ -67,17 +108,17 @@
 
 @keyframes cyber-ticker-scroll {
   from {
-    transform: translateX(100%);
+    transform: translateX(0);
   }
 
   to {
-    transform: translateX(-100%);
+    transform: translateX(-50%);
   }
 }
 
 @media (max-width: 1024px) {
   .cyber-ticker-label {
-    padding: 0 12px;
+    padding: 4px 12px;
     font-size: 11px;
   }
 
@@ -88,12 +129,14 @@
 }
 
 @media (max-width: 768px) {
-  .cyber-ticker {
+  .cyber-ticker-box,
+  .cyber-ticker-track {
     min-height: 44px;
   }
 
   .cyber-ticker-label {
-    padding: 0 10px;
+    min-height: 24px;
+    padding: 3px 10px;
     font-size: 10px;
   }
 
@@ -106,6 +149,9 @@
 @media (prefers-reduced-motion: reduce) {
   .cyber-ticker-track {
     animation: none;
+  }
+
+  .cyber-ticker-box {
     overflow-x: auto;
   }
 }

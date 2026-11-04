@@ -7,6 +7,7 @@ import math
 import os
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -250,9 +251,62 @@ def svc_with_sub(svc: StripeService) -> StripeService:
     return svc
 
 
-# ===========================================================================
-# Section A — units_for_tokens() boundary cases
-# ===========================================================================
+class _FakeCustomerLinkQuery:
+    def __init__(self, rows: list[dict[str, str]]) -> None:
+        self._rows = rows
+        self._filters: dict[str, str] = {}
+
+    def select(self, _columns: str) -> _FakeCustomerLinkQuery:
+        return self
+
+    def eq(self, column: str, value: str) -> _FakeCustomerLinkQuery:
+        self._filters[column] = value
+        return self
+
+    def limit(self, _count: int) -> _FakeCustomerLinkQuery:
+        return self
+
+    def upsert(self, payload: dict[str, str], *, on_conflict: str | None = None, returning: str | None = None) -> _FakeCustomerLinkQuery:
+        self._rows[:] = [row for row in self._rows if row["org_id"] != payload["org_id"]]
+        self._rows.append(dict(payload))
+        return self
+
+    def execute(self) -> SimpleNamespace:
+        rows = [row for row in self._rows if all(row.get(k) == v for k, v in self._filters.items())]
+        return SimpleNamespace(data=rows)
+
+
+class _FakeCustomerLinkClient:
+    def __init__(self) -> None:
+        self.rows: list[dict[str, str]] = []
+
+    def table(self, name: str) -> _FakeCustomerLinkQuery:
+        assert name == "stripe_customer_links"
+        return _FakeCustomerLinkQuery(self.rows)
+
+
+class TestCustomerLinkPersistence:
+    @pytest.fixture()
+    def link_store(self, monkeypatch: pytest.MonkeyPatch) -> _FakeCustomerLinkClient:
+        client = _FakeCustomerLinkClient()
+        monkeypatch.setattr("app.services.stripe_service._should_use_memory_fallback", lambda: False)
+        monkeypatch.setattr("app.services.stripe_service.get_supabase_service_client", lambda: client)
+        return client
+
+    def test_registered_mapping_is_persisted_and_reloaded_after_memory_reset(self, svc: StripeService, link_store: _FakeCustomerLinkClient) -> None:
+        svc.register_customer_mapping(_ORG, _CUSTOMER_ID)
+        assert link_store.rows == [{"org_id": _ORG, "customer_id": _CUSTOMER_ID}]
+
+        svc.reset()
+
+        assert svc.resolve_customer_id(_ORG) == _CUSTOMER_ID
+        assert svc.resolve_org_from_customer(_CUSTOMER_ID) == _ORG
+
+    def test_get_or_create_reuses_persisted_customer_instead_of_creating_duplicate(self, svc_wired: StripeService, mock_client: MagicMock, link_store: _FakeCustomerLinkClient) -> None:
+        link_store.rows.append({"org_id": _ORG, "customer_id": _CUSTOMER_ID})
+
+        assert svc_wired.get_or_create_stripe_customer(_ORG) == _CUSTOMER_ID
+        mock_client.post.assert_not_called()
 
 
 class TestUnitsForTokensBoundary:
