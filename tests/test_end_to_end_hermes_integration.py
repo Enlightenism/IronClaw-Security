@@ -6,13 +6,11 @@ from app.api.integrations import router as integrations_router
 from app.core.auth import AuthContext, get_auth_context
 from app.core.install_keys import get_install_key_registry
 from app.main import create_app
-from app.routes.install_keys import router as install_keys_router
 from app.services.integration_registry import get_integration, initialize_integration_registry
 
 
 def _client() -> TestClient:
     app = create_app()
-    app.include_router(install_keys_router)
     app.include_router(integrations_router)
     return TestClient(app)
 
@@ -41,24 +39,15 @@ def test_hermes_end_to_end_paid_flow_and_contract() -> None:
 
     client = _client()
 
-    activate = client.post(
-        "/install-keys/activate",
-        headers={"X-API-Key": "test-api-key", "X-Owner-Key": owner_key},
-        json={"raw_key": record.raw_key},
+    self_status = client.get(
+        "/install-key-events/self",
+        headers={"X-API-Key": "test-api-key", "X-Install-Key": record.raw_key},
     )
-    assert activate.status_code == 200, activate.text
-    activate_payload = activate.json()
-    assert activate_payload["program"] == "hermes"
-    assert activate_payload["valid"] is True
-    assert activate_payload["active"] is True
-
-    my_keys = client.get(
-        "/install-keys/my-keys",
-        headers={"X-API-Key": "test-api-key", "X-Owner-Key": owner_key},
-    )
-    assert my_keys.status_code == 200, my_keys.text
-    my_keys_payload = my_keys.json()
-    hermes_slot = next(item for item in my_keys_payload["keys"] if item["program"] == "hermes")
+    assert self_status.status_code == 200, self_status.text
+    self_payload = self_status.json()
+    assert self_payload["owner_key"] == owner_key
+    assert self_payload["has_active_entitlement"] is True
+    hermes_slot = next(item for item in self_payload["keys"] if item["program"] == "hermes")
     assert hermes_slot["status"] == "active"
     assert hermes_slot["masked_key"] == record.masked_key
 
@@ -160,10 +149,9 @@ def test_hermes_install_key_paid_gate_rejects_unpaid_state() -> None:
     key_registry._records_by_id[record.key_id] = record
 
     client = _client()
-    response = client.post(
-        "/install-keys/activate",
-        headers={"X-API-Key": "test-api-key", "X-Owner-Key": owner_key},
-        json={"raw_key": record.raw_key},
+    response = client.get(
+        "/install-key-events/self",
+        headers={"X-API-Key": "test-api-key", "X-Install-Key": record.raw_key},
     )
     assert response.status_code == 401, response.text
-    assert response.json()["detail"] == "Invalid or inactive install key."
+    assert response.json()["detail"] == "Invalid or inactive install key"

@@ -382,3 +382,45 @@ def test_revoked_event_deactivates_key(client: TestClient) -> None:
     wallet = wallet_registry.get_wallet(owner_key)
     assert wallet is not None
     assert wallet.metadata["dashboard_sync"]["install_key_revoked"]["key_id"] == record.key_id
+
+
+def test_self_status_reports_units_from_live_wallet(client: TestClient) -> None:
+    owner_key = "owner_self_001"
+    wallet_registry = get_unit_wallet_registry()
+    wallet_registry.credit_units(owner_key, 100, metadata={"seeded": True})
+    record = _make_paid_key(owner_key=owner_key, subscription_id="sub_self_001")
+
+    usage_response = _post_event(
+        client,
+        record,
+        {
+            "event_id": "evt_self_usage_001",
+            "event_type": "usage_units_debited",
+            "key_id": record.key_id,
+            "owner_key": owner_key,
+            "program": "openclaw",
+            "units": 7,
+            "action_type": "prompt",
+            "metadata": {"source": "runtime"},
+        },
+    )
+    assert usage_response.status_code == 200, usage_response.text
+
+    response = client.get("/install-key-events/self", headers={"X-Install-Key": record.raw_key})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["owner_key"] == owner_key
+    assert body["has_active_entitlement"] is True
+    assert len(body["keys"]) == 1
+    slot = body["keys"][0]
+    assert slot["key_id"] == record.key_id
+    assert slot["units_used"] == 7
+    assert slot["units_remaining"] == 93
+    assert slot["blocked_attacks"] == 0
+
+
+def test_self_status_rejects_unknown_install_key(client: TestClient) -> None:
+    response = client.get("/install-key-events/self", headers={"X-Install-Key": "ic_install_not_a_real_key"})
+
+    assert response.status_code == 401

@@ -10,6 +10,7 @@ import pytest
 
 from app.core.auth import AuthContext, get_auth_context, require_auth_context
 from app.core.billing import (
+    UNIT_PACKAGE_CATALOG,
     BillingRegistry,
     _reset_billing_registry_for_testing,
     get_billing_registry,
@@ -644,6 +645,54 @@ class TestDashboardWalletKPIs:
             assert response.status_code == 200
             body = response.json()
             assert body["wallet_units"] == 750
+        finally:
+            _clear_registry_overrides()
+
+    def test_last_payment_reflects_newest_package_credit(self, dashboard_client: TestClient) -> None:
+        older_package = UNIT_PACKAGE_CATALOG[0]
+        newer_package = UNIT_PACKAGE_CATALOG[-1]
+
+        def _ledger_entry(package_id: str | None, entry_type: str, units: int, created_at: datetime) -> _unit_wallet_module.RegistryUnitLedgerEntry:
+            return _unit_wallet_module.RegistryUnitLedgerEntry(
+                entry_id=f"ledger_{entry_type}_{created_at.day}",
+                wallet_id="wallet_test",
+                owner_key=_OWNER_KEY,
+                entry_type=entry_type,
+                units=units,
+                balance_after=units,
+                created_at=created_at,
+                metadata={"package_id": package_id} if package_id else {},
+            )
+
+        mock_wallet = _make_unit_wallet_registry(_OWNER_KEY)
+        mock_wallet.list_ledger_entries.return_value = [
+            _ledger_entry(older_package["package_id"], "credit", older_package["units"], datetime(2025, 6, 1, tzinfo=UTC)),
+            _ledger_entry(newer_package["package_id"], "credit", newer_package["units"], datetime(2025, 6, 2, tzinfo=UTC)),
+            _ledger_entry(None, "debit", 5, datetime(2025, 6, 3, tzinfo=UTC)),
+        ]
+        _apply_registry_overrides(_make_install_key_registry(), mock_wallet, _make_billing_registry(_OWNER_KEY))
+        try:
+            response = dashboard_client.get("/dashboard/overview", params={"owner_key": _OWNER_KEY})
+            assert response.status_code == 200
+            body = response.json()
+            assert body["has_paid"] is True
+            assert body["last_payment"]["package_id"] == newer_package["package_id"]
+            assert body["last_payment"]["label"] == newer_package["name"]
+            assert body["last_payment"]["amount"] == float(newer_package["price_usd"])
+            assert body["last_payment"]["units"] == newer_package["units"]
+        finally:
+            _clear_registry_overrides()
+
+    def test_last_payment_absent_without_package_credit(self, dashboard_client: TestClient) -> None:
+        mock_wallet = _make_unit_wallet_registry(_OWNER_KEY)
+        mock_wallet.list_ledger_entries.return_value = []
+        _apply_registry_overrides(_make_install_key_registry(), mock_wallet, _make_billing_registry(_OWNER_KEY))
+        try:
+            response = dashboard_client.get("/dashboard/overview", params={"owner_key": _OWNER_KEY})
+            assert response.status_code == 200
+            body = response.json()
+            assert body["has_paid"] is False
+            assert body["last_payment"] is None
         finally:
             _clear_registry_overrides()
 

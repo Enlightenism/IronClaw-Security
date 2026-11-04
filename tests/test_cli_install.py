@@ -43,10 +43,9 @@ def test_cli_install_blocks_known_integration_when_paid_key_is_missing(capsys):
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 
-    assert payload["integration_id"] == "integration-openclaw"
-    assert payload["installed"] is False
-    assert payload["status_after"] == "blocked"
-    assert "step_count" in payload
+    assert payload["status"] == "failed"
+    assert "install claim" in payload["message"]
+    assert payload.get("installed", False) is False
 
 
 def test_cli_install_requires_a_valid_claim_before_building_command() -> None:

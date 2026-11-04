@@ -9,6 +9,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.api.routes.dashboard import _record_is_paid_entitled
 from app.core.auth import InstallKeyAuthContext, get_install_key_auth_context
 from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import InstallKeyRegistry, get_install_key_registry
@@ -485,6 +486,55 @@ def _apply_event(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail=f"Unsupported install-key event_type: {event_name!r}",
     )
+
+
+@router.get(
+    "/self",
+    response_model=dict[str, Any],
+    summary="Return the caller's own install-key status and usage",
+    description=("Authenticates with the caller's X-Install-Key only. Owner and key scope are derived from that key, never from caller-supplied headers. Returns the InstallKeysResponse shape used by the SDK."),
+)
+def read_own_install_key(
+    auth_context: InstallKeyAuthContext = Depends(get_install_key_auth_context),
+    install_key_registry: InstallKeyRegistry = Depends(get_install_key_registry),
+    wallet_registry: UnitWalletRegistry = Depends(get_unit_wallet_registry),
+) -> dict[str, Any]:
+    record = _require_key_record(
+        auth_context=auth_context,
+        install_key_registry=install_key_registry,
+        op="status",
+    )
+    wallet = wallet_registry.get_wallet(record.owner_key)
+    usage = wallet.install_key_usage.get(record.key_id) if wallet is not None else None
+    registry_units = int(getattr(record, "units_consumed", 0) or 0)
+    wallet_units = int(getattr(usage, "total_consumed_units", 0) or 0)
+    is_revoked = getattr(record, "revoked_at", None) is not None or str(getattr(record, "status", "")).lower() == "revoked"
+    is_paid = not is_revoked and _record_is_paid_entitled(record)
+    slot_status = "revoked" if is_revoked else ("active" if is_paid else "locked")
+
+    return {
+        "status": "ok",
+        "service": "IronClaw-Security",
+        "timestamp": _utc_now_iso(),
+        "owner_key": record.owner_key,
+        "has_active_entitlement": is_paid,
+        "keys": [
+            {
+                "key_id": record.key_id,
+                "program": str(record.program),
+                "masked_key": getattr(record, "masked_key", None),
+                "label": getattr(record, "label", "") or "",
+                "status": slot_status,
+                "active": is_paid,
+                "payment_status": getattr(record, "payment_status", "unpaid"),
+                "entitlements_status": getattr(record, "entitlements_status", "not_active"),
+                "issued_after_payment": bool(getattr(record, "issued_after_payment", False)),
+                "units_used": max(registry_units, wallet_units),
+                "units_remaining": int(getattr(usage, "balance_units", 0) or 0),
+                "blocked_attacks": int(getattr(usage, "total_blocked_attacks", 0) or 0),
+            }
+        ],
+    }
 
 
 @router.post(

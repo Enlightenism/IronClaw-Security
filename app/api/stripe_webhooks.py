@@ -483,6 +483,7 @@ def _svc_handle_checkout_completed(
             amount=unit_credits,
             reason=StripeUnitEventReason.CHECKOUT_COMPLETE,
             reference_id=session_id,
+            package_id=str(metadata.get("package_id") or "") or None,
         )
     logger.info(
         "stripe_bridge: checkout_completed session=%s org=%s units=%d amount=%d %s",

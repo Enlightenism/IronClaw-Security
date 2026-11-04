@@ -1836,6 +1836,7 @@ class StripeService:
         reference_id: str | None = None,
         *,
         owner_key: str | None = None,
+        package_id: str | None = None,
     ) -> UnitBalanceResponse:
         """
         Credit units to an org's balance and record a ledger entry.
@@ -1846,17 +1847,20 @@ class StripeService:
             raise StripeServiceError("credit amount must be > 0")
 
         wallet_owner_key = self._resolve_wallet_owner_key(org_id, owner_key)
+        ledger_metadata: dict[str, Any] = {
+            "stripe_reason": reason.value,
+            "reference_id": reference_id,
+            "source": "stripe_service",
+            "event_id": (f"stripe:{reason.value}:{str(reference_id).strip()}" if reference_id and str(reference_id).strip() else None),
+            "purchase_reference": str(reference_id).strip() if reference_id else None,
+            "checkout_session_id": (str(reference_id).strip() if reference_id and reason == StripeUnitEventReason.CHECKOUT_COMPLETE else None),
+        }
+        if package_id:
+            ledger_metadata["package_id"] = package_id
         wallet = self._wallet_registry.credit_units(
             wallet_owner_key,
             amount,
-            metadata={
-                "stripe_reason": reason.value,
-                "reference_id": reference_id,
-                "source": "stripe_service",
-                "event_id": (f"stripe:{reason.value}:{str(reference_id).strip()}" if reference_id and str(reference_id).strip() else None),
-                "purchase_reference": str(reference_id).strip() if reference_id else None,
-                "checkout_session_id": (str(reference_id).strip() if reference_id and reason == StripeUnitEventReason.CHECKOUT_COMPLETE else None),
-            },
+            metadata=ledger_metadata,
         )
         with self._lock:
             self._unit_balances[org_id] = wallet.balance_units
@@ -2547,6 +2551,7 @@ class StripeService:
                     StripeUnitEventReason.CHECKOUT_COMPLETE,
                     reference_id=session_id,
                     owner_key=owner_key,
+                    package_id=integrity["package_id"],
                 )
                 result["units_credited"] = unit_credits
                 result["tokens_covered"] = unit_credits * TOKENS_PER_UNIT

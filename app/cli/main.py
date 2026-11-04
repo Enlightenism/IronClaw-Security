@@ -6,15 +6,11 @@ import sys
 from typing import Any
 
 from app.cli.config import CLIConfig, load_cli_config
+from app.cli.install import handle_install_args
 from app.cli.output import (
     format_error,
     format_json_payload,
     format_scan_result,
-)
-from app.services.integration_installer import (
-    IntegrationInstallResult,
-    install_integration,
-    summarize_install_result,
 )
 from app.services.integration_registry import (
     IntegrationRegistry,
@@ -89,6 +85,12 @@ def _build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument("--dry-run", action="store_true")
     install_parser.add_argument("--requested-by", default="cli")
     install_parser.add_argument("--install-target", default=None)
+    install_parser.add_argument(
+        "--install-claim",
+        dest="claim_token",
+        default=None,
+        help="One-time install claim to redeem and save for a paid install (required unless --dry-run).",
+    )
     _add_common_output_arguments(install_parser)
     install_parser.set_defaults(handler=_handle_install)
 
@@ -143,17 +145,7 @@ def _handle_list(args: argparse.Namespace, registry: IntegrationRegistry, _confi
 
 
 def _handle_install(args: argparse.Namespace, registry: IntegrationRegistry, _config: CLIConfig) -> int:
-    result: IntegrationInstallResult = install_integration(
-        registry,
-        args.integration_id,
-        dry_run=args.dry_run,
-        requested_by=args.requested_by,
-        install_target=args.install_target,
-    )
-    summary = summarize_install_result(result)
-    payload = {"command": "install", **summary}
-    format_json_payload(payload, compact=args.compact)
-    return 0 if summary.get("installed", False) or args.dry_run else 1
+    return handle_install_args(args, registry=registry)
 
 
 def _handle_verify(args: argparse.Namespace, registry: IntegrationRegistry, _config: CLIConfig) -> int:

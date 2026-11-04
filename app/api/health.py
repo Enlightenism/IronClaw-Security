@@ -12,7 +12,7 @@ from app.orchestrator.secure_runtime_pipeline import (
     get_secure_runtime_health_snapshot,
 )
 
-router = APIRouter(prefix="/health", tags=["health"])
+router = APIRouter(prefix="/health/details", tags=["health"])
 
 SERVICE_NAME = "IronClaw-Security"
 SERVICE_VERSION = "1.0.0"
@@ -108,12 +108,11 @@ def _build_secure_runtime_component() -> ComponentHealth:
 
 @router.get("", response_model=HealthSnapshot)
 def read_compact_health() -> HealthSnapshot:
-    """Compact health snapshot for readiness and operational dashboards.
+    """Authenticated compact health snapshot for operational dashboards.
 
-    This endpoint is designed to be:
-    - Lightweight enough for frequent polling (readiness / uptime checks),
-    - Structured enough to power the UI health snapshot panel,
-    - Stable as a public contract for external monitoring tools.
+    Served at /health/details behind the protected dependencies in app.main.
+    The public /health, /health/liveness, and /health/readiness routes are
+    defined in app.main and must not be shadowed by this router.
     """
     components = [
         _build_api_component(),
@@ -130,7 +129,7 @@ def read_compact_health() -> HealthSnapshot:
         metadata={
             "purpose": HEALTH_PURPOSE,
             "notes": [
-                "This snapshot is safe for external uptime monitoring.",
+                "This snapshot is authenticated; use the public /health routes for uptime monitoring.",
                 "The secure_runtime_pipeline details field is intentionally compact and stable.",
             ],
             "component_count": len(components),

@@ -99,6 +99,7 @@ def test_checkout_completed_paid_event_credits_units_and_issues_install_keys() -
         amount=50,
         reason=stripe_service_mod.StripeUnitEventReason.CHECKOUT_COMPLETE,
         reference_id="cs_123",
+        package_id=None,
     )
     service._issue_paid_install_keys_for_checkout.assert_called_once()
     usage_service.record_action_event.assert_called()

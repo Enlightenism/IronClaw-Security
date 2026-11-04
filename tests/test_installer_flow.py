@@ -168,6 +168,7 @@ def test_app_cli_install_rejects_claim_for_mismatched_runtime(
 
 def test_app_cli_install_redeems_claim_and_does_not_expose_credentials(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     import app.cli.install as cli_install
     from app.services.install_key_handoff import InstallKeyRedemption
@@ -193,8 +194,7 @@ def test_app_cli_install_redeems_claim_and_does_not_expose_credentials(
         units_consumed=120,
     )
     wallet_registry = MagicMock()
-    wallet_registry.get_wallet.return_value = SimpleNamespace(balance_units=4880)
-    wallet_registry.get_key_usage_summary.return_value = {"total_blocked_attacks": 2}
+    wallet_registry.get_wallet.return_value = SimpleNamespace(balance_units=4880, install_key_usage={})
     install_calls: dict[str, Any] = {}
 
     def fake_install_integration(
@@ -215,6 +215,15 @@ def test_app_cli_install_redeems_claim_and_does_not_expose_credentials(
     )
     monkeypatch.setattr(cli_install, "get_unit_wallet_registry", lambda: wallet_registry)
     monkeypatch.setattr(cli_install, "install_integration", fake_install_integration)
+    save_calls: dict[str, Any] = {}
+    config_file = tmp_path / "config.json"
+
+    def fake_save_install_key(*, program: str, install_key: str, **_: Any) -> object:
+        save_calls["program"] = program
+        save_calls["install_key"] = install_key
+        return SimpleNamespace(config_file=config_file)
+
+    monkeypatch.setattr(cli_install, "save_install_key", fake_save_install_key)
     monkeypatch.setattr(
         cli_install,
         "summarize_install_result",
@@ -237,6 +246,34 @@ def test_app_cli_install_redeems_claim_and_does_not_expose_credentials(
     assert install_calls["integration_id"] == "openclaw"
     assert install_calls["kwargs"]["install_key"] == install_key
     assert install_calls["kwargs"]["owner_key"] == "owner-456"
+    assert save_calls == {"program": "openclaw", "install_key": install_key}
+    assert payload["config_file"] == str(config_file)
+
+
+def test_app_cli_install_dry_run_never_redeems_claim(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.cli.install as cli_install
+    from app.cli.install import run_install_command
+
+    handoff = MagicMock()
+    monkeypatch.setattr(cli_install, "get_install_key_handoff_service", lambda: handoff)
+    monkeypatch.setattr(cli_install, "install_integration", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        cli_install,
+        "summarize_install_result",
+        lambda _: {"installed": False, "integration_id": "integration-openclaw"},
+    )
+
+    exit_code, payload = run_install_command(
+        "integration-openclaw",
+        dry_run=True,
+        claim_token="ic_claim_dry_run_example",
+        registry=MagicMock(),
+    )
+
+    assert exit_code == 0
+    assert payload["dry_run"] is True
+    assert payload["claim_consumed"] is False
+    handoff.redeem_claim.assert_not_called()
 
 
 def test_installer_module_imports(installer_module: Any) -> None:

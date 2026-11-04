@@ -226,11 +226,15 @@ class IronclawClient:
     # Install keys
     # ------------------------------------------------------------------
 
-    def get_my_install_keys(self, owner_key: str) -> InstallKeysResponse:
-        url = f"{self.base_url}/install-keys/my-keys"
+    def get_my_install_keys(self, install_key: str) -> InstallKeysResponse:
+        """Return the status and usage of the install key the caller authenticates with.
+
+        Ownership is derived server-side from the install key, so no owner key is sent.
+        """
+        url = f"{self.base_url}/install-key-events/self"
 
         def _call() -> httpx.Response:
-            with httpx.Client(timeout=self._timeout, headers={**self._headers(), "X-Owner-Key": owner_key}) as client:
+            with httpx.Client(timeout=self._timeout, headers={"X-Install-Key": install_key, "Accept": "application/json"}) as client:
                 return client.get(url)
 
         try:

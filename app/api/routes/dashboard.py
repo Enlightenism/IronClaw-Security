@@ -9,15 +9,17 @@ from pydantic import BaseModel, Field
 
 from app.core.auth import AuthContext
 from app.core.billing import (
+    UNIT_PACKAGE_CATALOG,
     BillingRegistry,
     BillingSubscription,
     get_billing_registry,
     resolve_authenticated_billing_owner,
+    resolve_package_id,
 )
 from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import InstallKeyNotFoundError, InstallKeyRegistry, get_install_key_registry
 from app.core.settings import Settings, get_settings
-from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
+from app.core.unit_wallet import RegistryUnitLedgerEntry, UnitWalletRegistry, get_unit_wallet_registry
 from app.dependencies.customer_auth import require_customer_read, require_customer_write
 from app.services.audit_store import get_audit_store
 from app.services.incident_store import get_incident_store
@@ -97,12 +99,22 @@ class DashboardBillingKPI(BaseModel):
     remaining_units: int
 
 
+class DashboardLastPaymentView(BaseModel):
+    label: str
+    amount: float
+    units: int
+    package_id: str
+    purchased_at: str
+
+
 class DashboardResponse(BaseModel):
     status: str
     service: str
     timestamp: str
     environment: str
     wallet_units: int = Field(default=0, ge=0)
+    has_paid: bool = False
+    last_payment: DashboardLastPaymentView | None = None
     kpis: list[DashboardStatView] = Field(default_factory=list)
     alerts: list[DashboardIncidentView] = Field(default_factory=list)
     activity: list[DashboardQueueView] = Field(default_factory=list)
@@ -297,6 +309,7 @@ def _record_is_paid_entitled(r: Any) -> bool:
 def _build_install_key_views(
     records: list[Any],
     owner_key: str,
+    wallet_usage: dict[str, Any] | None = None,
 ) -> list[DashboardInstallKeyView]:
     normalized_owner = str(owner_key).strip().lower()
     supported_programs = tuple(InstallKeyFormatRegistry.list_programs())
@@ -374,6 +387,9 @@ def _build_install_key_views(
         metadata.setdefault("program_label", label)
         metadata.setdefault("display_name", label)
 
+        wallet_usage_entry = (wallet_usage or {}).get(_coerce_string(getattr(r, "key_id", ""), default=""))
+        wallet_consumed = int(getattr(wallet_usage_entry, "total_consumed_units", 0) or 0)
+
         candidate = DashboardInstallKeyView(
             key_id=_coerce_string(getattr(r, "key_id", ""), default=""),
             program=program,
@@ -386,7 +402,7 @@ def _build_install_key_views(
             payment_status=payment_status,
             entitlements_status=entitlement_status,
             issued_after_payment=issued_after_payment,
-            units_consumed=int(getattr(r, "units_consumed", 0) or 0),
+            units_consumed=max(int(getattr(r, "units_consumed", 0) or 0), wallet_consumed),
             created_at=_iso(getattr(r, "created_at", None)),
             activated_at=_iso(activated_at),
             revoked_at=_iso(revoked_at),
@@ -472,6 +488,36 @@ def _build_billing_kpi(
     )
 
 
+def _ledger_timestamp_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _build_last_payment_view(ledger_entries: list[RegistryUnitLedgerEntry]) -> DashboardLastPaymentView | None:
+    latest_entry: RegistryUnitLedgerEntry | None = None
+    latest_package_id: str | None = None
+    for entry in ledger_entries:
+        if entry.entry_type != "credit":
+            continue
+        package_id = resolve_package_id(str(entry.metadata.get("package_id") or ""))
+        if package_id is None:
+            continue
+        if latest_entry is None or _ledger_timestamp_utc(entry.created_at) > _ledger_timestamp_utc(latest_entry.created_at):
+            latest_entry = entry
+            latest_package_id = package_id
+    if latest_entry is None or latest_package_id is None:
+        return None
+    catalog_entry = next((item for item in UNIT_PACKAGE_CATALOG if item["package_id"] == latest_package_id), None)
+    if catalog_entry is None:
+        return None
+    return DashboardLastPaymentView(
+        label=catalog_entry["name"],
+        amount=float(catalog_entry["price_usd"]),
+        units=latest_entry.units,
+        package_id=latest_package_id,
+        purchased_at=_ledger_timestamp_utc(latest_entry.created_at).isoformat(),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -551,9 +597,14 @@ def get_dashboard_overview(
 
     wallet = wallet_registry.get_wallet(resolved_owner)
     wallet_kpi = _build_wallet_kpi(wallet)
+    last_payment = _build_last_payment_view(wallet_registry.list_ledger_entries(owner_key=resolved_owner, limit=500))
     billing_kpi = _build_billing_kpi(billing_registry, resolved_owner)
     install_key_records = install_key_registry.get_keys_for_owner(resolved_owner)
-    install_keys = _build_install_key_views(install_key_records, resolved_owner)
+    install_keys = _build_install_key_views(
+        install_key_records,
+        resolved_owner,
+        wallet.install_key_usage if wallet is not None else None,
+    )
     install_key_dashboard = InstallKeyDashboardSyncService().build_dashboard_summary(
         owner_key=resolved_owner,
         install_keys=install_key_records,
@@ -592,6 +643,8 @@ def get_dashboard_overview(
         timestamp=now,
         environment=settings.environment,
         wallet_units=wallet_kpi.unit_balance if wallet_kpi is not None else 0,
+        has_paid=last_payment is not None,
+        last_payment=last_payment,
         kpis=[
             DashboardStatView(
                 key="protected_requests",
@@ -688,13 +741,23 @@ def get_dashboard_units(
     owner_key: str = Query(...),
     auth_ctx: AuthContext = Depends(require_customer_read),
     registry: InstallKeyRegistry = Depends(get_install_key_registry),
+    wallet_registry: UnitWalletRegistry = Depends(get_unit_wallet_registry),
 ) -> DashboardUnitsResponse:
     resolved_owner = _resolve_dashboard_owner(auth_ctx, owner_key)
     records = registry.get_keys_for_owner(resolved_owner)
+    wallet = wallet_registry.get_wallet(resolved_owner)
+    wallet_usage = wallet.install_key_usage if wallet is not None else {}
+    effective_units = {
+        r.key_id: max(
+            int(r.units_consumed or 0),
+            int(getattr(wallet_usage.get(r.key_id), "total_consumed_units", 0) or 0),
+        )
+        for r in records
+    }
     return DashboardUnitsResponse(
         owner_key=resolved_owner,
         total_keys=len(records),
-        total_units_consumed=sum(r.units_consumed for r in records),
+        total_units_consumed=sum(effective_units.values()),
         keys=[
             KeyUsageSummary(
                 key_id=r.key_id,
@@ -702,7 +765,7 @@ def get_dashboard_units(
                 masked_key=r.masked_key,
                 label=r.label,
                 active=r.active,
-                units_consumed=r.units_consumed,
+                units_consumed=effective_units[r.key_id],
                 last_used_at=r.last_used_at.isoformat().replace("+00:00", "Z") if r.last_used_at else None,
             )
             for r in records

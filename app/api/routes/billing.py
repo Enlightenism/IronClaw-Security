@@ -858,7 +858,7 @@ def _process_checkout_session_completed_webhook(
                     "purchase_id": purchase.purchase_id,
                     "purchase_reference": purchase.purchase_id,
                     "checkout_session_id": session_id,
-                    "event_id": f"billing-checkout:{purchase.purchase_id}:credit",
+                    "event_id": f"stripe:checkout.complete:{session_id}",
                     "package_id": purchase.package_id,
                     "event_type": event_type,
                     "customer_id": customer_id,

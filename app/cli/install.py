@@ -21,6 +21,7 @@ from app.services.integration_registry import (
     IntegrationRegistry,
     initialize_integration_registry,
 )
+from ironclaw_installer import IronClawInstallerError, save_install_key
 
 _GENERIC_PLATFORM_KEY_PATTERNS = (
     "platform_api_key",
@@ -64,7 +65,10 @@ def _infer_install_program(integration_id: str | None) -> str | None:
     if not integration_id or not integration_id.strip():
         return None
     format_registry = get_install_key_format_registry()
-    program = format_registry.normalize_program(integration_id)
+    candidate = integration_id.strip().lower()
+    if candidate.startswith("integration-"):
+        candidate = candidate[len("integration-") :]
+    program = format_registry.normalize_program(candidate)
     return program if program in RUNTIME_INSTALL_KEY_PROGRAMS else None
 
 
@@ -201,17 +205,9 @@ def _validate_paid_cli_install_claim(
     wallet_registry = get_unit_wallet_registry()
     wallet = wallet_registry.get_wallet(record.owner_key)
     wallet_balance = wallet.balance_units if wallet is not None else 0
-    usage_summary = (
-        wallet_registry.get_key_usage_summary(record.owner_key, key_id=record.key_id)
-        if wallet is not None
-        else {
-            "owner_key": record.owner_key,
-            "wallet_balance_units": 0,
-            "total_consumed_units": 0,
-            "total_blocked_attacks": 0,
-            "install_key_usage": {},
-        }
-    )
+    key_usage = wallet.install_key_usage.get(record.key_id) if wallet is not None else None
+    units_used = max(int(record.units_consumed), int(getattr(key_usage, "total_consumed_units", 0) or 0))
+    blocked_attacks = int(getattr(key_usage, "total_blocked_attacks", 0) or 0)
 
     return (
         True,
@@ -227,9 +223,9 @@ def _validate_paid_cli_install_claim(
             "usage": {
                 "key_id": record.key_id,
                 "program": record.program,
-                "units_used": int(record.units_consumed),
+                "units_used": units_used,
                 "units_remaining": wallet_balance,
-                "blocked_attacks": int(usage_summary.get("total_blocked_attacks", 0)),
+                "blocked_attacks": blocked_attacks,
             },
         },
         None,
@@ -270,6 +266,24 @@ def run_install_command(
     registry: IntegrationRegistry | None = None,
     compact: bool = False,
 ) -> tuple[int, dict[str, Any]]:
+    active_registry = registry or initialize_integration_registry()
+    if dry_run:
+        dry_result: IntegrationInstallResult = install_integration(
+            active_registry,
+            integration_id,
+            dry_run=True,
+            requested_by=requested_by,
+            install_target=install_target,
+        )
+        dry_payload = {
+            "command": "install",
+            **summarize_install_result(dry_result),
+            "dry_run": True,
+            "claim_consumed": False,
+        }
+        _emit(dry_payload, pretty=not compact)
+        return 0, dry_payload
+
     valid, validation_payload, validation_error, redemption = _validate_paid_cli_install_claim(
         claim_token,
         integration_id=integration_id,
@@ -284,11 +298,27 @@ def run_install_command(
         _emit(payload, pretty=not compact)
         return 1, payload
 
-    active_registry = registry or initialize_integration_registry()
+    try:
+        saved = save_install_key(
+            program=str(validation_payload["program"]),
+            install_key=redemption.install_key,
+        )
+    except IronClawInstallerError as exc:
+        payload = {
+            "command": "install",
+            "status": "failed",
+            "message": str(exc),
+            "usage": validation_payload.get("usage", {}),
+            "install_key": None,
+            "owner_key": validation_payload.get("owner_key"),
+        }
+        _emit(payload, pretty=not compact)
+        return 1, payload
+
     result: IntegrationInstallResult = install_integration(
         active_registry,
         integration_id,
-        dry_run=dry_run,
+        dry_run=False,
         requested_by=requested_by,
         install_target=install_target,
         install_key=redemption.install_key,
@@ -300,11 +330,13 @@ def run_install_command(
         },
     )
     summary = summarize_install_result(result)
+    installed = bool(summary.get("installed", False))
     payload = {
         "command": "install",
-        "status": "ok" if summary.get("installed", False) or dry_run else "failed",
-        "message": ("install completed successfully" if summary.get("installed", False) or dry_run else "install key unavailable until payment is complete"),
+        "status": "ok" if installed else "failed",
+        "message": ("install completed successfully" if installed else "integration registry install did not complete"),
         **summary,
+        "config_file": str(saved.config_file),
         "usage": validation_payload.get("usage", {}),
         "install_key": None,
         "owner_key": validation_payload.get("owner_key"),
@@ -315,7 +347,7 @@ def run_install_command(
             "units_remaining": validation_payload.get("units_remaining", 0),
         }
     _emit(payload, pretty=not compact)
-    exit_code = 0 if summary.get("installed", False) or dry_run else 1
+    exit_code = 0 if installed else 1
     return exit_code, payload
 
 

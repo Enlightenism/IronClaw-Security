@@ -451,6 +451,10 @@ def test_checkout_session_completed_webhook_fulfills_pending_purchase_and_credit
     assert wallet_resp.status_code == 200
     assert wallet_resp.json()["wallet"]["balance_units"] == 5_000
 
+    credit_entries = [entry for entry in _unit_wallet_module.get_unit_wallet_registry().list_ledger_entries(owner_key=owner, checkout_session_id=checkout_session_id) if entry.entry_type == "credit"]
+    assert len(credit_entries) == 1
+    assert credit_entries[0].event_id == f"stripe:checkout.complete:{checkout_session_id}"
+
 
 def test_checkout_session_completed_webhook_rejects_missing_signature_and_replays_are_duplicate(
     client: TestClient,

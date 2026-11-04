@@ -244,7 +244,7 @@ def test_end_to_end_openclaw_cli_install_and_verify(capsys):
     assert install_payload["status_before"] == "planned"
     assert install_payload["status_after"] == "blocked"
 
-    # 3. Run CLI install in real mode; without a valid paid key it stays blocked.
+    # 3. Run CLI install in real mode without a claim; it must fail before any redemption or save.
     exit_code = run_cli(
         ["install", "integration-openclaw", "--requested-by", "e2e-cli"],
     )
@@ -253,9 +253,9 @@ def test_end_to_end_openclaw_cli_install_and_verify(capsys):
     captured = capsys.readouterr()
     real_install_payload = json.loads(captured.out)
 
-    assert real_install_payload["integration_id"] == "integration-openclaw"
-    assert real_install_payload["installed"] is False
-    assert real_install_payload["status_after"] == "blocked"
+    assert real_install_payload["status"] == "failed"
+    assert "install claim" in real_install_payload["message"]
+    assert real_install_payload.get("installed", False) is False
 
     # 4. Run CLI verify in non-strict mode after the blocked install state.
     exit_code = run_cli(

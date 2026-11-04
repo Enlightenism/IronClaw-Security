@@ -161,10 +161,10 @@ class TestRetryBehavior:
 
     @respx.mock
     def test_invalid_install_key_response_does_not_retry(self):
-        route = respx.get(f"{_BASE}/install-keys/my-keys").mock(return_value=httpx.Response(403, json={"detail": "Install key 'ic_install_openclaw_abc' is inactive or not available for paid entitlement."}))
+        route = respx.get(f"{_BASE}/install-key-events/self").mock(return_value=httpx.Response(403, json={"detail": "Install key 'ic_install_openclaw_abc' is inactive or not available for paid entitlement."}))
         client = _make_client()
         with pytest.raises(IronclawAuthError):
-            client.get_my_install_keys(owner_key="ada@example.com")
+            client.get_my_install_keys(install_key="ic_install_openclaw_abc")
         assert route.call_count == 1
 
 
@@ -393,10 +393,10 @@ class TestBillingAndInstallKeyContracts:
                 }
             ],
         }
-        respx.get(f"{_BASE}/install-keys/my-keys").mock(return_value=httpx.Response(200, json=payload))
+        respx.get(f"{_BASE}/install-key-events/self").mock(return_value=httpx.Response(200, json=payload))
         client = _make_client()
 
-        result = client.get_my_install_keys(owner_key="ada@example.com")
+        result = client.get_my_install_keys(install_key="ic_install_openclaw_abc")
 
         assert isinstance(result, InstallKeysResponse)
         assert result.owner_key == "ada@example.com"

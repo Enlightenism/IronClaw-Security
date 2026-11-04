@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.api.routes.alerts import router as alerts_router
 from app.api.routes.audit import router as audit_router
+from app.api.routes.dashboard import _build_install_key_views
 from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.deployment import router as deployment_router
 from app.api.routes.incidents import router as incidents_router
@@ -15,6 +16,7 @@ from app.api.routes.organizations import router as organizations_router
 from app.api.routes.policy import router as policy_router
 from app.api.routes.quarantine import router as quarantine_router
 from app.core.auth import AuthContext
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import get_install_key_registry
 from app.dependencies.customer_auth import require_customer_read, require_customer_write
 from app.services.policy_store import reset_policy_store
@@ -267,6 +269,35 @@ def test_dashboard_units_rejects_caller_selected_owner() -> None:
     )
 
     assert response.status_code == 403
+
+
+def test_dashboard_install_key_units_reflect_live_wallet_consumption() -> None:
+    spec = next(s for s in InstallKeyFormatRegistry.list_specs() if s.program == "openclaw")
+    record = SimpleNamespace(
+        key_id="key-live-001",
+        owner_key="owner@ironclaw.local",
+        program="openclaw",
+        masked_key=f"{spec.prefix}abcd****",
+        label="",
+        active=True,
+        status="active",
+        revoked_at=None,
+        activated_at=None,
+        created_at=None,
+        last_used_at=None,
+        units_consumed=0,
+        payment_status="paid",
+        entitlements_status="active",
+        issued_after_payment=True,
+    )
+    wallet_usage = {"key-live-001": SimpleNamespace(total_consumed_units=7)}
+
+    views = _build_install_key_views([record], "owner@ironclaw.local", wallet_usage)
+
+    assert len(views) == len(InstallKeyFormatRegistry.list_programs())
+    openclaw_view = next(view for view in views if view.program == "openclaw")
+    assert openclaw_view.key_id == "key-live-001"
+    assert openclaw_view.units_consumed == 7
 
 
 def test_dashboard_usage_record_rejects_foreign_install_key() -> None:

@@ -691,6 +691,36 @@ def _configure_openclaw_plugin(target_config_dir: Path, config_file: Path) -> No
         ) from exc
 
 
+def _prepare_config_dir(config_dir: Path | None) -> Path:
+    target_config_dir = (config_dir or _default_config_dir()).expanduser()
+    if target_config_dir.is_symlink():
+        raise IronClawInstallerError(f"Refusing to write credentials into a symbolic-link directory: {target_config_dir}")
+    try:
+        _ensure_directory(target_config_dir)
+    except OSError as exc:
+        raise IronClawInstallerError(f"Unable to create user configuration directory: {target_config_dir}") from exc
+    return target_config_dir
+
+
+def _store_install_key(
+    *,
+    target_config_dir: Path,
+    program: str,
+    install_key: str,
+    base_url: str,
+) -> Path:
+    config_file = target_config_dir / DEFAULT_CONFIG_FILENAME
+    existing_config = _read_bootstrap_config(config_file)
+    payload = _build_bootstrap_config_payload(
+        existing_config,
+        program=program,
+        install_key=install_key,
+        base_url=base_url,
+    )
+    _write_json_file(config_file, payload, overwrite=True, private=True)
+    return config_file
+
+
 def _redeem_claim_into_config(
     *,
     program: str,
@@ -704,24 +734,14 @@ def _redeem_claim_into_config(
 
     validated_claim = _validate_install_claim_for_runtime(runtime_program, claim_token)
     normalized_base_url = _normalize_base_url(base_url)
-    target_config_dir = (config_dir or _default_config_dir()).expanduser()
-    if target_config_dir.is_symlink():
-        raise IronClawInstallerError(f"Refusing to write credentials into a symbolic-link directory: {target_config_dir}")
-    try:
-        _ensure_directory(target_config_dir)
-    except OSError as exc:
-        raise IronClawInstallerError(f"Unable to create user configuration directory: {target_config_dir}") from exc
-
-    config_file = target_config_dir / DEFAULT_CONFIG_FILENAME
-    existing_config = _read_bootstrap_config(config_file)
+    target_config_dir = _prepare_config_dir(config_dir)
     install_key = _redeem_install_claim(normalized_base_url, runtime_program, validated_claim)
-    payload = _build_bootstrap_config_payload(
-        existing_config,
+    config_file = _store_install_key(
+        target_config_dir=target_config_dir,
         program=runtime_program,
         install_key=install_key,
         base_url=normalized_base_url,
     )
-    _write_json_file(config_file, payload, overwrite=True, private=True)
     return runtime_program, target_config_dir, config_file
 
 
@@ -776,6 +796,38 @@ def run_redeem(
         base_url=base_url,
     )
 
+    if runtime_program == "openclaw":
+        _configure_openclaw_plugin(target_config_dir, config_file)
+
+    return BootstrapResult(
+        program=runtime_program,
+        config_file=config_file,
+        skill_name=SECURITY_GUARDIAN_SKILL_NAME,
+    )
+
+
+def save_install_key(
+    *,
+    program: str,
+    install_key: str,
+    config_dir: Path | None = None,
+    base_url: str = DEFAULT_BOOTSTRAP_BASE_URL,
+) -> BootstrapResult:
+    """Store an install key that was already redeemed from a claim. Never redeems a claim."""
+    runtime_program = _canonical_program_name(program)
+    if runtime_program is None or runtime_program not in _CANONICAL_RUNTIME_TARGETS:
+        raise IronClawInstallerError(f"Unsupported runtime target for install-key storage: {program!r}")
+    if not InstallKeyFormatRegistry.get_spec(runtime_program).matches_key(install_key):
+        raise IronClawInstallerError(f"Install key does not match the {runtime_program} key format.")
+
+    normalized_base_url = _normalize_base_url(base_url)
+    target_config_dir = _prepare_config_dir(config_dir)
+    config_file = _store_install_key(
+        target_config_dir=target_config_dir,
+        program=runtime_program,
+        install_key=install_key,
+        base_url=normalized_base_url,
+    )
     if runtime_program == "openclaw":
         _configure_openclaw_plugin(target_config_dir, config_file)
 
@@ -1078,6 +1130,11 @@ def build_bootstrap_parser() -> argparse.ArgumentParser:
         help="Directory for private IronClaw user configuration.",
     )
     parser.add_argument(
+        "--enable-runtime-hooks",
+        action="store_true",
+        help="Write the fail-closed tool-call enforcement hook into the runtime's user-global config (claude_code, gemini_cli, cursor, copilot).",
+    )
+    parser.add_argument(
         "--base-url",
         default=os.getenv("IRONCLAW_BASE_URL", DEFAULT_BOOTSTRAP_BASE_URL),
         help=f"Base URL for the claim service, default: {DEFAULT_BOOTSTRAP_BASE_URL}",
@@ -1197,8 +1254,42 @@ def build_install_config(args: argparse.Namespace) -> InstallConfig:
     )
 
 
+def _runtime_hook_plan(program: str, enable: bool) -> tuple[Path, dict[str, Any]] | None:
+    from ironclaw_sdk import runtime_hooks
+
+    if not enable or program not in runtime_hooks.SUPPORTED_PROGRAMS:
+        return None
+    return runtime_hooks.plan_runtime_hook(program)
+
+
+def _report_runtime_hook(program: str, enable: bool, plan: tuple[Path, dict[str, Any]] | None) -> int:
+    from ironclaw_sdk import runtime_hooks
+
+    if program not in runtime_hooks.SUPPORTED_PROGRAMS:
+        print(f"[ironclaw-installer] enforcement: no tool-call hook applies to {program}; its skill is guidance-only.")
+        return 0
+    if not enable or plan is None:
+        target = runtime_hooks.runtime_hook_config_path(program)
+        print(f"[ironclaw-installer] enforcement hook not written. Re-run with --enable-runtime-hooks, or add this to {target}:")
+        print(json.dumps(runtime_hooks.merge_hook_config(program, {}), indent=2))
+        return 0
+    target, merged = plan
+    try:
+        written = runtime_hooks.write_runtime_hook(target, merged)
+    except OSError as exc:
+        print(f"[ironclaw-installer] install key saved, but the enforcement hook could not be written: {exc}", file=sys.stderr)
+        return 1
+    print(f"[ironclaw-installer] enforcement hook written: {written}")
+    return 0
+
+
 def _bootstrap_main(argv: list[str]) -> int:
     args = build_bootstrap_parser().parse_args(argv)
+    try:
+        hook_plan = _runtime_hook_plan(args.program, args.enable_runtime_hooks)
+    except (OSError, ValueError) as exc:
+        print(f"[ironclaw-installer] failed: existing runtime hook configuration is invalid; no claim was redeemed: {exc}", file=sys.stderr)
+        return 1
     try:
         result = run_bootstrap(
             program=args.program,
@@ -1213,11 +1304,16 @@ def _bootstrap_main(argv: list[str]) -> int:
     print("[ironclaw-installer] shared skill installed")
     print(f"[ironclaw-installer] program: {result.program}")
     print(f"[ironclaw-installer] config: {result.config_file}")
-    return 0
+    return _report_runtime_hook(args.program, args.enable_runtime_hooks, hook_plan)
 
 
 def _redeem_main(argv: list[str]) -> int:
     args = build_bootstrap_parser().parse_args(argv)
+    try:
+        hook_plan = _runtime_hook_plan(args.program, args.enable_runtime_hooks)
+    except (OSError, ValueError) as exc:
+        print(f"[ironclaw-installer] failed: existing runtime hook configuration is invalid; no claim was redeemed: {exc}", file=sys.stderr)
+        return 1
     try:
         result = run_redeem(
             program=args.program,
@@ -1232,7 +1328,7 @@ def _redeem_main(argv: list[str]) -> int:
     print("[ironclaw-installer] install key redeemed")
     print(f"[ironclaw-installer] program: {result.program}")
     print(f"[ironclaw-installer] config: {result.config_file}")
-    return 0
+    return _report_runtime_hook(args.program, args.enable_runtime_hooks, hook_plan)
 
 
 def main(argv: list[str] | None = None) -> int:
