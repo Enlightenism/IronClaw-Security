@@ -46,8 +46,7 @@ _REDACTION_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bsk_(?:live|test)_[A-Za-z0-9]{16,}\b", re.IGNORECASE), REDACTED),
     (
         re.compile(
-            r"(api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|secret"
-            r"|authorization|cookie|credential|private[_-]?key)\s*[:=]\s*[\"']?([^\"'\s&,;]+)",
+            r"(api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|secret" r"|authorization|cookie|credential|private[_-]?key)\s*[:=]\s*[\"']?([^\"'\s&,;]+)",
             re.IGNORECASE,
         ),
         r"\1=[REDACTED]",
