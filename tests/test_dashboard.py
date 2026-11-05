@@ -24,6 +24,9 @@ from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
 from app.dependencies.hybrid_auth import HybridAuthResult
 from app.main import app as _app
 from app.routes.dashboard import _build_install_key_slots, _resolve_dashboard_owner
+from app.services.audit_store import reset_security_audit_store
+from app.services.block_store import record_block, reset_block_store
+from app.services.incident_store import get_incident_store, reset_incident_store
 from app.services.install_key_provisioning import provision_install_key_service
 
 # ---------------------------------------------------------------------------
@@ -949,3 +952,80 @@ class TestDashboardGracefulFallback:
         )
         assert r1.status_code in (200, 404)
         assert r2.status_code == 403
+
+
+class TestDashboardRuntimeBlocks:
+    def test_runtime_blocks_route_returns_owner_blocks(self, dashboard_client: TestClient) -> None:
+        reset_block_store()
+        record_block(gate="install", platform="claude_code", reason_codes=["unpinned_install"], owner_key=_OWNER_KEY)
+        try:
+            response = dashboard_client.get("/dashboard/runtime-blocks", params={"owner_key": _OWNER_KEY})
+            assert response.status_code == 200
+            body = response.json()
+            assert body["owner_key"] == _OWNER_KEY
+            assert body["total"] == 1
+            block = body["blocks"][0]
+            assert block["gate"] == "install"
+            assert block["verdict"] == "block"
+            assert block["id"]
+            assert "owner_key" not in block
+        finally:
+            reset_block_store()
+
+    def test_runtime_blocks_route_rejects_unknown_owner(self, dashboard_client: TestClient) -> None:
+        response = dashboard_client.get("/dashboard/runtime-blocks", params={"owner_key": "nonexistent-owner-xxxxxxx"})
+        assert response.status_code == 403
+
+    def test_runtime_blocks_limit_is_bounded(self, dashboard_client: TestClient) -> None:
+        assert dashboard_client.get("/dashboard/runtime-blocks", params={"owner_key": _OWNER_KEY, "limit": 0}).status_code == 422
+        assert dashboard_client.get("/dashboard/runtime-blocks", params={"owner_key": _OWNER_KEY, "limit": 501}).status_code == 422
+
+    def test_overview_includes_runtime_blocks(self, dashboard_client: TestClient) -> None:
+        reset_block_store()
+        record_block(gate="install", platform="claude_code", reason_codes=["unpinned_install"], owner_key=_OWNER_KEY)
+        mock_wallet = _make_unit_wallet_registry(_OWNER_KEY)
+        mock_wallet.list_ledger_entries.return_value = []
+        _apply_registry_overrides(_make_install_key_registry(), mock_wallet, _make_billing_registry(_OWNER_KEY))
+        try:
+            response = dashboard_client.get("/dashboard/overview", params={"owner_key": _OWNER_KEY})
+            assert response.status_code == 200
+            runtime_blocks = response.json()["runtime_blocks"]
+            assert len(runtime_blocks) == 1
+            assert runtime_blocks[0]["gate"] == "install"
+        finally:
+            _clear_registry_overrides()
+            reset_block_store()
+
+    def test_overview_kpis_exclude_seeded_incidents(self, dashboard_client: TestClient) -> None:
+        mock_wallet = _make_unit_wallet_registry(_OWNER_KEY)
+        mock_wallet.list_ledger_entries.return_value = []
+        _apply_registry_overrides(_make_install_key_registry(), mock_wallet, _make_billing_registry(_OWNER_KEY))
+
+        def _open_incidents() -> int:
+            body = dashboard_client.get("/dashboard/overview", params={"owner_key": _OWNER_KEY}).json()
+            return next(kpi["value"] for kpi in body["kpis"] if kpi["key"] == "open_incidents")
+
+        try:
+            baseline = _open_incidents()
+            get_incident_store().create_incident(
+                title="Seeded sample",
+                summary="Seeded sample",
+                severity="high",
+                source="guard",
+                status="open",
+                metadata={"seeded": True, "owner_key": _OWNER_KEY},
+            )
+            assert _open_incidents() == baseline
+            get_incident_store().create_incident(
+                title="Live gate block",
+                summary="Live gate block",
+                severity="high",
+                source="guard",
+                status="open",
+                metadata={"owner_key": _OWNER_KEY},
+            )
+            assert _open_incidents() == baseline + 1
+        finally:
+            _clear_registry_overrides()
+            reset_incident_store()
+            reset_security_audit_store()

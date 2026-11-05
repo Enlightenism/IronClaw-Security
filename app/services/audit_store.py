@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+import logging
 from threading import Lock
 from typing import Any
 from uuid import uuid4
 
+logger = logging.getLogger(__name__)
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _is_seeded(record: AuditEventRecord) -> bool:
+    return bool(record.metadata.get("seeded"))
 
 
 @dataclass(slots=True)
@@ -122,6 +130,7 @@ class SecurityAuditEventStore:
         event_type: str | None = None,
         severity: str | None = None,
         limit: int = 100,
+        include_seeded: bool = True,
     ) -> list[AuditEventRecord]:
         with self._lock:
             items = list(self._items)
@@ -140,6 +149,8 @@ class SecurityAuditEventStore:
             items = [item for item in items if item.event_type == event_type]
         if severity:
             items = [item for item in items if item.severity == severity]
+        if not include_seeded:
+            items = [item for item in items if not _is_seeded(item)]
 
         return items[:limit]
 
@@ -220,9 +231,11 @@ class SecurityAuditEventStore:
         with self._lock:
             return len(self._items)
 
-    def summarize(self) -> dict[str, Any]:
+    def summarize(self, *, include_seeded: bool = True) -> dict[str, Any]:
         with self._lock:
             items = list(self._items)
+        if not include_seeded:
+            items = [item for item in items if not _is_seeded(item)]
 
         by_event_type: dict[str, int] = {}
         by_severity: dict[str, int] = {}
@@ -263,6 +276,45 @@ def reset_security_audit_store() -> None:
     """Reset the singleton store and re-seed defaults. Used by tests."""
     _SECURITY_AUDIT_STORE.reset()
     _SECURITY_AUDIT_STORE.seed_defaults()
+
+
+def record_gate_audit_event(
+    *,
+    gate: str,
+    verdict: str,
+    platform: str,
+    reason_codes: Sequence[str],
+    owner_key: str | None,
+    decision_id: str | None = None,
+    session_id: str | None = None,
+    agent_id: str | None = None,
+    details: Mapping[str, Any] | None = None,
+) -> AuditEventRecord | None:
+    """Audit one return or install gate decision, allow or block.
+
+    Best-effort and bounded: metadata holds only identifiers and reason codes, never raw agent content.
+    """
+    try:
+        return _SECURITY_AUDIT_STORE.create_event(
+            event_type=f"{gate}_gate_decision",
+            severity="low" if verdict == "allow" else "high",
+            summary=f"{gate} gate {verdict} for {platform}",
+            session_id=session_id,
+            integration_id=platform,
+            verdict=verdict,
+            metadata={
+                "gate": gate,
+                "platform": platform,
+                "owner_key": owner_key,
+                "decision_id": decision_id,
+                "agent_id": agent_id,
+                "reason_codes": sorted({str(code) for code in reason_codes}),
+                **dict(details or {}),
+            },
+        )
+    except Exception:
+        logger.exception("runtime gate audit write failed", extra={"gate": gate, "platform": platform})
+        return None
 
 
 # ---------------------------------------------------------------------------

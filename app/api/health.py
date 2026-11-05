@@ -7,10 +7,13 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from app.core.settings import get_settings
 from app.dependencies.action_execute import get_action_execute_pipeline
 from app.orchestrator.secure_runtime_pipeline import (
     get_secure_runtime_health_snapshot,
 )
+from app.services.prompt_guard import resolve_prompt_guard_path
+from app.services.sandbox_broker_client import SandboxBrokerClient
 
 router = APIRouter(prefix="/health/details", tags=["health"])
 
@@ -64,6 +67,8 @@ def _resolve_overall_status(components: list[ComponentHealth]) -> HealthStatus:
         return HealthStatus.degraded
     if any(component.status == HealthStatus.unknown for component in components):
         return HealthStatus.degraded
+    if any(component.status == HealthStatus.degraded for component in components):
+        return HealthStatus.degraded
     if any(component.status == HealthStatus.warn for component in components):
         return HealthStatus.warn
     return HealthStatus.ok
@@ -106,6 +111,60 @@ def _build_secure_runtime_component() -> ComponentHealth:
         )
 
 
+def _build_return_gate_component() -> ComponentHealth:
+    try:
+        broker = SandboxBrokerClient().health()
+    except Exception as exc:
+        return ComponentHealth(
+            name="return_gate",
+            status=HealthStatus.error,
+            details={"error": repr(exc)},
+        )
+
+    if broker.get("reachable"):
+        scanner_image = broker.get("scanner_image", "unknown")
+        if scanner_image == "ready":
+            return ComponentHealth(name="return_gate", status=HealthStatus.ok, details={"broker": "reachable"})
+        return ComponentHealth(
+            name="return_gate",
+            status=HealthStatus.degraded,
+            details={"broker": "reachable", "scanner_image": scanner_image, "reason": "scanner_image_not_ready"},
+        )
+    return ComponentHealth(
+        name="return_gate",
+        status=HealthStatus.degraded,
+        details={"broker": "unavailable", "reason": broker.get("reason")},
+    )
+
+
+def _build_install_gate_component() -> ComponentHealth:
+    return ComponentHealth(
+        name="install_gate",
+        status=HealthStatus.ok,
+        details={"policy": "scan-and-allow", "pinned_sources": "install_allowlist", "third_party_scan": "sandbox_broker"},
+    )
+
+
+def _build_prompt_guard_component() -> ComponentHealth:
+    settings = get_settings()
+    model_path = resolve_prompt_guard_path(settings.guard_model_path)
+    model_files_present = model_path.is_dir() and (model_path / "config.json").is_file() and (model_path / "model.safetensors").is_file()
+    details: dict[str, Any] = {"enabled": settings.guard_enabled, "model_files_present": model_files_present}
+    if not settings.guard_enabled:
+        return ComponentHealth(
+            name="prompt_guard",
+            status=HealthStatus.warn,
+            details={**details, "reason": "prompt_guard_disabled"},
+        )
+    if not model_files_present:
+        return ComponentHealth(
+            name="prompt_guard",
+            status=HealthStatus.degraded,
+            details={**details, "reason": "prompt_guard_model_missing"},
+        )
+    return ComponentHealth(name="prompt_guard", status=HealthStatus.ok, details=details)
+
+
 @router.get("", response_model=HealthSnapshot)
 def read_compact_health() -> HealthSnapshot:
     """Authenticated compact health snapshot for operational dashboards.
@@ -117,6 +176,9 @@ def read_compact_health() -> HealthSnapshot:
     components = [
         _build_api_component(),
         _build_secure_runtime_component(),
+        _build_return_gate_component(),
+        _build_install_gate_component(),
+        _build_prompt_guard_component(),
     ]
     overall_status = _resolve_overall_status(components)
 

@@ -17,6 +17,7 @@ import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import UnitWalletRegistry
 from app.main import app as _app
 from app.services.audit_log_service import reset_audit_log
+from app.services.block_store import reset_block_store
 from app.supabaseclient import reset_supabase_client
 from ironclaw_sdk.client import IronclawClient
 from ironclaw_sdk.exceptions import IronclawAPIError, IronclawAuthError
@@ -41,6 +42,7 @@ _TEST_ENV_DEFAULTS: dict[str, str] = {
     "SUPABASE_SERVICE_ROLE_KEY": "",
     "SUPABASE_KEY": "",
     "SUPABASE_ANON_KEY": "",
+    "CLAUDE_UPSTREAM_ALLOWED_HOSTS": "api.anthropic.com,upstream.example,upstream.test",
 }
 
 _TEST_SECRET_DEFAULTS: dict[str, str] = {
@@ -63,6 +65,7 @@ def _reset_runtime_singletons() -> None:
     reset_supabase_client()
     stripe_webhooks.reset_processed_events()
     _install_keys_module._reset_install_key_registry_for_testing()
+    reset_block_store()
 
     wallet = UnitWalletRegistry()
     _unit_wallet_module._unit_wallet_registry = wallet

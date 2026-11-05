@@ -275,6 +275,7 @@ def executeguardedaction(
             "sessionid": sessionid,
             "filepath": effective_filepath,
         },
+        # Decision-only: no side-effecting executor is wired. The default dry-run receipt reports the verdict and runs nothing.
         executor=None,
     )
 

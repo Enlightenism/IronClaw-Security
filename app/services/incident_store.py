@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+import logging
 from threading import Lock
 from typing import Any, Literal
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 IncidentSeverity = Literal["low", "medium", "high", "critical"]
 IncidentStatus = Literal["open", "triaged", "contained", "resolved", "closed", "investigating", "inprogress"]
@@ -32,6 +36,10 @@ def _norm_status(value: str | None, default: str = "open") -> str:
 def _norm_source(value: str | None, default: str = "ironclaw") -> str:
     v = (value or default).strip().lower()
     return v if v in _ALLOWED_SOURCES else default
+
+
+def _is_seeded(record: IncidentRecordInMemory) -> bool:
+    return bool(record.metadata.get("seeded"))
 
 
 @dataclass(slots=True)
@@ -178,6 +186,7 @@ class IncidentStoreInMemory:
         category: str | None = None,
         scan_id: str | None = None,
         limit: int = 100,
+        include_seeded: bool = True,
     ) -> list[IncidentRecordInMemory]:
         with self._lock:
             items = list(self._items)
@@ -196,6 +205,8 @@ class IncidentStoreInMemory:
             items = [i for i in items if i.category == category]
         if scan_id is not None:
             items = [i for i in items if i.scan_id == scan_id]
+        if not include_seeded:
+            items = [i for i in items if not _is_seeded(i)]
 
         items.sort(key=lambda r: r.updated_at, reverse=True)
         return items[:limit]
@@ -456,8 +467,8 @@ class IncidentStoreInMemory:
     # Summarize
     # ------------------------------------------------------------------
 
-    def summarize(self, *, organization_id: str | None = None) -> dict[str, Any]:
-        items = self.list_incidents(limit=10000, organization_id=organization_id)
+    def summarize(self, *, organization_id: str | None = None, include_seeded: bool = True) -> dict[str, Any]:
+        items = self.list_incidents(limit=10000, organization_id=organization_id, include_seeded=include_seeded)
         by_status: dict[str, int] = {}
         by_severity: dict[str, int] = {}
         by_category: dict[str, int] = {}
@@ -558,3 +569,30 @@ def list_incidents(
 def reset_incident_store() -> None:
     _INCIDENT_STORE_MEMORY.reset()
     _INCIDENT_STORE_MEMORY.seed_defaults()
+
+
+def record_gate_block_incident(
+    *,
+    gate: str,
+    platform: str,
+    reason_codes: Sequence[str],
+    owner_key: str | None,
+) -> IncidentRecordInMemory | None:
+    """Record a return or install gate block as a high-severity incident.
+
+    Best-effort and bounded: only reason codes are stored, never raw agent content.
+    The store is in memory until migration 016_runtime_blocks.sql is wired, so blocks are lost on restart.
+    """
+    try:
+        codes = sorted({str(code) for code in reason_codes})
+        return _INCIDENT_STORE_MEMORY.create_incident(
+            title=f"Runtime {gate} gate blocked {platform} action",
+            summary=f"Gate reasons: {', '.join(codes) or 'blocked'}"[:500],
+            severity="high",
+            source="sandbox" if gate == "return" else "guard",
+            category="runtime_block",
+            metadata={"gate": gate, "platform": platform, "reason_codes": codes, "owner_key": owner_key},
+        )
+    except Exception:
+        logger.exception("runtime gate incident write failed", extra={"gate": gate, "platform": platform})
+        return None

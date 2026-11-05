@@ -48,6 +48,12 @@ class TelemetryEventType(StrEnum):
     POLICY_CREATED = "policy.created"
     POLICY_DELETED = "policy.deleted"
 
+    # Return gate layer
+    RETURN_GATE_DECISION = "return_gate.decision"
+
+    # Install gate layer
+    INSTALL_GATE_DECISION = "install_gate.decision"
+
     # Agent / session layer
     AGENT_SESSION_STARTED = "agent.session_started"
     AGENT_SESSION_ENDED = "agent.session_ended"

@@ -4,6 +4,7 @@ import importlib
 import io
 import json
 from pathlib import Path
+import sys
 import tomllib
 from typing import Any
 
@@ -588,6 +589,13 @@ def test_run_bootstrap_installs_fail_closed_openclaw_plugin(
             "plugins.entries.ironclaw-security.config.configFile",
             str(config_file),
         ],
+        [
+            "openclaw",
+            "config",
+            "set",
+            "plugins.entries.ironclaw-security.config.pythonPath",
+            sys.executable,
+        ],
         ["openclaw", "plugins", "enable", "ironclaw-security"],
     ]
 
@@ -711,3 +719,85 @@ def test_main_returns_one_when_project_root_is_invalid(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "failed" in captured.err.lower()
+
+
+def test_report_runtime_hook_goose_writes_pre_tool_block_plugin(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    plan = install_module._runtime_hook_plan("goose", True)
+    exit_code = install_module._report_runtime_hook("goose", True, plan)
+
+    plugin_root = tmp_path / ".agents" / "plugins" / "ironclaw-security"
+    hooks = json.loads((plugin_root / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert (plugin_root / "plugin.json").is_file()
+    assert hooks["hooks"]["PreToolUse"][0]["hooks"][0]["on_failure"] == "block"
+    assert "guidance-only" not in capsys.readouterr().out
+
+
+def test_report_runtime_hook_hermes_copies_plugin_and_enables_it(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_subprocess_run(command: list[str], **kwargs: Any) -> None:
+        commands.append(command)
+        assert kwargs == {"check": True, "timeout": install_module._SUBPROCESS_TIMEOUT}
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(install_module.subprocess, "run", fake_subprocess_run)
+
+    plan = install_module._runtime_hook_plan("hermes", True)
+    exit_code = install_module._report_runtime_hook("hermes", True, plan)
+
+    plugin_dir = tmp_path / ".hermes" / "plugins" / install_module.HERMES_PLUGIN_ID
+    assert plan == []
+    assert exit_code == 0
+    assert (plugin_dir / "__init__.py").is_file()
+    assert (plugin_dir / "plugin.yaml").is_file()
+    assert commands == [["hermes", "plugins", "enable", "ironclaw-security"]]
+
+
+def test_report_runtime_hook_hermes_fails_when_cli_is_missing(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fake_subprocess_run(command: list[str], **kwargs: Any) -> None:
+        raise FileNotFoundError(command[0])
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(install_module.subprocess, "run", fake_subprocess_run)
+
+    exit_code = install_module._report_runtime_hook("hermes", True, [])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "hermes plugins enable ironclaw-security" in captured.err
+
+
+def test_report_runtime_hook_opt_out_points_adapters_at_reenable(
+    install_module: Any,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert install_module._runtime_hook_plan("goose", False) is None
+    exit_code = install_module._report_runtime_hook("goose", False, None)
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Re-run without --no-enable-runtime-hooks" in captured.out
+
+
+def test_runtime_hooks_default_on_with_opt_out_flag(install_module: Any) -> None:
+    parser = install_module.build_parser()
+
+    assert parser.parse_args(["openclaw"]).enable_runtime_hooks is True
+    assert parser.parse_args(["openclaw", "--no-enable-runtime-hooks"]).enable_runtime_hooks is False

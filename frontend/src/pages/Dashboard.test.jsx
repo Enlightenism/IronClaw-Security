@@ -117,6 +117,12 @@ jest.mock("@/components/dashboard/IntegrationCard", () => ({
   },
 }));
 
+// ── RuntimeBlocksCard stub ──────────────────────────────────────────────
+jest.mock("@/components/dashboard/RuntimeBlocksCard", () => ({
+  __esModule: true,
+  default: () => <div data-testid="runtime-blocks-card">RuntimeBlocksCard</div>,
+}));
+
 // ── Module under test ───────────────────────────────────────────────────
 import Dashboard from "./Dashboard";
 

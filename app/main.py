@@ -265,6 +265,8 @@ def _protected_router_configs() -> list[tuple[Any, dict[str, Any]]]:
         (_optional_router("app.api.audit"), {"prefix": "/api", "dependencies": dependencies}),
         (_optional_router("app.api.behavioral_baseline"), {"dependencies": dependencies}),
         (_optional_router("app.api.policy"), {"prefix": "/policy", "dependencies": dependencies}),
+        (_optional_router("app.api.return_gate"), {"prefix": "/return-gate"}),
+        (_optional_router("app.api.install_gate"), {"prefix": "/install-gate"}),
         (_optional_router("app.api.actionpolicy"), {"dependencies": dependencies}),
         (_optional_router("app.api.actiondecision"), {"dependencies": dependencies}),
         (_optional_router("app.api.actionguard"), {"dependencies": agent_dependencies}),

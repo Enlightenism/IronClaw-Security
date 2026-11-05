@@ -113,6 +113,18 @@ def test_safe_request_allows_and_preserves_executor_payload() -> None:
     assert len(artifact_guard.calls) == 1
 
 
+def test_safe_request_without_executor_is_denied_fail_closed() -> None:
+    router, _, _, _ = _build_router()
+
+    result = router.route(request=_request(command="echo safe"))
+
+    assert result.executionstate == "denied"
+    assert result.verdict == "block"
+    assert result.executed is False
+    assert result.result is None
+    assert any(reason["label"] == "No sandbox executor" for reason in result.reasons)
+
+
 def test_low_severity_match_blocks_and_floors_risk() -> None:
     calls: list[dict[str, Any]] = []
     router, _, _, _ = _build_router(

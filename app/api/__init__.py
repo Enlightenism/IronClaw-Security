@@ -3,10 +3,12 @@ from app.api.action_guard import router as action_guard_router
 from app.api.auditlog import router as audit_log_router
 from app.api.behavioral_baseline import router as behavioral_baseline_router
 from app.api.history import router as history_router
+from app.api.install_gate import router as install_gate_router
 from app.api.ioc_management import router as ioc_management_router
 from app.api.onboarding import router as onboarding_router
 from app.api.policy import router as policy_router
 from app.api.requestcontext import router as request_context_router
+from app.api.return_gate import router as return_gate_router
 from app.api.review_queue import router as review_queue_router
 from app.api.root import router as root_router
 from app.api.scan import router as scan_router
@@ -24,10 +26,12 @@ __all__ = [
     "audit_log_router",
     "behavioral_baseline_router",
     "history_router",
+    "install_gate_router",
     "ioc_management_router",
     "onboarding_router",
     "policy_router",
     "request_context_router",
+    "return_gate_router",
     "review_queue_router",
     "root_router",
     "scan_router",

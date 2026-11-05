@@ -22,6 +22,7 @@ from app.core.settings import Settings, get_settings
 from app.core.unit_wallet import RegistryUnitLedgerEntry, UnitWalletRegistry, get_unit_wallet_registry
 from app.dependencies.customer_auth import require_customer_read, require_customer_write
 from app.services.audit_store import get_audit_store
+from app.services.block_store import list_blocks
 from app.services.incident_store import get_incident_store
 from app.services.install_key_dashboard_sync import InstallKeyDashboardSyncService
 from app.services.quarantine_store import get_quarantine_store
@@ -32,6 +33,8 @@ router = APIRouter(
 )
 
 logger = logging.getLogger(__name__)
+
+DASHBOARD_RUNTIME_BLOCK_LIMIT = 50
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +87,22 @@ class DashboardInstallKeyView(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class DashboardRuntimeBlockView(BaseModel):
+    id: str
+    platform: str
+    gate: str
+    reason: str
+    verdict: str
+    created_at: str
+
+
+class DashboardRuntimeBlocksResponse(BaseModel):
+    owner_key: str
+    total: int
+    blocks: list[DashboardRuntimeBlockView] = Field(default_factory=list)
+    timestamp: str
+
+
 class DashboardWalletKPI(BaseModel):
     unit_balance: int
     units_consumed: int
@@ -119,6 +138,7 @@ class DashboardResponse(BaseModel):
     alerts: list[DashboardIncidentView] = Field(default_factory=list)
     activity: list[DashboardQueueView] = Field(default_factory=list)
     install_keys: list[DashboardInstallKeyView] = Field(default_factory=list)
+    runtime_blocks: list[DashboardRuntimeBlockView] = Field(default_factory=list)
     wallet: DashboardWalletKPI | None = None
     billing: DashboardBillingKPI | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -553,7 +573,7 @@ def get_dashboard_overview(
 
     incidents = [
         incident
-        for incident in incident_store.list_incidents()
+        for incident in incident_store.list_incidents(include_seeded=False)
         if _record_matches_dashboard_identity(
             incident,
             owner_key=resolved_owner,
@@ -573,7 +593,7 @@ def get_dashboard_overview(
     ]
     audit_events = [
         event
-        for event in audit_store.list_events(limit=500)
+        for event in audit_store.list_events(limit=500, include_seeded=False)
         if _record_matches_dashboard_identity(
             event,
             owner_key=resolved_owner,
@@ -618,6 +638,8 @@ def get_dashboard_overview(
         wallet_summary=wallet.as_summary() if wallet is not None else {},
         audit_events=audit_events,
     )
+
+    runtime_block_views = _build_runtime_block_views(resolved_owner)
 
     wallet_meta: dict[str, Any] = {"owner_key": resolved_owner}
     if wallet_kpi is not None:
@@ -716,6 +738,7 @@ def get_dashboard_overview(
             ),
         ],
         install_keys=install_keys,
+        runtime_blocks=runtime_block_views,
         wallet=wallet_kpi,
         billing=billing_kpi,
         metadata={
@@ -804,5 +827,43 @@ def record_key_usage(
         key_id=updated.key_id,
         units_consumed=updated.units_consumed,
         last_used_at=updated.last_used_at.isoformat().replace("+00:00", "Z") if updated.last_used_at else None,
+        timestamp=_utc_now_iso(),
+    )
+
+
+def _build_runtime_block_views(owner_key: str, limit: int = DASHBOARD_RUNTIME_BLOCK_LIMIT) -> list[DashboardRuntimeBlockView]:
+    try:
+        rows = list_blocks(owner_key, limit=limit)
+    except Exception:
+        logger.exception("dashboard runtime block read failed")
+        return []
+    return [
+        DashboardRuntimeBlockView(
+            id=_coerce_string(row.get("id"), default=""),
+            platform=_coerce_string(row.get("platform"), default=""),
+            gate=_coerce_string(row.get("gate"), default=""),
+            reason=_coerce_string(row.get("reason"), default=""),
+            verdict=_coerce_string(row.get("verdict"), default=""),
+            created_at=_coerce_string(row.get("created_at"), default=""),
+        )
+        for row in rows
+    ]
+
+
+@router.get(
+    "/runtime-blocks",
+    response_model=DashboardRuntimeBlocksResponse,
+)
+def get_dashboard_runtime_blocks(
+    owner_key: str | None = Query(default=None),
+    limit: int = Query(default=DASHBOARD_RUNTIME_BLOCK_LIMIT, ge=1, le=500),
+    auth_ctx: AuthContext = Depends(require_customer_read),
+) -> DashboardRuntimeBlocksResponse:
+    resolved_owner = _resolve_dashboard_owner(auth_ctx, owner_key)
+    blocks = _build_runtime_block_views(resolved_owner, limit)
+    return DashboardRuntimeBlocksResponse(
+        owner_key=resolved_owner,
+        total=len(blocks),
+        blocks=blocks,
         timestamp=_utc_now_iso(),
     )

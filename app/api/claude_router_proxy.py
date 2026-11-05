@@ -9,6 +9,7 @@ import httpx
 from starlette.background import BackgroundTask
 
 from app.core.auth import require_api_key
+from app.core.claude_upstream import is_allowed_claude_upstream_url
 from app.core.errors import AppError
 
 router = APIRouter(
@@ -51,6 +52,13 @@ async def claude_router_proxy(
         raise AppError(
             error="http_error",
             message="Missing 'upstream_url' in request body.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not is_allowed_claude_upstream_url(upstream_url):
+        raise AppError(
+            error="http_error",
+            message="Upstream URL is not an allowed Claude upstream host.",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 

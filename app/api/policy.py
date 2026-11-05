@@ -28,6 +28,7 @@ from app.schemas.policy import (
     PolicyStatus,
     PolicyUpdateRequest,
 )
+from app.services.guard import guard_text
 
 _log = logging.getLogger(__name__)
 
@@ -396,11 +397,18 @@ def guard_bundle(request: Request, body: GuardBundleRequest) -> GuardBundleRespo
             _log.error("policy.guard_bundle: engine error on field=%s: %s", field, exc)
             evaluation_failed = True
 
-    risk_score = max((v.risk_score for v in verdicts), default=0)
-    should_halt = evaluation_failed or not verdicts or any(v.verdict != PolicyEnforcementMode.allow for v in verdicts)
+    content_decisions = [guard_text(field, text) for field, text in sources.items()]
+    content_blocked = any(d["verdict"] != "allow" for d in content_decisions)
+
+    risk_score = max(
+        [v.risk_score for v in verdicts] + [d["risk_score"] for d in content_decisions],
+        default=0,
+    )
+    should_halt = evaluation_failed or not verdicts or content_blocked or any(v.verdict != PolicyEnforcementMode.allow for v in verdicts)
     should_warn = False
     highest_verdict = "block" if should_halt else "allow"
     reasoning_parts = [v.reasoning for v in verdicts if v.reasoning]
+    reasoning_parts.extend(f"{d['context_type']}: {d['summary']}" for d in content_decisions if d["verdict"] != "allow")
     if evaluation_failed:
         reasoning_parts.append("policy evaluation failed")
     elif not verdicts:

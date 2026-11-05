@@ -54,6 +54,22 @@ describe("IntegrationCard", () => {
     delete window.IntersectionObserver;
   });
 
+  it("shows per-platform runtime coverage", () => {
+    renderCard({ program: "goose", testid: "goose-card" });
+
+    const coverage = screen.getByTestId("goose-card-coverage");
+    expect(coverage).toHaveTextContent("Install: Enforce");
+    expect(coverage).toHaveTextContent("Return: No return-path enforcement");
+  });
+
+  it("marks audit-only return coverage for cursor", () => {
+    renderCard({ program: "cursor", testid: "cursor-card" });
+
+    expect(screen.getByTestId("cursor-card-coverage")).toHaveTextContent(
+      "Return: Audit only",
+    );
+  });
+
   it("does not request or expose a claim until the user generates one", async () => {
     const onCreateClaim = jest.fn();
 

@@ -1,8 +1,11 @@
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 const REQUEST_TIMEOUT_MS = 12_000;
+// Matches INSTALL_GATE_TIMEOUT_SECONDS in ironclaw_sdk/runtime_hooks.py: the scan budgets total about 20 s.
+const INSTALL_GATE_TIMEOUT_MS = 26_000;
 const REDACTED = "[REDACTED]";
 const SENSITIVE_FIELD_PATTERN =
   /password|passwd|secret|token|api[_-]?key|authorization|cookie|credential|private[_-]?key/i;
@@ -36,7 +39,7 @@ export function serializeToolParams(params) {
 
 export function actionTypeForTool(toolName) {
   const name = toolName.toLowerCase().replace(/[^a-z0-9]+/g, "_");
-  if (/(^|_)(exec|shell|command|bash|terminal)(_|$)/.test(name)) {
+  if (/(^|_)(exec|shell|command|bash|terminal|powershell|pwsh)(_|$)/.test(name)) {
     return "command";
   }
   if (/(^|_)(write|edit|patch|delete|move|copy|mkdir|touch)(_|$)/.test(name)) {
@@ -54,7 +57,32 @@ export function actionTypeForTool(toolName) {
   return "toolcall";
 }
 
-function actionEndpoint(baseUrl) {
+// Mirrors INSTALL_CHECKED_ACTIONS and _INSTALL_COMMAND_PATTERN in ironclaw_sdk/runtime_hooks.py.
+const INSTALL_CHECKED_ACTIONS = new Set(["command", "httpfetch", "toolcall"]);
+const INSTALL_COMMAND_PATTERN =
+  /\b(?:install|clone|skill|plugin|recipe)s?\b|\b(?:npx|pipx|uvx|cargo|brew|gem)\b|\b(?:pip3?|uv|npm|pnpm|yarn|bun)\s+(?:add|i)\b|\bgit\s+(?:submodule|fetch|pull)\b|\b(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b[^|]*?(?:\|\s*(?:sh|bash|zsh|python3?|pwsh|powershell|iex)\b|\s-o\b|\s-outfile\b|\s--output\b|\s>)  |\$\(\s*(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b|<\(\s*(?:curl|wget)\b|\b(?:iex|invoke-expression)\b.*\b(?:downloadstring|downloadfile|iwr|irm|invoke-webrequest|invoke-restmethod)\b/i;
+function stringValues(value) {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(stringValues);
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap(stringValues);
+  }
+  return [];
+}
+
+export function installCommandText(toolName, params) {
+  if (!INSTALL_CHECKED_ACTIONS.has(actionTypeForTool(toolName))) {
+    return null;
+  }
+  const text = stringValues(params).join(" ");
+  return INSTALL_COMMAND_PATTERN.test(text) ? text : null;
+}
+
+function safeBaseUrl(baseUrl) {
   const parsed = new URL(baseUrl);
   const hostname = parsed.hostname.toLowerCase();
   const isLoopback = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname);
@@ -67,7 +95,7 @@ function actionEndpoint(baseUrl) {
   ) {
     throw new Error("IronClaw base URL is not safe for install-key authentication.");
   }
-  return `${baseUrl.replace(/\/+$/, "")}/action/execute`;
+  return baseUrl.replace(/\/+$/, "");
 }
 
 async function loadRuntimeConfig(configFile) {
@@ -95,7 +123,7 @@ async function loadRuntimeConfig(configFile) {
 
   return {
     installKey: installKey.trim(),
-    endpoint: actionEndpoint(parsed.base_url.trim()),
+    baseUrl: safeBaseUrl(parsed.base_url.trim()),
   };
 }
 
@@ -103,28 +131,26 @@ function blocked(reason) {
   return { block: true, blockReason: reason };
 }
 
-async function requestAuthorization(event, context, configFile, fetchImpl) {
-  const toolName = typeof event?.toolName === "string" ? event.toolName.trim() : "";
-  if (!toolName) {
-    return blocked("IronClaw could not identify this tool call; the action was blocked.");
-  }
+function sessionIdFor(context) {
+  return context?.sessionId || context?.sessionKey || context?.runId || randomUUID();
+}
 
-  const payload = {
-    actiontype: actionTypeForTool(toolName),
-    target: toolName,
-    content: serializeToolParams(event.params),
-    clientid: "openclaw",
-    sessionid: context?.sessionId || context?.sessionKey || context?.runId || randomUUID(),
-    eventid: randomUUID(),
-    metadata: { runtime: "openclaw" },
-  };
-  const runtime = await loadRuntimeConfig(configFile);
+function installBlockReason(decision) {
+  const first = Array.isArray(decision?.reasons)
+    ? decision.reasons.find((reason) => typeof reason === "string" && reason.trim())
+    : undefined;
+  return first
+    ? `${redactText(first.trim()).slice(0, 240)} The action was blocked.`
+    : "IronClaw blocked this install command; the action was blocked.";
+}
+
+async function postToGate(route, body, runtime, context, fetchImpl, timeoutMs = REQUEST_TIMEOUT_MS) {
   if (typeof fetchImpl !== "function") {
     throw new Error("The OpenClaw runtime does not provide fetch.");
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const parentSignal = context?.abortSignal;
   const abortFromParent = () => controller.abort();
   if (parentSignal?.aborted) {
@@ -133,16 +159,15 @@ async function requestAuthorization(event, context, configFile, fetchImpl) {
     parentSignal?.addEventListener("abort", abortFromParent, { once: true });
   }
 
-  let response;
   try {
-    response = await fetchImpl(runtime.endpoint, {
+    return await fetchImpl(`${runtime.baseUrl}${route}`, {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
         "X-Install-Key": runtime.installKey,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
       redirect: "error",
       signal: controller.signal,
     });
@@ -150,6 +175,51 @@ async function requestAuthorization(event, context, configFile, fetchImpl) {
     clearTimeout(timeout);
     parentSignal?.removeEventListener("abort", abortFromParent);
   }
+}
+
+async function requestInstallDecision(command, context, runtime, fetchImpl) {
+  const response = await postToGate(
+    "/install-gate/evaluate",
+    { platform: "openclaw", command, client_id: "openclaw" },
+    runtime,
+    context,
+    fetchImpl,
+    INSTALL_GATE_TIMEOUT_MS,
+  );
+  if (!response.ok) {
+    return blocked(`IronClaw install gate failed with HTTP ${response.status}; the action was blocked.`);
+  }
+
+  const decision = await response.json();
+  return decision?.verdict === "allow" ? undefined : blocked(installBlockReason(decision));
+}
+
+async function requestAuthorization(event, context, configFile, fetchImpl) {
+  const toolName = typeof event?.toolName === "string" ? event.toolName.trim() : "";
+  if (!toolName) {
+    return blocked("IronClaw could not identify this tool call; the action was blocked.");
+  }
+
+  rememberToolInput(event.toolCallId, event.params);
+  const runtime = await loadRuntimeConfig(configFile);
+  const installCommand = installCommandText(toolName, event.params);
+  if (installCommand !== null) {
+    const installBlock = await requestInstallDecision(installCommand, context, runtime, fetchImpl);
+    if (installBlock) {
+      return installBlock;
+    }
+  }
+
+  const payload = {
+    actiontype: actionTypeForTool(toolName),
+    target: toolName,
+    content: serializeToolParams(event.params),
+    clientid: "openclaw",
+    sessionid: sessionIdFor(context),
+    eventid: randomUUID(),
+    metadata: { runtime: "openclaw", ...actionFields(event.params) },
+  };
+  const response = await postToGate("/action/execute", payload, runtime, context, fetchImpl);
 
   if (!response.ok) {
     return blocked(`IronClaw enforcement failed with HTTP ${response.status}; the action was blocked.`);
@@ -186,5 +256,143 @@ export async function authorizeToolCall(
       `[ironclaw-security] Authorization failed (${errorName}); the tool call was blocked.`,
     );
     return blocked("IronClaw could not verify this action; the action was blocked.");
+  }
+}
+
+const RETURN_BLOCKED_TEXT =
+  "[BLOCKED BY IRONCLAW RETURN GATE] The original tool output was withheld because it failed the return-gate scan.";
+const PERSIST_TIMEOUT_MS = 30_000;
+const PERSIST_MAX_BUFFER = 16 * 1024 * 1024;
+const TOOL_INPUT_LIMIT = 500;
+const toolInputs = new Map();
+
+function asObject(value) {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return {};
+    }
+  }
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+}
+
+const ACTION_FIELD_ALIASES = {
+  url: ["url"],
+  command: ["command"],
+  file_path: ["file_path", "filePath", "path"],
+};
+
+function actionFields(params) {
+  const source = asObject(params);
+  const fields = {};
+  for (const [field, aliases] of Object.entries(ACTION_FIELD_ALIASES)) {
+    for (const alias of aliases) {
+      const value = source[alias];
+      if (typeof value === "string" && value.trim()) {
+        fields[field] = value.trim();
+        break;
+      }
+    }
+  }
+  return fields;
+}
+
+function rememberToolInput(toolCallId, params) {
+  if (typeof toolCallId !== "string" || !toolCallId) {
+    return;
+  }
+  toolInputs.delete(toolCallId);
+  toolInputs.set(toolCallId, actionFields(params));
+  if (toolInputs.size > TOOL_INPUT_LIMIT) {
+    toolInputs.delete(toolInputs.keys().next().value);
+  }
+}
+
+function takeToolInput(toolCallId) {
+  const fields = toolInputs.get(toolCallId) ?? {};
+  toolInputs.delete(toolCallId);
+  return fields;
+}
+
+function firstString(...values) {
+  const value = values.find((item) => typeof item === "string" && item.trim());
+  return value ? value.trim() : "";
+}
+
+function persistableText(message) {
+  const { content, details } = message;
+  if (typeof content === "string") {
+    return details === undefined ? content : `${content}\n${JSON.stringify({ details })}`;
+  }
+  if (!Array.isArray(content)) {
+    return JSON.stringify(message);
+  }
+  const isText = (part) => part?.type === "text" && typeof part.text === "string";
+  const textParts = content.filter(isText).map((part) => part.text);
+  const otherParts = content.filter((part) => !isText(part));
+  if (otherParts.length > 0 || details !== undefined) {
+    textParts.push(JSON.stringify({ content: otherParts, details }));
+  }
+  return textParts.join("\n");
+}
+
+function persistedMessage(message, text) {
+  return { message: { ...message, content: [{ type: "text", text }], details: undefined } };
+}
+
+export function persistToolResult(event, configFile, pythonPath, runPython = execFileSync) {
+  const message = event?.message ?? event;
+  if (!message || typeof message !== "object") {
+    return undefined;
+  }
+  if (message.role !== undefined && message.role !== "toolResult") {
+    return undefined;
+  }
+
+  const toolName = firstString(message.toolName, event?.toolName);
+  const toolCallId = firstString(message.toolCallId, event?.toolCallId);
+  if (
+    !toolName ||
+    typeof configFile !== "string" ||
+    !isAbsolute(configFile) ||
+    typeof pythonPath !== "string" ||
+    !isAbsolute(pythonPath)
+  ) {
+    console.error("[ironclaw-security] Return gate is not configured; the tool output was withheld.");
+    return persistedMessage(message, RETURN_BLOCKED_TEXT);
+  }
+
+  try {
+    const input = JSON.stringify({
+      tool_name: toolName,
+      tool_input: takeToolInput(toolCallId),
+      tool_response: persistableText(message),
+    });
+    const stdout = runPython(
+      pythonPath,
+      ["-m", "ironclaw_sdk.runtime_hooks", "--program", "openclaw", "--phase", "persist", "--config-file", configFile],
+      {
+        input,
+        encoding: "utf8",
+        timeout: PERSIST_TIMEOUT_MS,
+        maxBuffer: PERSIST_MAX_BUFFER,
+        windowsHide: true,
+      },
+    );
+    const output = typeof stdout === "string" ? stdout.trim() : "";
+    if (!output) {
+      return undefined;
+    }
+    const replacement = JSON.parse(output)?.replacement;
+    if (typeof replacement !== "string" || !replacement) {
+      throw new Error("Unexpected return gate output.");
+    }
+    return persistedMessage(message, replacement);
+  } catch (error) {
+    const errorName = error instanceof Error ? error.name : "UnknownError";
+    console.error(`[ironclaw-security] Return gate failed (${errorName}); the tool output was withheld.`);
+    return persistedMessage(message, RETURN_BLOCKED_TEXT);
   }
 }

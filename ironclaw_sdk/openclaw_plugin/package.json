@@ -2,6 +2,9 @@
   "name": "ironclaw-openclaw-security",
   "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "test": "node --test test/install_gate.test.js"
+  },
   "openclaw": {
     "extensions": ["./index.js"]
   }

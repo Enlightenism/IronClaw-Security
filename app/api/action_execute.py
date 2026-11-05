@@ -8,6 +8,7 @@ from app.dependencies.rate_limit import limit_guard_routes
 from app.facade import guardandexecuteaction
 from app.models.action_execute import ExecuteRequest, ExecuteResponse
 from app.orchestrator.secure_runtime_pipeline import SecureRuntimePipeline
+from app.runtime.install_gate import gate_shell_payload
 from app.services.action_guard import (
     ActionGuardDecision,
     analyze_action,
@@ -18,6 +19,7 @@ from app.services.telemetry import append_telemetry_event
 
 router = APIRouter(dependencies=[Depends(limit_guard_routes)])
 
+_INSTALL_CHECKED_ACTIONS = frozenset({"shell_command", "command", "tool_call", "toolcall"})
 
 _ALLOWED_REASON_SOURCES = {"policy", "scan", "ai"}
 _REASON_SOURCE_MAP = {
@@ -147,6 +149,16 @@ def guarded_execute(
         )
     else:
         execution_risk_score = max(execution_risk_score, RISK_THRESHOLD_BLOCK_MIN)
+
+    if normalize_action_type(payload.action_type) in _INSTALL_CHECKED_ACTIONS:
+        install_decision = gate_shell_payload(
+            payload.content,
+            platform=payload.client_id,
+            agent_id=payload.agent_id,
+            client_id=payload.client_id,
+        )
+        if install_decision is not None and not install_decision.allowed:
+            execution_risk_score = max(execution_risk_score, RISK_THRESHOLD_BLOCK_MIN)
 
     execution_payload = payload.model_copy(update={"risk_score": execution_risk_score})
     response: ExecuteResponse = guardandexecuteaction(execution_payload, pipeline)

@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Check, Terminal } from "lucide-react";
 import { toast } from "sonner";
+import {
+  COVERAGE_LABELS,
+  RUNTIME_GATE_INSTALL,
+  RUNTIME_GATE_RETURN,
+  getRuntimeCoverage,
+} from "@/lib/runtimeCoverage";
 
 const TINT_STYLES = {
   gold: { surface: "glass-gold", accent: "#FFD700" },
@@ -552,6 +558,22 @@ const IntegrationCard = ({
           {canonicalTitle}
         </h3>
       </div>
+
+      {program ? (
+        <div
+          className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-white/60"
+          data-testid={`${testid}-coverage`}
+        >
+          <span>
+            Install:{" "}
+            {COVERAGE_LABELS[getRuntimeCoverage(program, RUNTIME_GATE_INSTALL)]}
+          </span>
+          <span>
+            Return:{" "}
+            {COVERAGE_LABELS[getRuntimeCoverage(program, RUNTIME_GATE_RETURN)]}
+          </span>
+        </div>
+      ) : null}
 
       {isRevoked ? (
         <p

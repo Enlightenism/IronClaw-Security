@@ -4,6 +4,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
+import httpx
 import pytest
 
 from app.api.scan import (
@@ -17,6 +18,7 @@ from app.api.scan import (
 )
 from app.core.auth import AuthContext, require_auth_context
 from app.main import app
+from app.orchestrator.claude_sandbox_executor import DockerSandboxRunner
 from app.services import sandbox_service, scanner
 from app.services.prompt_guard import PromptGuardResult
 from ironclaw_sdk.models import ScanRequest, ScanResponse
@@ -698,14 +700,17 @@ def test_scan_emits_sandbox_evaluated_event():
 
 
 def test_scan_applies_sandbox_policy():
-    with patch("app.api.scan.apply_sandbox_policy", wraps=lambda result, decision: result) as mock_policy:
+    with patch("app.api.scan.apply_sandbox_policy", wraps=lambda result, decision, sandbox_verdict="block": result) as mock_policy:
         resp = client.post("/scan/", json=SAFE_PAYLOAD)
     assert resp.status_code == 200
     mock_policy.assert_called_once()
 
 
 def test_scan_evaluates_sandbox():
-    with patch("app.api.scan.evaluate_sandbox", wraps=lambda tt, rm, rs: MagicMock()) as mock_eval:
+    with (
+        patch("app.api.scan.evaluate_sandbox", wraps=lambda tt, rm, rs: MagicMock()) as mock_eval,
+        patch("app.api.scan.run_sandbox_scan", return_value="block"),
+    ):
         resp = client.post("/scan/", json=SAFE_PAYLOAD)
     assert resp.status_code == 200
     mock_eval.assert_called_once()
@@ -748,6 +753,69 @@ def test_sandbox_invalid_verdicts_fail_closed(legacy_verdict):
     assert result["verdict"] == "block"
     assert result["risk_score"] >= scanner.RISK_THRESHOLD_BLOCK_MIN
     assert result["review_status"] == "none"
+
+
+def test_sandbox_allow_verdict_clears_enforced_block():
+    decision = sandbox_service.evaluate_sandbox("skill", "sandbox", True)
+    result = sandbox_service.apply_sandbox_policy(
+        {"verdict": "allow", "summary": "No risky patterns detected.", "risk_score": 0, "failed_checks": []},
+        decision,
+        "allow",
+    )
+
+    assert result["verdict"] == "allow"
+    assert result["quarantine_reason"] is None
+    assert result["untrusted"] is False
+
+
+def test_sandbox_allow_requires_static_allow():
+    decision = sandbox_service.evaluate_sandbox("skill", "sandbox", True)
+    result = sandbox_service.apply_sandbox_policy(
+        {"verdict": "block", "summary": "Malicious pattern.", "risk_score": 90, "failed_checks": []},
+        decision,
+        "allow",
+    )
+
+    assert result["verdict"] == "block"
+
+
+@pytest.mark.parametrize("outcome", ["raise", "block", "malformed"])
+def test_run_sandbox_scan_fails_closed(outcome):
+    runner = MagicMock()
+    if outcome == "raise":
+        runner.run.side_effect = RuntimeError("broker down")
+    elif outcome == "block":
+        runner.run.return_value = {"verdict": "block"}
+    else:
+        runner.run.return_value = "allow"
+
+    assert sandbox_service.run_sandbox_scan("skill", "/tmp/sample", runner=runner) == "block"
+
+
+def test_run_sandbox_scan_allows_only_on_allow_verdict():
+    runner = MagicMock()
+    runner.run.return_value = {"verdict": "allow"}
+
+    assert sandbox_service.run_sandbox_scan("skill", "/tmp/sample", runner=runner) == "allow"
+
+
+def test_run_sandbox_scan_blocks_when_default_runner_cannot_be_built(monkeypatch):
+    def _broken_runner(*args, **kwargs):
+        raise RuntimeError("docker unavailable")
+
+    monkeypatch.setattr("app.orchestrator.claude_sandbox_executor.DockerSandboxRunner", _broken_runner)
+
+    assert sandbox_service.run_sandbox_scan("skill", "/tmp/sample") == "block"
+
+
+def test_docker_sandbox_runner_blocks_when_broker_unreachable(monkeypatch):
+    def _unreachable(*args, **kwargs):
+        raise httpx.ConnectError("broker refused connection")
+
+    monkeypatch.setattr(httpx, "post", _unreachable)
+    result = DockerSandboxRunner(broker_url="http://broker.test", broker_token="test-token").run("scan", "/tmp/sample", {}, timeout_seconds=1)
+
+    assert result["verdict"] == "block"
     assert result["untrusted"] is True
 
 

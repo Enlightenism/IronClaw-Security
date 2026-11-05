@@ -33,6 +33,8 @@ class SandboxRuntimeAdapter:
         environment_scope: str = "sandbox",
         metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if self.executor is None:
+            return self._unconfigured_payload(environment_scope=environment_scope)
         request = self._build_request(
             actiontype=actiontype,
             target=target,
@@ -128,10 +130,40 @@ class SandboxRuntimeAdapter:
                 "runtime": environment_scope,
             }
 
+        if self.executor is None:
+            return self._unconfigured_payload(environment_scope=environment_scope, decision=decision_dict)
+
         result = self.router.route(request=request, executor=self.executor)
         payload = self._normalize_result(result=result)
         payload["decision"] = decision_dict
         return payload
+
+    def _unconfigured_payload(
+        self,
+        *,
+        environment_scope: str,
+        decision: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        reasons = list((decision or {}).get("reasons", []))
+        reasons.append(
+            {
+                "source": self.name,
+                "label": "No sandbox executor",
+                "details": "No sandbox executor is configured; execution denied.",
+                "score": 0,
+            }
+        )
+        return {
+            "executionstate": "denied",
+            "verdict": "block",
+            "executed": False,
+            "result": None,
+            "decision": decision or {},
+            "reasons": reasons,
+            "telemetry": {},
+            "adapter": self.name,
+            "runtime": environment_scope,
+        }
 
     def _build_request(
         self,

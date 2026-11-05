@@ -8,7 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 import httpx
 
+from app.config import APP_BASE_URL
 from app.core.auth import require_api_key
+from app.core.claude_upstream import is_allowed_claude_upstream_url
 
 router = APIRouter(
     prefix="/claude/stream-guard",
@@ -150,13 +152,19 @@ async def claude_stream_guard_proxy(
 
     upstream_url = body.get("upstream_url")
     upstream_payload = body.get("upstream_payload") or {}
-    guard_base_url = body.get("guard_base_url") or _infer_guard_base_url(request)
+    guard_base_url = APP_BASE_URL
     guard_mode = str(body.get("guard_mode") or "enforce").lower()
 
     if not upstream_url:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Missing 'upstream_url' in request body.",
+        )
+
+    if not is_allowed_claude_upstream_url(upstream_url):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Upstream URL is not an allowed Claude upstream host.",
         )
 
     if guard_mode not in {"enforce", "assist", "dryrun"}:
@@ -192,9 +200,3 @@ async def claude_stream_guard_proxy(
         event_stream(),
         media_type="text/plain; charset=utf-8",
     )
-
-
-def _infer_guard_base_url(request: Request) -> str:
-    scheme = request.headers.get("X-Forwarded-Proto") or request.url.scheme
-    host = request.headers.get("X-Forwarded-Host") or request.headers.get("Host") or request.url.netloc
-    return f"{scheme}://{host}".rstrip("/")

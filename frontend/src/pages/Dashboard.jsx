@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import IntegrationCard from "@/components/dashboard/IntegrationCard";
+import RuntimeBlocksCard from "@/components/dashboard/RuntimeBlocksCard";
 import SecurityAnalysis from "@/components/dashboard/SecurityAnalysis";
 import WalletCard from "@/components/dashboard/WalletCard";
 import { useAuth } from "@/context/AuthContext";
@@ -983,6 +984,7 @@ const Dashboard = () => {
                 />
               ))}
             </div>
+            <RuntimeBlocksCard />
           </div>
         </div>
       </main>

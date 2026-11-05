@@ -36,6 +36,7 @@ def executeguardedaction(
         session_id=session_id,
         file_path=effective_file_path,
         metadata={"source": "service.execute"},
+        # Decision-only: no side-effecting executor is wired. The default dry-run receipt reports the verdict and runs nothing.
         executor=None,
     )
 

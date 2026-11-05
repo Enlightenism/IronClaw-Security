@@ -20,6 +20,7 @@ from app.config import (
 from app.core.auth import AuthContext, InstallKeyAuthContext, get_runtime_auth_context
 from app.core.install_keys import get_install_key_registry
 from app.core.unit_wallet import get_unit_wallet_registry
+from app.runtime.install_gate import gate_shell_payload
 from app.services.action_guard import ActionGuardDecision, analyze_action, normalize_action_type
 from app.services.actionexecuteservice import (
     ActionExecutionRequest,
@@ -44,6 +45,8 @@ _ACTION_TYPE_MAP: dict[str, str] = {
     "fileread": "file_read",
     "command": "shell_command",
 }
+
+INSTALL_CHECKED_ACTIONS: frozenset[str] = frozenset({"command", "toolcall"})
 
 
 class ActionExecuteRequestModel(BaseModel):
@@ -302,6 +305,19 @@ def executeaction(
         mergedmetadata["install_key_id"] = install_key_id
         mergedmetadata["program"] = install_program
 
+    if install_key_id is not None:
+        mergedmetadata["install_key_id"] = install_key_id
+        mergedmetadata["program"] = install_program
+
+    install_decision = None
+    if request.actiontype in INSTALL_CHECKED_ACTIONS:
+        install_decision = gate_shell_payload(
+            request.content or "",
+            platform=install_program or str(request.metadata.get("runtime") or request.clientid or ""),
+            client_id=request.clientid,
+            owner_key=owner_key,
+        )
+
     # 2. Security audit decides status
     audit = createauditevent(
         actiontype=request.actiontype,
@@ -313,6 +329,9 @@ def executeaction(
         filepath=request.filepath,
         metadata=mergedmetadata,
     )
+
+    if install_decision is not None and not install_decision.allowed:
+        audit = _mark_usage_denial(audit, f"install_gate:{','.join(install_decision.reasons)}")
 
     status = _map_audit_event_to_status(audit["eventtype"])
 

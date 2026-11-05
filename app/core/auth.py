@@ -1464,6 +1464,14 @@ def require_auth_context(
     return context
 
 
+def require_runtime_auth_context(
+    context: AuthContext | InstallKeyAuthContext = Depends(get_runtime_auth_context),
+) -> AuthContext | InstallKeyAuthContext:
+    if isinstance(context, InstallKeyAuthContext):
+        return context
+    return require_auth_context(context)
+
+
 def get_current_organization_id(
     context: AuthContext = Depends(get_auth_context),
 ) -> str:

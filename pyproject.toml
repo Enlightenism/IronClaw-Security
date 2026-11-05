@@ -146,7 +146,7 @@ namespaces = false
 
 [tool.setuptools.package-data]
 ironclawskill = ["py.typed"]
-ironclaw_sdk = ["py.typed", "openclaw_plugin/*.js", "openclaw_plugin/*.json"]
+ironclaw_sdk = ["py.typed", "openclaw_plugin/*.js", "openclaw_plugin/*.json", "hermes_plugin/*.yaml"]
 app = ["py.typed"]
 
 [tool.pytest.ini_options]

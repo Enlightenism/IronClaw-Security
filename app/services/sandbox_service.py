@@ -1,9 +1,14 @@
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from app.config import RISK_THRESHOLD_BLOCK_MIN
 
+if TYPE_CHECKING:
+    from app.orchestrator.claude_sandbox_executor import SandboxRunner
+
 QUARANTINE_TARGET_TYPES = {"skill", "archive", "local_path"}
 HIGH_RISK_SANDBOX_TARGET_TYPES = {"github_repo"}
+SANDBOX_SCAN_TIMEOUT_SECONDS = 30
 
 
 @dataclass
@@ -57,16 +62,47 @@ def evaluate_sandbox(target_type: str, route_mode: str, requires_sandbox: bool) 
     )
 
 
-def apply_sandbox_policy(scan_result: dict, decision: SandboxDecision) -> dict:
+def run_sandbox_scan(target_type: str, target_value: str, runner: "SandboxRunner | None" = None) -> str:
+    try:
+        if runner is None:
+            from app.orchestrator.claude_sandbox_executor import DockerSandboxRunner
+
+            runner = DockerSandboxRunner()
+        result = runner.run(
+            "scan",
+            target_value,
+            {"target_type": target_type},
+            timeout_seconds=SANDBOX_SCAN_TIMEOUT_SECONDS,
+            read_only_fs=True,
+            network_enabled=False,
+        )
+    except Exception:
+        return "block"
+
+    if isinstance(result, dict) and result.get("verdict") == "allow":
+        return "allow"
+    return "block"
+
+
+def apply_sandbox_policy(scan_result: dict, decision: SandboxDecision, sandbox_verdict: str = "block") -> dict:
     result = dict(scan_result)
 
+    sandbox_allowed = decision.enforced and sandbox_verdict == "allow" and result.get("verdict") == "allow"
+
     base_summary = result.get("summary", "Sandbox policy applied.")
-    if decision.summary_suffix:
+    if sandbox_allowed:
+        result["summary"] = f"{base_summary} Cleared by isolated sandbox scan.".strip()
+    elif decision.summary_suffix:
         result["summary"] = f"{base_summary}{decision.summary_suffix}".strip()
     else:
         result["summary"] = base_summary
 
-    if decision.enforced:
+    if sandbox_allowed:
+        result["verdict"] = "allow"
+        result["quarantine_reason"] = None
+        result["review_status"] = "none"
+        result["untrusted"] = False
+    elif decision.enforced:
         result["verdict"] = decision.verdict_override or result.get("verdict", "block")
 
         failed_checks = list(result.get("failed_checks", []))

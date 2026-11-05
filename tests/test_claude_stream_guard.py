@@ -63,6 +63,20 @@ def test_stream_guard_requires_upstream_url() -> None:
     assert response.json()["detail"] == "Missing 'upstream_url' in request body."
 
 
+def test_stream_guard_rejects_disallowed_upstream_host() -> None:
+    app = _build_test_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/claude/stream-guard/proxy",
+        headers=_headers(),
+        json={"upstream_url": "https://169.254.169.254/latest/meta-data", "upstream_payload": {}},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Upstream URL is not an allowed Claude upstream host."
+
+
 def test_stream_guard_dryrun_truncates_on_block_verdict(monkeypatch) -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if str(request.url).endswith("/policy/guard-bundle"):

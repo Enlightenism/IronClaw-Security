@@ -47,6 +47,7 @@ def execute_guarded_action(
             "session_id": session_id,
             "client_id": client_id,
         },
+        # Decision-only: no side-effecting executor is wired. The default dry-run receipt reports the verdict and runs nothing.
         executor=None,
     )
 

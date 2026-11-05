@@ -11,7 +11,7 @@
 # The environment block below pins runtime-critical values that must
 # never be sourced from an absent .env — these are safe, non-secret
 # defaults that prevent silent failure on a fresh install.
-# Secret keys (SUPABASE_*, *_API_KEY) are loaded
+# Secret keys (SUPABASE_*, *_API_KEY, SANDBOX_BROKER_TOKEN) are loaded
 # exclusively from .env and are intentionally absent here.
 
 services:
@@ -25,6 +25,9 @@ services:
 
     ports:
       - "8000:8000"
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     env_file:
       - .env
@@ -63,8 +66,27 @@ services:
       # -----------------------------------------------------------------------
       # Policy and verdict defaults
       # -----------------------------------------------------------------------
-      DEFAULT_SCAN_VERDICT: "allow"
+      DEFAULT_SCAN_VERDICT: "block"
       DEFAULT_REVIEW_STATUS: "not_required"
+
+      # -----------------------------------------------------------------------
+      # Host sandbox broker
+      # NOT a compose service: it needs host Docker access, so it runs on the
+      # host with: python -m sandbox_broker.main
+      # It refuses to start unless SANDBOX_BROKER_TOKEN is set in its process
+      # environment. Export the same value from .env in the host shell (the broker
+      # does not read .env). The token is passed to this container via env_file only.
+      # Without it, every return is blocked with broker_unconfigured.
+      # Build the scanner image once before starting the broker:
+      #   python -m sandbox_broker.build_image
+      # Until it exists, /health reports scanner_image=missing and returns are blocked.
+      # The broker binds to 127.0.0.1:8088 and rejects non-loopback bind hosts.
+      # Docker Desktop (Windows/macOS) reaches it via host.docker.internal.
+      # Linux Docker Engine is NOT supported by this layout as-is: host-gateway
+      # resolves to the bridge gateway, which cannot reach a loopback listener.
+      # Do not relax the loopback rule to work around it; that needs a reviewed change.
+      # -----------------------------------------------------------------------
+      SANDBOX_BROKER_URL: "http://host.docker.internal:8088"
 
       # -----------------------------------------------------------------------
       # Risk thresholds  (allow_max < quarantine_min <= block_min)

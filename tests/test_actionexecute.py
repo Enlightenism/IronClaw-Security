@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from app.api.actionexecute import router
 from app.config import RISK_THRESHOLD_BLOCK_MIN
 from app.core.auth import AuthContext, get_runtime_auth_context
+from app.runtime import install_gate
+from app.services.third_party_install_scanner import ScanOutcome
 
 app = FastAPI()
 app.include_router(router)
@@ -18,6 +21,10 @@ app.dependency_overrides[get_runtime_auth_context] = lambda: AuthContext(
     authenticated=True,
 )
 client = TestClient(app)
+
+
+def _block_scan(command: str, *, platform: str) -> ScanOutcome:
+    return ScanOutcome(False, ["unresolvable_install_source"], [])
 
 
 def test_executeaction_reviews_network_request_without_allowlist() -> None:
@@ -131,3 +138,43 @@ def test_executeaction_rejects_unknown_actiontype() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_executeaction_denies_unpinned_install_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(install_gate, "scan_third_party_install", _block_scan)
+    response = client.post(
+        "/action/execute",
+        json={
+            "actiontype": "command",
+            "target": "npm",
+            "content": "npm install evil-pkg",
+            "clientid": "client-006",
+            "sessionid": "session-006",
+            "riskscore": 0,
+            "metadata": {"runtime": "claude_code"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["executionallowed"] is False
+    assert body["audit"]["eventtype"] == "execution_denied"
+
+
+def test_executeaction_gates_toolcall_install_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(install_gate, "scan_third_party_install", _block_scan)
+    response = client.post(
+        "/action/execute",
+        json={
+            "actiontype": "toolcall",
+            "target": "skill_install",
+            "content": "npm install evil-pkg",
+            "clientid": "client-007",
+            "sessionid": "session-007",
+            "riskscore": 0,
+            "metadata": {"runtime": "claude_code"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["executionallowed"] is False

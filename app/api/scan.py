@@ -16,7 +16,7 @@ from app.schemas.scan import (
 )
 from app.services.history import append_scan_result
 from app.services.intake_service import prepare_intake
-from app.services.sandbox_service import apply_sandbox_policy, evaluate_sandbox
+from app.services.sandbox_service import apply_sandbox_policy, evaluate_sandbox, run_sandbox_scan
 from app.services.scanner import RULE_INDEX, get_rule_severities, perform_scan
 from app.services.telemetry import append_telemetry_event
 from app.services.telemetry_service import (
@@ -252,7 +252,8 @@ def _run_scan(request: ScanRequest, background_tasks: BackgroundTasks) -> ScanRe
         },
     )
 
-    result = apply_sandbox_policy(result, sandbox_decision)
+    sandbox_verdict = run_sandbox_scan(intake.target_type, intake.target_value) if sandbox_decision.enforced else "block"
+    result = apply_sandbox_policy(result, sandbox_decision, sandbox_verdict)
     result = _coerce_result_scalars(result)
     result["client_id"] = request.client_id
 

@@ -1,0 +1,6 @@
+name: ironclaw-security
+version: "1.0"
+description: IronClaw install gating and return-path enforcement for Hermes Agent.
+provides_hooks:
+  - pre_tool_call
+  - transform_tool_result

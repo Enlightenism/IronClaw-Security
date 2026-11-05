@@ -45,6 +45,20 @@ def test_guard_router_requires_upstream_url() -> None:
     assert response.json()["detail"] == "Missing 'upstream_url' in request body."
 
 
+def test_guard_router_rejects_disallowed_upstream_host() -> None:
+    app = _build_test_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/claude/guard-router/proxy",
+        headers=_headers(),
+        json={"upstream_url": "https://169.254.169.254/latest/meta-data", "upstream_payload": {}},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Upstream URL is not an allowed Claude upstream host."
+
+
 def test_guard_router_streams_guarded_response(monkeypatch) -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)

@@ -132,13 +132,22 @@ class SandboxRouter:
 
         runtime_executor = executor or self.default_executor
         if runtime_executor is None:
+            no_executor_reasons = [
+                *decision.reasons,
+                {
+                    "source": "sandboxrouter",
+                    "label": "No sandbox executor",
+                    "details": "No sandbox executor is configured; execution is denied fail-closed.",
+                    "score": 0,
+                },
+            ]
             return SandboxExecutionResult(
-                executionstate="approved",
-                verdict=decision.verdict,
+                executionstate="denied",
+                verdict="block",
                 executed=False,
                 result=None,
                 decision=decision.as_dict(),
-                reasons=list(decision.reasons),
+                reasons=no_executor_reasons,
                 telemetry=self._build_telemetry(request=request, decision=decision, executed=False),
             )
 

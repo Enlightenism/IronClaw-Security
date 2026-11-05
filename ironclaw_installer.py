@@ -38,6 +38,11 @@ _OPENCLAW_PLUGIN_FILES: Final[tuple[str, ...]] = (
     "index.js",
     "policy.js",
 )
+HERMES_PLUGIN_ID: Final[str] = "ironclaw-security"
+_HERMES_PLUGIN_FILES: Final[tuple[str, ...]] = (
+    "__init__.py",
+    "plugin.yaml",
+)
 DEFAULT_ENV_FILENAME: Final[str] = ".env"
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 20.0
 DEFAULT_BACKUP_TARGET: Final[str] = "primary"
@@ -662,9 +667,11 @@ def _stage_openclaw_plugin(config_dir: Path) -> Path:
 def _install_openclaw_plugin(plugin_dir: Path, config_file: Path) -> None:
     config_path = str(config_file.resolve())
     config_path_setting = f"plugins.entries.{OPENCLAW_PLUGIN_ID}.config.configFile"
+    python_path_setting = f"plugins.entries.{OPENCLAW_PLUGIN_ID}.config.pythonPath"
     commands = (
         ["openclaw", "plugins", "install", "--link", str(plugin_dir), "--force"],
         ["openclaw", "config", "set", config_path_setting, config_path],
+        ["openclaw", "config", "set", python_path_setting, sys.executable],
         ["openclaw", "plugins", "enable", OPENCLAW_PLUGIN_ID],
     )
     try:
@@ -683,12 +690,41 @@ def _configure_openclaw_plugin(target_config_dir: Path, config_file: Path) -> No
         _install_openclaw_plugin(plugin_dir, config_file)
     except IronClawInstallerError as exc:
         config_path_setting = f"plugins.entries.{OPENCLAW_PLUGIN_ID}.config.configFile"
+        python_path_setting = f"plugins.entries.{OPENCLAW_PLUGIN_ID}.config.pythonPath"
         raise IronClawInstallerError(
             f"OpenClaw enforcement setup failed: {exc} The paid key was securely saved to {config_file}. "
             f'Complete setup with `openclaw plugins install --link "{plugin_dir}" --force`, '
-            f'`openclaw config set {config_path_setting} "{config_file.resolve()}"`, and '
+            f'`openclaw config set {config_path_setting} "{config_file.resolve()}"`, '
+            f'`openclaw config set {python_path_setting} "{sys.executable}"`, and '
             f"`openclaw plugins enable {OPENCLAW_PLUGIN_ID}`.",
         ) from exc
+
+
+def _install_hermes_plugin() -> Path:
+    plugin_dir = Path.home() / ".hermes" / "plugins" / HERMES_PLUGIN_ID
+    if plugin_dir.is_symlink():
+        raise IronClawInstallerError(f"Refusing to install the Hermes plugin through a symbolic-link directory: {plugin_dir}")
+    try:
+        _ensure_directory(plugin_dir)
+        packaged_plugin = resources.files("ironclaw_sdk").joinpath("hermes_plugin")
+        for filename in _HERMES_PLUGIN_FILES:
+            source = packaged_plugin.joinpath(filename)
+            if not source.is_file():
+                raise FileNotFoundError(filename)
+            _write_text_file(
+                plugin_dir / filename,
+                source.read_text(encoding="utf-8"),
+                overwrite=True,
+            )
+    except (ModuleNotFoundError, OSError, UnicodeDecodeError) as exc:
+        raise IronClawInstallerError("The Hermes enforcement plugin is missing from the installed IronClaw package.") from exc
+    try:
+        subprocess.run(["hermes", "plugins", "enable", HERMES_PLUGIN_ID], check=True, timeout=_SUBPROCESS_TIMEOUT)
+    except FileNotFoundError as exc:
+        raise IronClawInstallerError(f"The Hermes CLI was not found. The plugin was copied to {plugin_dir}; run `hermes plugins enable {HERMES_PLUGIN_ID}` after installing Hermes.") from exc
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise IronClawInstallerError(f"The Hermes enforcement plugin could not be enabled. Run `hermes plugins enable {HERMES_PLUGIN_ID}`.") from exc
+    return plugin_dir
 
 
 def _prepare_config_dir(config_dir: Path | None) -> Path:
@@ -1131,8 +1167,9 @@ def build_bootstrap_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--enable-runtime-hooks",
-        action="store_true",
-        help="Write the fail-closed tool-call enforcement hook into the runtime's user-global config (claude_code, gemini_cli, cursor, copilot).",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Write the fail-closed tool-call enforcement hook into the runtime's user-global config (claude_code, gemini_cli, cursor, copilot, goose), or install and enable the IronClaw plugin for hermes. On by default; pass --no-enable-runtime-hooks to skip.",
     )
     parser.add_argument(
         "--base-url",
@@ -1254,32 +1291,50 @@ def build_install_config(args: argparse.Namespace) -> InstallConfig:
     )
 
 
-def _runtime_hook_plan(program: str, enable: bool) -> tuple[Path, dict[str, Any]] | None:
-    from ironclaw_sdk import runtime_hooks
+def _runtime_hook_plan(program: str, enable: bool) -> list[tuple[Path, dict[str, Any]]] | None:
+    from ironclaw_sdk import goose_hooks, runtime_hooks
 
     if not enable or program not in runtime_hooks.SUPPORTED_PROGRAMS:
         return None
-    return runtime_hooks.plan_runtime_hook(program)
+    if program == "goose":
+        return goose_hooks.plan_goose_hook()
+    if program == "hermes":
+        # Hermes loads a Python plugin directory, so there is no JSON config to validate before redeeming.
+        return []
+    plan = runtime_hooks.plan_runtime_hook(program)
+    return None if plan is None else [plan]
 
 
-def _report_runtime_hook(program: str, enable: bool, plan: tuple[Path, dict[str, Any]] | None) -> int:
+def _report_runtime_hook(program: str, enable: bool, plan: list[tuple[Path, dict[str, Any]]] | None) -> int:
     from ironclaw_sdk import runtime_hooks
 
+    if program == "openclaw":
+        print("[ironclaw-installer] enforcement: the OpenClaw plugin registered during setup enforces tool calls; no runtime hook is written here.")
+        return 0
     if program not in runtime_hooks.SUPPORTED_PROGRAMS:
         print(f"[ironclaw-installer] enforcement: no tool-call hook applies to {program}; its skill is guidance-only.")
         return 0
     if not enable or plan is None:
+        if program in runtime_hooks.ADAPTER_PROGRAMS:
+            print(f"[ironclaw-installer] enforcement hook not written. Re-run without --no-enable-runtime-hooks to install the {program} enforcement hook.")
+            return 0
         target = runtime_hooks.runtime_hook_config_path(program)
-        print(f"[ironclaw-installer] enforcement hook not written. Re-run with --enable-runtime-hooks, or add this to {target}:")
+        print(f"[ironclaw-installer] enforcement hook not written. Re-run without --no-enable-runtime-hooks, or add this to {target}:")
         print(json.dumps(runtime_hooks.merge_hook_config(program, {}), indent=2))
         return 0
-    target, merged = plan
     try:
-        written = runtime_hooks.write_runtime_hook(target, merged)
-    except OSError as exc:
+        if program == "hermes":
+            plugin_dir = _install_hermes_plugin()
+            print(f"[ironclaw-installer] enforcement hook written: {plugin_dir}")
+            return 0
+        written_paths = [runtime_hooks.write_runtime_hook(target, merged) for target, merged in plan]
+    except (OSError, IronClawInstallerError) as exc:
         print(f"[ironclaw-installer] install key saved, but the enforcement hook could not be written: {exc}", file=sys.stderr)
         return 1
-    print(f"[ironclaw-installer] enforcement hook written: {written}")
+    for written in written_paths:
+        print(f"[ironclaw-installer] enforcement hook written: {written}")
+    if program == "cursor":
+        print("[ironclaw-installer] cursor: local MCP tool output is replaced when withheld; built-in and HTTP MCP output is audited but not replaced, and unparseable events are withheld.")
     return 0
 
 

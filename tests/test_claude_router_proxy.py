@@ -65,6 +65,21 @@ def test_proxy_requires_upstream_url() -> None:
     assert response.json()["message"] == "Missing 'upstream_url' in request body."
 
 
+def test_proxy_rejects_disallowed_upstream_host() -> None:
+    app = _build_test_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/claude/router-proxy/proxy",
+        headers=_headers(),
+        json={"upstream_url": "https://169.254.169.254/latest/meta-data", "upstream_payload": {}},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "http_error"
+    assert response.json()["message"] == "Upstream URL is not an allowed Claude upstream host."
+
+
 def test_proxy_streams_upstream_response(monkeypatch) -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

@@ -20,6 +20,9 @@ HIGH_RISK_TOOL_NAMES = {
     "filesystem_write",
     "registry_edit",
     "package_install",
+    "skill_install",
+    "plugin_install",
+    "mcp_add",
     "browser_open_external",
 }
 
