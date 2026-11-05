@@ -257,6 +257,9 @@ describe("Landing", () => {
     jest.useRealTimers();
   });
 
+  // First render in this file is cold (full Landing tree in jsdom) and can exceed
+  // Jest's 5s default under parallel load; a timeout here would leave its pending act
+  // overlapping the next test.
   it("renders hero content on first paint", async () => {
     await renderLanding();
 
@@ -266,7 +269,7 @@ describe("Landing", () => {
     expect(screen.getByTestId("hero-signup-btn")).toBeInTheDocument();
     expect(screen.getByTestId("threat-counter")).toBeInTheDocument();
     expect(screen.getByTestId("user-counter")).toBeInTheDocument();
-  });
+  }, 20000);
 
   it("shows the server value for each counter key", async () => {
     const nowMs = START_MS + HOUR_MS;

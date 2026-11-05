@@ -229,6 +229,8 @@ const IntegrationCard = ({
   integrationId,
   agentId,
   available = false,
+  revoked = false,
+  revokedReason = "",
   onCreateClaim,
   savedCommand = "",
   savedCommandClaimed = false,
@@ -238,6 +240,8 @@ const IntegrationCard = ({
   const [copied, setCopied] = useState(false);
   const [pressed, setPressed] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const isRevoked = revoked === true;
+  const isAvailable = available === true && !isRevoked;
   const [installCommand, setInstallCommand] = useState("");
   const [installClaimed, setInstallClaimed] = useState(false);
   const cardRef = useRef(null);
@@ -328,7 +332,7 @@ const IntegrationCard = ({
   }, [savedCommand, program, integrationId, agentId]);
 
   useEffect(() => {
-    if (available !== true || !restoredClaim) {
+    if (!isAvailable || !restoredClaim) {
       setInstallCommand("");
       setInstallClaimed(false);
       return;
@@ -336,7 +340,7 @@ const IntegrationCard = ({
 
     setInstallCommand(restoredClaim.command);
     setInstallClaimed(savedCommandClaimed === true);
-  }, [available, restoredClaim, savedCommandClaimed]);
+  }, [isAvailable, restoredClaim, savedCommandClaimed]);
 
   const canonicalTitle = typeof title === "string" ? title.trim() : "";
   if (
@@ -350,9 +354,9 @@ const IntegrationCard = ({
     return null;
   }
 
-  const normalizedCommand = available === true ? installCommand : "";
+  const normalizedCommand = isAvailable ? installCommand : "";
   const isLocked = !normalizedCommand;
-  const canGenerate = available === true && typeof onCreateClaim === "function";
+  const canGenerate = isAvailable && typeof onCreateClaim === "function";
 
   const { surface, accent } = TINT_STYLES[tint] || DEFAULT_TINT_STYLE;
 
@@ -549,12 +553,23 @@ const IntegrationCard = ({
         </h3>
       </div>
 
-      <p className="mb-2 text-[11px] leading-snug text-[#BFC1C2]">
-        After your purchase is verified, generate a one-time install command for
-        this platform. The command installs the shared IronClaw security skill
-        and embeds a single-use key for your account. The key is cleared once it
-        is redeemed.
-      </p>
+      {isRevoked ? (
+        <p
+          className="mb-2 text-[11px] leading-snug text-[#BFC1C2]"
+          data-testid={`${testid}-revoked-note`}
+        >
+          {revokedReason === "refunded"
+            ? "Revoked — purchase refunded. This install key no longer works and its command has been removed."
+            : "Revoked. This install key no longer works and its command has been removed."}
+        </p>
+      ) : (
+        <p className="mb-2 text-[11px] leading-snug text-[#BFC1C2]">
+          After your purchase is verified, generate a one-time install command
+          for this platform. The command installs the shared IronClaw security
+          skill and embeds a single-use key for your account. The key is cleared
+          once it is redeemed.
+        </p>
+      )}
 
       <div className="flex items-stretch gap-1.5">
         <code
@@ -562,29 +577,35 @@ const IntegrationCard = ({
             isLocked ? "italic text-white/40" : "text-white/90"
           }`}
         >
-          {isLocked ? PLACEHOLDER_TEXT : normalizedCommand}
+          {isRevoked
+            ? "Revoked"
+            : isLocked
+              ? PLACEHOLDER_TEXT
+              : normalizedCommand}
         </code>
-        <button
-          type="button"
-          onClick={copy}
-          disabled={isLocked}
-          data-testid={`${testid}-copy`}
-          className="flex w-7 shrink-0 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-50"
-          style={{
-            borderColor: `${accent}55`,
-            background: `${accent}14`,
-            color: accent,
-          }}
-          aria-label={
-            isLocked
-              ? canGenerate
-                ? `Generate a one-time ${canonicalTitle} install command before copying`
-                : `${canonicalTitle} install command locked until purchase`
-              : `Copy ${canonicalTitle} install command`
-          }
-        >
-          {copied ? <Check size={12} /> : <Copy size={12} />}
-        </button>
+        {isRevoked ? null : (
+          <button
+            type="button"
+            onClick={copy}
+            disabled={isLocked}
+            data-testid={`${testid}-copy`}
+            className="flex w-7 shrink-0 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-50"
+            style={{
+              borderColor: `${accent}55`,
+              background: `${accent}14`,
+              color: accent,
+            }}
+            aria-label={
+              isLocked
+                ? canGenerate
+                  ? `Generate a one-time ${canonicalTitle} install command before copying`
+                  : `${canonicalTitle} install command locked until purchase`
+                : `Copy ${canonicalTitle} install command`
+            }
+          >
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+          </button>
+        )}
       </div>
       {installClaimed && normalizedCommand ? (
         <p
@@ -595,24 +616,26 @@ const IntegrationCard = ({
           another machine.
         </p>
       ) : null}
-      <button
-        type="button"
-        onClick={generate}
-        disabled={!canGenerate || generating}
-        data-testid={`${testid}-generate`}
-        className="mt-2 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
-        style={{
-          borderColor: `${accent}55`,
-          background: `${accent}14`,
-          color: accent,
-        }}
-      >
-        {generating
-          ? "Generating..."
-          : normalizedCommand
-            ? "Generate a new one-time command"
-            : "Generate one-time install command"}
-      </button>
+      {isRevoked ? null : (
+        <button
+          type="button"
+          onClick={generate}
+          disabled={!canGenerate || generating}
+          data-testid={`${testid}-generate`}
+          className="mt-2 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
+          style={{
+            borderColor: `${accent}55`,
+            background: `${accent}14`,
+            color: accent,
+          }}
+        >
+          {generating
+            ? "Generating..."
+            : normalizedCommand
+              ? "Generate a new one-time command"
+              : "Generate one-time install command"}
+        </button>
+      )}
     </div>
   );
 };

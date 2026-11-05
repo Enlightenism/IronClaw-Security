@@ -24,7 +24,7 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-LedgerEntryType = Literal["purchase", "debit", "credit", "adjustment", "refund"]
+LedgerEntryType = Literal["purchase", "debit", "credit", "adjustment", "refund", "refund_revoke"]
 
 
 # ---------------------------------------------------------------------------

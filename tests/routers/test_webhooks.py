@@ -1061,6 +1061,30 @@ class TestStripeWebhookReceiver:
         assert resp.status_code == 200
         stripe_service.dispatch_webhook_event.assert_called_once_with(fake_event)
 
+    def test_charge_refunded_event_dispatches_to_stripe_service_and_returns_200(self, client: TestClient):
+        fake_event = {
+            "id": "evt_refund_router_001",
+            "type": "charge.refunded",
+            "data": {"object": {"id": "ch_123", "payment_intent": "pi_123", "refunded": True}},
+        }
+        stripe_service = MagicMock()
+        _app.dependency_overrides[_wh.get_stripe_service] = lambda: stripe_service
+        try:
+            with patch(f"{_PERSISTENCE_MODULE}.vault.stripe_webhook_secret", return_value="whsec_testsecret"):
+                with patch(f"{_PERSISTENCE_MODULE}.stripe_lib.Webhook.construct_event", return_value=fake_event):
+                    resp = client.post(
+                        _STRIPE_URL,
+                        content=_STRIPE_RAW_BODY,
+                        headers={
+                            "stripe-signature": "t=1,v1=abc123",
+                            "content-type": "application/json",
+                        },
+                    )
+        finally:
+            _app.dependency_overrides.pop(_wh.get_stripe_service, None)
+        assert resp.status_code == 200
+        stripe_service.dispatch_webhook_event.assert_called_once_with(fake_event)
+
     def test_dispatch_failure_returns_500_for_known_runtime_event(self, client: TestClient):
         if not _wh._STRIPE_DISPATCHABLE_EVENTS:
             pytest.skip("No dispatchable Stripe events are defined on the router module.")

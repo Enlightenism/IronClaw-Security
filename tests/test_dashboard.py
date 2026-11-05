@@ -483,6 +483,24 @@ class TestDashboardInstallKeySlotLogic:
         finally:
             _clear_registry_overrides()
 
+    def test_install_keys_refunded_status_when_revoked_for_refund(self, dashboard_client: TestClient) -> None:
+        mock_registry = _make_install_key_registry(_OWNER_KEY, locked_count=0, active_count=0, revoked_count=1)
+        mock_registry.get_keys_for_owner.return_value[0].metadata = {"revoke_reason": "refunded"}
+        _apply_registry_overrides(mock_registry, _make_unit_wallet_registry(), _make_billing_registry())
+        try:
+            response = dashboard_client.get(
+                "/dashboard/overview",
+                params={"owner_key": _OWNER_KEY},
+            )
+            assert response.status_code == 200
+            body = response.json()
+            install_keys = body.get("install_keys", [])
+            refunded = [k for k in install_keys if k.get("status") == "refunded"]
+            assert len(refunded) == 1
+            assert refunded[0].get("revoked") is True
+        finally:
+            _clear_registry_overrides()
+
     def test_install_keys_mixed_slot_logic_openclaw_program(self, dashboard_client: TestClient) -> None:
         mock_registry = _make_install_key_registry(
             _OWNER_KEY,

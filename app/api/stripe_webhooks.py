@@ -1174,6 +1174,24 @@ def _handle_customer_updated(
     return True
 
 
+def _handle_charge_refunded(
+    event_id: str,
+    event_data: dict[str, Any],
+    org_id: str | None,
+    svc: Any,
+) -> bool:
+    """Delegate charge.refunded to the shared StripeService refund revocation (idempotent per event id)."""
+    result = svc.handle_webhook_event(event_data)
+    processed = result.get("action") == "processed"
+    logger.info(
+        "stripe_webhooks: charge.refunded — event=%s org=%s action=%s",
+        event_id,
+        org_id,
+        result.get("action"),
+    )
+    return processed
+
+
 # ---------------------------------------------------------------------------
 # Dispatch table — maps event_type string → handler function
 # ---------------------------------------------------------------------------
@@ -1189,6 +1207,7 @@ _EVENT_HANDLERS: dict[str, Any] = {
     StripeWebhookEventType.CUSTOMER_CREATED: _handle_customer_created,
     StripeWebhookEventType.CUSTOMER_UPDATED: _handle_customer_updated,
     StripeWebhookEventType.PAYMENT_INTENT_SUCCEEDED: _handle_payment_intent_succeeded,
+    StripeWebhookEventType.CHARGE_REFUNDED: _handle_charge_refunded,
     "charge.succeeded": _handle_payment_intent_succeeded,
 }
 

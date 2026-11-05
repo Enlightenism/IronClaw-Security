@@ -630,6 +630,61 @@ class TestUnitWalletRegistry:
         registry = UnitWalletRegistry()
         assert registry.list_ledger_entries(owner_key="ghost-ledger-xyz") == []
 
+    def test_revoke_units_for_checkout_claws_back_once(self) -> None:
+        registry = UnitWalletRegistry()
+        owner = "owner-revoke-001"
+        registry.credit_units(owner_key=owner, units=100, metadata={"checkout_session_id": "cs_revoke_001"})
+        registry.debit_units(owner_key=owner, units=20)
+        revoked = registry.revoke_units_for_checkout(owner_key=owner, checkout_session_id="cs_revoke_001")
+        wallet = registry.get_wallet(owner)
+        assert revoked == 80
+        assert wallet is not None
+        assert wallet.balance_units == 0
+        assert registry.revoke_units_for_checkout(owner_key=owner, checkout_session_id="cs_revoke_001") == 0
+
+    def test_revoke_purchase_units_floors_at_zero_and_links_purchase(self) -> None:
+        registry = UnitWalletRegistry()
+        owner = "owner-revoke-purchase-001"
+        registry.credit_units(owner_key=owner, units=30, metadata={"checkout_session_id": "cs_purchase_001"})
+        revoked = registry.revoke_purchase_units(owner_key=owner, purchase_reference="cs_purchase_001", units=50)
+        wallet = registry.get_wallet(owner)
+        assert revoked == 30
+        assert wallet is not None
+        assert wallet.balance_units == 0
+        assert wallet.total_consumed_units == 0
+        revoke_entries = [entry for entry in registry.list_ledger_entries(owner_key=owner, limit=10) if entry.entry_type == "refund_revoke"]
+        assert len(revoke_entries) == 1
+        assert revoke_entries[0].units == 30
+        assert revoke_entries[0].purchase_id == "cs_purchase_001"
+        assert revoke_entries[0].checkout_session_id == "cs_purchase_001"
+        assert registry.revoke_purchase_units(owner_key=owner, purchase_reference="cs_purchase_001", units=50) == 0
+
+    def test_revoke_units_for_refund_matches_payment_intent_and_invoice(self) -> None:
+        registry = UnitWalletRegistry()
+        owner = "owner-revoke-refund-001"
+        registry.credit_units(
+            owner_key=owner,
+            units=40,
+            metadata={"checkout_session_id": "cs_refund_001", "payment_intent": "pi_refund_001"},
+        )
+        registry.credit_units(
+            owner_key=owner,
+            units=60,
+            metadata={"purchase_reference": "in_refund_001", "invoice_id": "in_refund_001"},
+        )
+        registry.debit_units(owner_key=owner, units=30)
+        revoked = registry.revoke_units_for_refund(
+            [owner, "ghost-refund-owner-001"],
+            payment_intent="pi_refund_001",
+            invoice_id="in_refund_001",
+        )
+        wallet = registry.get_wallet(owner)
+        assert revoked == {"cs_refund_001": 40, "in_refund_001": 30}
+        assert wallet is not None
+        assert wallet.balance_units == 0
+        assert registry.get_wallet("ghost-refund-owner-001") is None
+        assert registry.revoke_units_for_refund([owner], payment_intent="pi_refund_001", invoice_id="in_refund_001") == {}
+
     def test_debit_units_for_install_key_tracks_owner_key_program_and_metadata(self) -> None:
         registry = UnitWalletRegistry()
         registry.credit_units(owner_key="owner-install-metadata", units=25)

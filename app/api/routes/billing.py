@@ -128,6 +128,9 @@ class BillingPackagePurchaseView(BaseModel):
     openclaw_install_key: str | None = None
     claude_code_install_key: str | None = None
     hermes_install_key: str | None = None
+    stripe_payment_intent_id: str | None = None
+    refunded_at: str | None = None
+    refund_reason: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -412,6 +415,36 @@ class _DurablePurchaseRepository:
             if customer_value and str(metadata.get("customer_id") or "").strip() == customer_value:
                 return purchase
         return None
+
+    def find_for_payment_intent(self, payment_intent: str | None) -> BillingPackagePurchaseView | None:
+        intent_value = str(payment_intent or "").strip()
+        if not intent_value:
+            return None
+        combined: list[BillingPackagePurchaseView] = list(reversed(_PURCHASES))
+        try:
+            for row in self._store.select(self._table):
+                try:
+                    combined.append(BillingPackagePurchaseView(**row))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        for purchase in combined:
+            if (purchase.stripe_payment_intent_id or "").strip() == intent_value:
+                return purchase
+        return None
+
+    def update_fields(self, purchase_id: str, updates: dict[str, Any]) -> BillingPackagePurchaseView | None:
+        current = self.find_for_checkout(purchase_id=purchase_id)
+        if current is None:
+            return None
+        updated = current.model_copy(update=updates)
+        self.upsert(updated)
+        with self._lock:
+            for index, existing in enumerate(_PURCHASES):
+                if existing.purchase_id == purchase_id:
+                    _PURCHASES[index] = updated
+        return updated
 
 
 _PURCHASE_REPOSITORY = _DurablePurchaseRepository()

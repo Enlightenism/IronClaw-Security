@@ -53,7 +53,7 @@ class UnitUsageSummaryView(BaseModel):
 class UnitLedgerItem(BaseModel):
     entry_id: str
     timestamp: str
-    entry_type: Literal["purchase", "debit", "credit", "adjustment", "refund"]
+    entry_type: Literal["purchase", "debit", "credit", "adjustment", "refund", "refund_revoke"]
     units: int
     balance_after: int = Field(ge=0)
     amount_usd: float | None = Field(default=None, ge=0)

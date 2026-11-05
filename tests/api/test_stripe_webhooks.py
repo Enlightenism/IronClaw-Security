@@ -272,6 +272,37 @@ def test_checkout_completed_persistence_failure_is_not_replayed_or_reissued() ->
     service._issue_paid_install_keys_for_checkout.assert_not_called()
 
 
+def test_charge_refunded_event_routes_to_refund_revocation_and_acks() -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+    service.handle_webhook_event.return_value = {"action": "processed"}
+    event = {
+        "id": "evt_refund_001",
+        "type": "charge.refunded",
+        "data": {
+            "object": {
+                "id": "ch_123",
+                "object": "charge",
+                "payment_intent": "pi_123",
+                "customer": "cus_123",
+                "amount": 2500,
+                "amount_refunded": 2500,
+                "refunded": True,
+                "metadata": {"org_id": "org_123"},
+            }
+        },
+    }
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"):
+        response = _post_event(event)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["processed"] is True
+    assert payload["event_type"] == "charge.refunded"
+    service.handle_webhook_event.assert_called_once_with(event)
+
+
 def test_invalid_json_returns_400() -> None:
     stripe_webhooks.reset_processed_events()
     service = _make_service()

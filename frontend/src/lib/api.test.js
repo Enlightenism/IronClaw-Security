@@ -408,6 +408,11 @@ describe("payments.getStatus", () => {
     expect(payments.getState({ payment_status: "paid" })).toBe("fulfilled");
     expect(payments.isFulfilled({ payment_status: "paid" })).toBe(true);
     expect(payments.isPending({ payment_status: "paid" })).toBe(false);
+
+    expect(payments.getState({ payment_status: "refunded" })).toBe("refunded");
+    expect(payments.isRefunded({ payment_status: "refunded" })).toBe(true);
+    expect(payments.isFulfilled({ payment_status: "refunded" })).toBe(false);
+    expect(payments.isPending({ payment_status: "refunded" })).toBe(false);
   });
 });
 

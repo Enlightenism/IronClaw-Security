@@ -272,6 +272,7 @@ export const payments = {
     );
 
     if (paymentStatus === "paid" || response?.paid === true) return "fulfilled";
+    if (paymentStatus === "refunded") return "refunded";
     if (
       paymentStatus === "pending" ||
       paymentStatus === "open" ||
@@ -287,6 +288,7 @@ export const payments = {
   },
   isPending: (response = {}) => payments.getState(response) === "pending",
   isFulfilled: (response = {}) => payments.getState(response) === "fulfilled",
+  isRefunded: (response = {}) => payments.getState(response) === "refunded",
   getInstallKey: (response = {}) => getInstallKeyFromResponse(response),
 };
 

@@ -534,15 +534,52 @@ def _should_use_memory_fallback() -> bool:
         return True
 
 
-def _persist_install_key_update(*, key_id: str, action: str, callback: Any) -> None:
+def _persist_install_key_update(*, key_id: str, action: str, callback: Any) -> bool:
     if _should_use_memory_fallback():
         _logger.info("install_keys: %s for %s skipped because persistence is running in memory-only mode", action, key_id)
-        return
+        return True
 
     try:
         callback()
     except (SupabaseAPIError, SupabaseClientError, Exception):
         _logger.warning("install_keys: failed to persist %s for %s", action, key_id)
+        return False
+    return True
+
+
+def _write_key_revocation(record: InstallKeyRecord, *, reason: str) -> None:
+    client = get_supabase_service_client()
+    revoked_at = (record.revoked_at or _utc_now()).isoformat()
+    client.table(_T_INSTALL_KEYS).update(
+        {
+            "active": False,
+            "entitlements_status": "revoked",
+            "revoked_at": revoked_at,
+            "metadata": record.metadata,
+        }
+    ).eq("key_id", record.key_id).execute()
+    client.table(_T_INSTALL_KEY_STATE).update(
+        {
+            "active": False,
+            "status": "revoked",
+            "revoked_at": revoked_at,
+            "updated_at": _utc_now_iso(),
+        }
+    ).eq("key_id", record.key_id).execute()
+    client.table(_T_INSTALL_KEY_HISTORY).insert(
+        {
+            "history_id": f"hist_{secrets.token_hex(12)}",
+            "key_id": record.key_id,
+            "purchase_id": str(record.purchase_reference or record.subscription_id or "").strip() or None,
+            "event_type": "revoked",
+            "status": "revoked",
+            "actor_type": "system",
+            "reason": reason,
+            "metadata": {"owner_key": record.owner_key, "program": record.program},
+            "created_at": _utc_now_iso(),
+            "updated_at": _utc_now_iso(),
+        }
+    ).execute()
 
 
 def _canonical_install_key_event_id(*, owner_key: str, program: ProgramCode, purchase_reference: str | None, checkout_session_id: str | None) -> str:
@@ -702,6 +739,7 @@ class InstallKeyRegistry:
         self._loaded = False
         self._last_sync_at: datetime | None = None
         self._last_write_at: datetime | None = None
+        self._pending_revocations: dict[str, tuple[InstallKeyRecord, str]] = {}
 
     # ------------------------------------------------------------------
     # Internal load
@@ -722,6 +760,19 @@ class InstallKeyRegistry:
         rebuilt_hash_index: dict[str, str] = {}
         for row in rows:
             record = _record_from_row(row)
+            pending = self._pending_revocations.get(record.key_id)
+            if pending is not None:
+                pending_record, pending_reason = pending
+                if record.active and record.revoked_at is None:
+                    record = pending_record
+                    if _persist_install_key_update(
+                        key_id=record.key_id,
+                        action="revocation_retry",
+                        callback=lambda r=pending_record, reason=pending_reason: _write_key_revocation(r, reason=reason),
+                    ):
+                        self._pending_revocations.pop(record.key_id, None)
+                else:
+                    self._pending_revocations.pop(record.key_id, None)
             rebuilt_by_id[record.key_id] = record
             if record.raw_key_hash:
                 rebuilt_hash_index[record.raw_key_hash] = record.key_id
@@ -1283,6 +1334,14 @@ class InstallKeyRegistry:
     # authenticate_install_key
     # ------------------------------------------------------------------
 
+    def get_keys_for_purchase(self, purchase_reference: str) -> list[InstallKeyRecord]:
+        reference = str(purchase_reference or "").strip()
+        if not reference:
+            return []
+        with self._lock:
+            self._ensure_loaded()
+            return [record for record in self._records_by_id.values() if reference in {record.purchase_reference, record.checkout_session_id}]
+
     def authenticate_install_key(self, raw_key: str) -> InstallKeyRecord | None:
         """
         Constant-time authenticate an install key.
@@ -1355,15 +1414,18 @@ class InstallKeyRegistry:
     # revoke_key
     # ------------------------------------------------------------------
 
-    def revoke_key(self, key_id: str) -> InstallKeyRecord:
-        """Deactivate an install key. Returns the updated record."""
+    def revoke_key(self, key_id: str, *, reason: str = "install_key_revoked", finalize_inactive: bool = False) -> InstallKeyRecord:
+        """Deactivate an install key. Returns the updated record.
+
+        ``finalize_inactive`` upgrades keys already locked by reconciliation to the ``revoked`` entitlement state.
+        """
         with self._lock:
             self._ensure_loaded()
             record = self._records_by_id.get(key_id)
             if record is None:
                 raise InstallKeyNotFoundError(key_id)
 
-            if not record.active:
+            if not record.active and not (finalize_inactive and record.entitlements_status != "revoked"):
                 return record
 
             now = _utc_now()
@@ -1385,43 +1447,49 @@ class InstallKeyRegistry:
                 units_consumed=record.units_consumed,
                 created_at=record.created_at,
                 last_used_at=record.last_used_at,
-                revoked_at=now,
+                revoked_at=record.revoked_at or now,
                 purchase_reference=record.purchase_reference,
                 checkout_session_id=record.checkout_session_id,
-                metadata=record.metadata,
+                metadata={**record.metadata, "revoke_reason": reason},
             )
             self._records_by_id[key_id] = updated
 
-            def _persist_revocation() -> None:
-                client = get_supabase_service_client()
-                client.table(_T_INSTALL_KEYS).update({"active": False, "entitlements_status": "revoked", "revoked_at": now.isoformat()}).eq("key_id", key_id).execute()
-                client.table(_T_INSTALL_KEY_STATE).update(
-                    {
-                        "active": False,
-                        "status": "revoked",
-                        "revoked_at": now.isoformat(),
-                        "updated_at": _utc_now_iso(),
-                    }
-                ).eq("key_id", key_id).execute()
-                client.table(_T_INSTALL_KEY_HISTORY).insert(
-                    {
-                        "history_id": f"hist_{secrets.token_hex(12)}",
-                        "key_id": key_id,
-                        "purchase_id": str(record.purchase_reference or record.subscription_id or "").strip() or None,
-                        "event_type": "revoked",
-                        "status": "revoked",
-                        "actor_type": "system",
-                        "reason": "install_key_revoked",
-                        "metadata": {"owner_key": record.owner_key, "program": record.program},
-                        "created_at": _utc_now_iso(),
-                        "updated_at": _utc_now_iso(),
-                    }
-                ).execute()
-
-            _persist_install_key_update(key_id=key_id, action="revocation", callback=_persist_revocation)
+            persisted = _persist_install_key_update(
+                key_id=key_id,
+                action="revocation",
+                callback=lambda: _write_key_revocation(updated, reason=reason),
+            )
+            if persisted:
+                self._pending_revocations.pop(key_id, None)
+            else:
+                self._pending_revocations[key_id] = (updated, reason)
 
             _logger.info("install_key_revoked", extra={"key_id": key_id, "owner_key": record.owner_key})
             return updated
+
+    def _revoke_matching(self, predicate: Callable[[InstallKeyRecord], bool], *, reason: str) -> list[InstallKeyRecord]:
+        with self._lock:
+            self._ensure_loaded()
+            matches = [record for record in self._records_by_id.values() if predicate(record)]
+            for record in matches:
+                self.revoke_key(record.key_id, reason=reason, finalize_inactive=True)
+            return matches
+
+    def revoke_keys_for_purchase(self, purchase_reference: str, *, reason: str = "refunded") -> list[InstallKeyRecord]:
+        reference = str(purchase_reference or "").strip()
+        if not reference:
+            return []
+        return self._revoke_matching(
+            lambda record: reference in {record.purchase_reference, record.checkout_session_id},
+            reason=reason,
+        )
+
+    def revoke_keys_for_refund(self, *, checkout_session_ids: set[str], payment_intent: str | None) -> list[InstallKeyRecord]:
+        intent_value = str(payment_intent or "").strip()
+        return self._revoke_matching(
+            lambda record: record.checkout_session_id in checkout_session_ids or record.purchase_reference in checkout_session_ids or (intent_value and str(record.metadata.get("payment_intent") or "") == intent_value),
+            reason="refunded",
+        )
 
     # ------------------------------------------------------------------
     # record_key_usage

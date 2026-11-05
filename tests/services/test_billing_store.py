@@ -273,6 +273,33 @@ def test_debit_units_records_metadata_on_event(store: SubscriptionMeterStore) ->
     assert event.metadata["run_id"] == "abc"
 
 
+def test_revoke_units_floors_at_balance_without_counting_consumption(store: SubscriptionMeterStore) -> None:
+    record = store.create_subscription(org_id="org-revoke", plan_name="starter", customer_id="cus_18")
+    store.credit_units(record.subscription_id, 40)
+    result = store.revoke_units(record.subscription_id, 100, metadata={"event_id": "refund_revoke:cs_store_001"})
+    assert result is not None
+    updated, event = result
+    assert updated.unit_balance == 0
+    assert updated.units_consumed == 0
+    assert event.action_type == "refund_revoke"
+    assert event.units == 40
+
+
+def test_revoke_units_is_idempotent_per_event_id(store: SubscriptionMeterStore) -> None:
+    record = store.create_subscription(org_id="org-revoke-dup", plan_name="starter", customer_id="cus_19")
+    store.credit_units(record.subscription_id, 100)
+    metadata = {"event_id": "refund_revoke:cs_store_002"}
+    assert store.revoke_units(record.subscription_id, 40, metadata=metadata) is not None
+    assert store.revoke_units(record.subscription_id, 40, metadata=metadata) is None
+    updated = store.get_subscription(record.subscription_id)
+    assert updated is not None
+    assert updated.unit_balance == 60
+
+
+def test_revoke_units_returns_none_for_unknown_subscription(store: SubscriptionMeterStore) -> None:
+    assert store.revoke_units("sub_missing_revoke", 5) is None
+
+
 # ---------------------------------------------------------------------------
 # provision_install_key_on_purchase
 # ---------------------------------------------------------------------------

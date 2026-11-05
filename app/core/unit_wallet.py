@@ -1406,6 +1406,95 @@ class UnitWalletRegistry:
     ) -> list[RegistryUnitLedgerEntry]:
         return self._repo.fetch_ledger_entries(owner_key=owner_key, limit=limit, checkout_session_id=checkout_session_id)
 
+    def revoke_purchase_units(self, owner_key: str, purchase_reference: str, units: int, reason: str = "refund") -> int:
+        reference_value = str(purchase_reference or "").strip()
+        safe_units = max(0, int(units))
+        if not reference_value or safe_units <= 0:
+            return 0
+        normalized_owner = _normalize_owner_key(owner_key)
+        # Idempotency: one revocation per purchase, keyed by a deterministic event_id.
+        event_id = f"refund_revoke:{reference_value}"
+        wallet = self.get_or_create_wallet(owner_key=normalized_owner)
+        normalized_metadata, purchase_id, checkout_session_id, _ = self._normalize_ledger_metadata(
+            {
+                "purchase_reference": reference_value,
+                "checkout_session_id": reference_value,
+                "event_id": event_id,
+                "reason": reason,
+                "requested_units": safe_units,
+            }
+        )
+
+        entry: RegistryUnitLedgerEntry | None = None
+        with self._lock:
+            if self._find_existing_event(event_id=event_id, owner_key=wallet.owner_key, entry_type="refund_revoke") is not None:
+                return 0
+
+            amount = min(safe_units, wallet.balance_units)
+            if amount <= 0:
+                return 0
+
+            wallet.balance_units -= amount
+            wallet.updated_at = datetime.now(UTC)
+            entry = RegistryUnitLedgerEntry(
+                entry_id=f"ledger_{uuid.uuid4().hex}",
+                wallet_id=wallet.wallet_id,
+                owner_key=wallet.owner_key,
+                entry_type="refund_revoke",
+                units=amount,
+                balance_after=wallet.balance_units,
+                purchase_id=purchase_id,
+                checkout_session_id=checkout_session_id,
+                event_id=event_id,
+                metadata=normalized_metadata,
+            )
+
+        self._repo.upsert_wallet(wallet)
+        self._repo.append_ledger_entry(entry)  # type: ignore[arg-type]
+        return amount
+
+    def revoke_units_for_checkout(self, owner_key: str, checkout_session_id: str, reason: str = "refund") -> int:
+        session_value = str(checkout_session_id or "").strip()
+        if not session_value:
+            return 0
+        normalized_owner = _normalize_owner_key(owner_key)
+        granted = sum(entry.units for entry in self.list_ledger_entries(owner_key=normalized_owner, limit=1000, checkout_session_id=session_value) if entry.entry_type == "credit")
+        return self.revoke_purchase_units(normalized_owner, session_value, granted, reason=reason)
+
+    def revoke_units_for_refund(
+        self,
+        owner_keys: list[str],
+        *,
+        payment_intent: str | None = None,
+        invoice_id: str | None = None,
+        checkout_session_id: str | None = None,
+        reason: str = "refund",
+    ) -> dict[str, int]:
+        payment_intent_value = str(payment_intent or "").strip()
+        invoice_value = str(invoice_id or "").strip()
+        session_value = str(checkout_session_id or "").strip()
+        if not payment_intent_value and not invoice_value and not session_value:
+            return {}
+        revoked: dict[str, int] = {}
+        for owner in sorted({_normalize_owner_key(key) for key in owner_keys if key}):
+            if self.get_wallet(owner) is None:
+                continue
+            granted: dict[str, int] = {}
+            for entry in self.list_ledger_entries(owner_key=owner, limit=1000):
+                # Checkout-session credits may carry no purchase reference, so fall back to the session id.
+                reference = entry.purchase_id or entry.checkout_session_id
+                if entry.entry_type != "credit" or not reference:
+                    continue
+                metadata = entry.metadata or {}
+                matches = (bool(payment_intent_value) and metadata.get("payment_intent") == payment_intent_value) or (bool(invoice_value) and metadata.get("invoice_id") == invoice_value) or reference in {value for value in (session_value, invoice_value) if value}
+                if matches:
+                    granted[reference] = granted.get(reference, 0) + entry.units
+            for reference, units in granted.items():
+                amount = self.revoke_purchase_units(owner, reference, units, reason=reason)
+                if amount:
+                    revoked[reference] = revoked.get(reference, 0) + amount
+        return revoked
+
     def get_key_usage_summary(
         self,
         owner_key: str,

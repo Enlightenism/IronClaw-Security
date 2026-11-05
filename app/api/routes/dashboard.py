@@ -343,6 +343,11 @@ def _build_install_key_views(
         issued_after_payment = bool(getattr(r, "issued_after_payment", False))
 
         is_revoked = revoked_at is not None or raw_status == "revoked"
+        record_metadata = getattr(r, "metadata", None)
+        revoke_reason = ""
+        if isinstance(record_metadata, dict):
+            revoke_reason = _coerce_string(record_metadata.get("revoke_reason"), default="").strip().lower()
+        is_refunded = is_revoked and revoke_reason == "refunded"
         is_locked = not active and not is_revoked
         is_active = active and not is_revoked
 
@@ -361,7 +366,9 @@ def _build_install_key_views(
             is_locked = False
             is_active = True
 
-        if is_revoked:
+        if is_refunded:
+            slot_status = "refunded"
+        elif is_revoked:
             slot_status = "revoked"
         elif is_locked:
             slot_status = "locked"
@@ -415,7 +422,7 @@ def _build_install_key_views(
             by_program[program] = candidate
             continue
 
-        preference = {"revoked": 3, "active": 2, "locked": 1}
+        preference = {"refunded": 3, "revoked": 3, "active": 2, "locked": 1}
         if preference.get(candidate.status, 0) > preference.get(existing.status, 0):
             by_program[program] = candidate
         elif preference.get(candidate.status, 0) == preference.get(existing.status, 0) and candidate.last_used_at and (existing.last_used_at is None or candidate.last_used_at > existing.last_used_at):

@@ -415,6 +415,24 @@ class InstallKeyHandoffService:
             install_key=install_key,
         )
 
+    def revoke_unredeemed_claims(self, key_ids: list[str]) -> None:
+        store = self._store()
+        if isinstance(store, InMemoryPersistenceStore):
+            with _MEMORY_LOCK:
+                for key_id in key_ids:
+                    secret = _MEMORY_SECRETS.get(key_id)
+                    if secret is not None:
+                        secret.claim_token_hash = None
+                        secret.encrypted_command = None
+            return
+        for key_id in key_ids:
+            store.rpc("revoke_install_key_claims", {"p_key_id": key_id}, schema="public")
+
+    def clear_claims_for_purchase(self, purchase_reference: str) -> None:
+        key_ids = [record.key_id for record in self._install_key_registry.get_keys_for_purchase(purchase_reference)]
+        if key_ids:
+            self.revoke_unredeemed_claims(key_ids)
+
 
 _install_key_handoff_service: InstallKeyHandoffService | None = None
 

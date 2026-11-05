@@ -959,6 +959,18 @@ class TestRevokeKey(unittest.TestCase):
         result = reg.revoke_key(key_id)
         assert isinstance(result, InstallKeyRecord)
 
+    def test_revoke_keys_for_refund_revokes_matching_checkout_session(self):
+        reg, key_id = self._registry_with_key()
+        revoked = reg.revoke_keys_for_refund(checkout_session_ids={_CHECKOUT_SESSION_ID}, payment_intent=None)
+        assert [record.key_id for record in revoked] == [key_id]
+        assert reg.get_key_by_id(key_id).active is False
+
+    def test_revoke_keys_for_refund_ignores_unrelated_checkout_session(self):
+        reg, key_id = self._registry_with_key()
+        revoked = reg.revoke_keys_for_refund(checkout_session_ids={"cs_unrelated_refund"}, payment_intent="pi_unrelated")
+        assert revoked == []
+        assert reg.get_key_by_id(key_id).active is True
+
     def test_unknown_key_id_raises_not_found_error(self):
         reg, _ = self._registry_with_key()
         with self.assertRaises(InstallKeyNotFoundError):
@@ -985,6 +997,37 @@ class TestRevokeKey(unittest.TestCase):
         )
         raw_key = record.raw_key
         reg.revoke_key(record.key_id)
+        assert reg.authenticate_install_key(raw_key) is None
+
+    def test_revoke_keys_for_purchase_revokes_matching_purchase(self):
+        reg, key_id = self._registry_with_key()
+        revoked = reg.revoke_keys_for_purchase(_PURCHASE_REFERENCE)
+        assert [record.key_id for record in revoked] == [key_id]
+        record = reg.get_key_by_id(key_id)
+        assert record.active is False
+        assert record.entitlements_status == "revoked"
+        assert record.metadata["revoke_reason"] == "refunded"
+
+    def test_revoke_keys_for_purchase_ignores_other_purchase(self):
+        reg, key_id = self._registry_with_key()
+        assert reg.revoke_keys_for_purchase("pr_unrelated_purchase") == []
+        assert reg.get_key_by_id(key_id).active is True
+
+    def test_revoke_keys_for_purchase_blocks_authenticate(self):
+        reg = InstallKeyRegistry()
+        reg._loaded = True
+        record = reg.generate_for_paid_customer(
+            owner_key=_OWNER,
+            subscription_id=_SUB_ID,
+            program="openclaw",
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+        )
+        raw_key = record.raw_key
+        reg.revoke_keys_for_purchase(_PURCHASE_REFERENCE)
         assert reg.authenticate_install_key(raw_key) is None
 
 

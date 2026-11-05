@@ -632,6 +632,56 @@ class SubscriptionMeterStore:
 
             return record, event
 
+    def revoke_units(
+        self,
+        subscription_id: str,
+        units: int,
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[SubscriptionRecord, MeterEventRecord] | None:
+        safe_units = max(0, int(units))
+        event_key = str((metadata or {}).get("event_id") or "")
+        with self._lock:
+            self._ensure_loaded()
+            record = self._subscriptions.get(subscription_id)
+            if record is None:
+                return None
+
+            if event_key and any(item.action_type == "refund_revoke" and str(item.metadata.get("event_id") or "") == event_key for item in self._events):
+                return None
+
+            amount = min(safe_units, record.unit_balance)
+            if amount <= 0:
+                return None
+
+            record.unit_balance -= amount
+            record.updated_at = datetime.now(UTC)
+
+            from uuid import uuid4
+
+            event = MeterEventRecord(
+                event_id=f"evt_{uuid4().hex}",
+                subscription_id=subscription_id,
+                org_id=record.org_id,
+                action_type="refund_revoke",
+                units=amount,
+                metadata=metadata or {},
+            )
+            self._events.append(event)
+
+            try:
+                client = get_supabase_service_client()
+                client.table(self._TABLE_SUBSCRIPTIONS).update(
+                    {
+                        "unit_balance": record.unit_balance,
+                        "updated_at": record.updated_at.isoformat(),
+                    }
+                ).eq("subscription_id", subscription_id).execute()
+                client.table(self._TABLE_METER_EVENTS).insert(event.as_dict()).execute()
+            except (SupabaseAPIError, SupabaseClientError, Exception):
+                pass
+
+            return record, event
+
     def provision_install_key_on_purchase(
         self,
         subscription_id: str,

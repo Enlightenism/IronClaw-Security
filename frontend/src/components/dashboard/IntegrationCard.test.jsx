@@ -285,6 +285,26 @@ describe("IntegrationCard", () => {
     expect(screen.queryByTestId("claude-code-card-claimed-note")).toBeNull();
   });
 
+  it("shows the refunded revoked state without copy, generate, or a restored command", () => {
+    const onCreateClaim = jest.fn();
+
+    renderCard({
+      savedCommand: makeClaim().command,
+      savedCommandClaimed: true,
+      revoked: true,
+      revokedReason: "refunded",
+      onCreateClaim,
+    });
+
+    expect(
+      screen.getByTestId("claude-code-card-revoked-note"),
+    ).toHaveTextContent("Revoked — purchase refunded");
+    expect(getDisplayedCommand()).toBe("Revoked");
+    expect(screen.queryByTestId("claude-code-card-copy")).toBeNull();
+    expect(screen.queryByTestId("claude-code-card-generate")).toBeNull();
+    expect(onCreateClaim).not.toHaveBeenCalled();
+  });
+
   it("gives each card a different, repeatable crack pattern", () => {
     const { unmount } = render(
       <>

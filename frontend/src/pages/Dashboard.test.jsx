@@ -1093,6 +1093,46 @@ describe("dashboard structure", () => {
     );
   });
 
+  it("marks a refunded runtime as revoked and drops its available and saved command state", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            install_keys: [{ program: "claude_code", status: "refunded" }],
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({
+          data: {
+            status: "ok",
+            install_metadata: {
+              "claude-code": {
+                ...makeInstallMetadata(["claude_code"])["claude-code"],
+                saved_command:
+                  "python -m ironclaw_installer redeem --program claude_code",
+                saved_command_claimed: true,
+              },
+            },
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await renderDashboard();
+
+    expect(mockCapturedIntegrationProps.claude_code).toMatchObject({
+      revoked: true,
+      revokedReason: "refunded",
+      available: false,
+      savedCommand: "",
+      savedCommandClaimed: false,
+    });
+    expect(screen.getByTestId("claude-code-card-generate")).toBeDisabled();
+  });
+
   it("requests an install claim only after an eligible runtime is selected", async () => {
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
     mockApiGet.mockImplementation((url) => {

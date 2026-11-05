@@ -1168,3 +1168,31 @@ class TestStripeWebhookFailureRetry:
 
         assert response.status_code == 502
         assert "sensitive internal details" not in response.text
+
+    def test_charge_refunded_is_acknowledged_with_200(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        refund_payload = {
+            "id": "evt_refund_route_001",
+            "type": "charge.refunded",
+            "data": {"object": {"id": "ch_route_001", "payment_intent": "pi_route_001"}},
+        }
+        mock_svc.verify_webhook_signature.return_value = SimpleNamespace(
+            valid=True,
+            event_type="charge.refunded",
+            event_id="evt_refund_route_001",
+            error=None,
+            payload=refund_payload,
+        )
+        mock_svc.handle_webhook_event.return_value = {"action": "processed"}
+
+        response = client.post(
+            "/webhooks/stripe",
+            content=b"{}",
+            headers={"stripe-signature": "t=1,v1=test"},
+        )
+
+        assert response.status_code == 200
+        mock_svc.handle_webhook_event.assert_called_once_with(refund_payload)

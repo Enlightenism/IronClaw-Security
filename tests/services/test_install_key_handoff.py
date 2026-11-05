@@ -216,6 +216,36 @@ def test_memory_storage_is_rejected_in_production(monkeypatch: pytest.MonkeyPatc
         )
 
 
+def test_clear_claims_for_purchase_nulls_claim_and_saved_command() -> None:
+    record = _make_record()
+    service = _build_service(record=record)
+    service._install_key_registry.get_keys_for_purchase.return_value = [record]
+    service.store_secret(
+        key_id=record.key_id,
+        owner_key=record.owner_key,
+        program=record.program,
+        install_key=_RAW_KEY,
+    )
+    claim = service.issue_claim(
+        key_id=record.key_id,
+        owner_key=record.owner_key,
+        program=record.program,
+    )
+    service.save_command(
+        key_id=record.key_id,
+        owner_key=record.owner_key,
+        program=record.program,
+        command=f"python -m ironclaw_installer redeem --program openclaw --claim-token {claim.claim_token}",
+    )
+
+    service.clear_claims_for_purchase("pr_handoff_test_001")
+
+    stored_secret = install_key_handoff._MEMORY_SECRETS[record.key_id]
+    assert stored_secret.claim_token_hash is None
+    assert stored_secret.encrypted_command is None
+    service._install_key_registry.get_keys_for_purchase.assert_called_once_with("pr_handoff_test_001")
+
+
 def test_saved_command_is_encrypted_and_survives_until_redeemed() -> None:
     record = _make_record()
     service = _build_service(record=record)

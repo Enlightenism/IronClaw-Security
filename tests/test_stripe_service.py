@@ -267,12 +267,40 @@ def _make_charge_refunded_obj(
     customer_id: str = _TEST_CUSTOMER_ID,
     org_id: str = _TEST_ORG,
     unit_credits: int = _PKG_STARTER_UNITS,  # type: ignore[assignment]
+    payment_intent: str | None = None,
+    amount_refunded: int = 0,
 ) -> dict[str, Any]:
     return {
         "id": charge_id,
         "customer": customer_id,
+        "payment_intent": payment_intent,
+        "amount_refunded": amount_refunded,
         "metadata": {"unit_credits": str(unit_credits), "org_id": org_id},
     }
+
+
+class _StubRefundPurchase:
+    purchase_id = "pur_refund_test_1"
+    owner_key = _TEST_ORG
+    payment_status = "paid"
+
+    def __init__(self) -> None:
+        self.metadata = {"checkout_session_id": "cs_refund_test_1"}
+
+
+class _StubRefundPurchaseRepository:
+    def __init__(self, purchase: _StubRefundPurchase, payment_intent: str) -> None:
+        self._purchase = purchase
+        self._payment_intent = payment_intent
+        self.updates: list[dict[str, Any]] = []
+
+    def find_for_payment_intent(self, payment_intent: str) -> _StubRefundPurchase | None:
+        return self._purchase if payment_intent == self._payment_intent else None
+
+    def update_fields(self, purchase_id: str, fields: dict[str, Any]) -> None:
+        assert purchase_id == self._purchase.purchase_id
+        self.updates.append(fields)
+        self._purchase.payment_status = fields["payment_status"]
 
 
 def _make_invoice_upcoming_obj(
@@ -1327,6 +1355,106 @@ class TestWebhookEventDispatch:
         obj = _make_charge_refunded_obj()
         result = svc.handle_webhook_event(self._event("charge.refunded", obj))
         assert result["action"] in ("processed", "ignored")
+
+    def test_charge_refunded_without_payment_intent_is_ignored(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        obj = _make_charge_refunded_obj(amount_refunded=1000)
+        result = svc.handle_webhook_event(self._event("charge.refunded", obj))
+        assert result["action"] == "processed"
+        assert result["detail"]["status"] == "ignored"
+
+    def test_charge_refunded_unknown_payment_intent_revokes_nothing(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        obj = _make_charge_refunded_obj(payment_intent="pi_unknown_refund_test", amount_refunded=1000)
+        result = svc.handle_webhook_event(self._event("charge.refunded", obj))
+        assert result["action"] == "processed"
+        detail = result["detail"]
+        assert detail["status"] == "refunded"
+        assert detail["purchase_id"] is None
+        assert detail["install_keys_revoked"] == 0
+        assert detail["units_revoked"] == 0
+
+    def test_charge_refunded_marks_purchase_refunded_once(self, svc: StripeService, monkeypatch: pytest.MonkeyPatch) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        repo = _StubRefundPurchaseRepository(_StubRefundPurchase(), payment_intent="pi_refund_test_1")
+        monkeypatch.setattr("app.api.routes.billing._PURCHASE_REPOSITORY", repo)
+        obj = _make_charge_refunded_obj(payment_intent="pi_refund_test_1", amount_refunded=1000)
+
+        first = svc.handle_webhook_event(self._event("charge.refunded", obj, event_id="evt_refund_first"))
+        second = svc.handle_webhook_event(self._event("charge.refunded", obj, event_id="evt_refund_second"))
+
+        assert first["action"] == "processed"
+        assert first["detail"]["status"] == "refunded"
+        assert first["detail"]["purchase_id"] == "pur_refund_test_1"
+        assert second["action"] == "processed"
+        assert second["detail"]["status"] == "already_refunded"
+        assert second["detail"]["install_keys_revoked"] == 0
+        assert second["detail"]["units_revoked"] == 0
+        assert len(repo.updates) == 1
+        assert repo.updates[0]["payment_status"] == "refunded"
+        assert repo.updates[0]["refund_reason"] == "charge_refunded"
+
+    def test_charge_refunded_duplicate_event_id_is_not_reprocessed(self, svc: StripeService) -> None:
+        svc.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
+        obj = _make_charge_refunded_obj(payment_intent="pi_unknown_duplicate_test", amount_refunded=1000)
+        first = svc.handle_webhook_event(self._event("charge.refunded", obj, event_id="evt_refund_dup"))
+        second = svc.handle_webhook_event(self._event("charge.refunded", obj, event_id="evt_refund_dup"))
+        assert first["action"] == "processed"
+        assert second["action"] == "duplicate"
+
+    def test_charge_refunded_revokes_renewal_units_by_invoice(self, svc: StripeService) -> None:
+        org = "org-refund-renewal"
+        customer = "cus_refund_renewal"
+        svc.register_customer_mapping(org, customer)
+        svc.credit_units(
+            org,
+            _PKG_STARTER_UNITS,
+            StripeUnitEventReason.SUBSCRIPTION_RENEWED,
+            reference_id="in_refund_renewal_1",
+            invoice_id="in_refund_renewal_1",
+        )
+        assert svc.get_unit_balance(org).balance == _PKG_STARTER_UNITS
+        obj = {
+            **_make_charge_refunded_obj(
+                charge_id="ch_refund_renewal",
+                customer_id=customer,
+                org_id=org,
+                payment_intent="pi_refund_renewal_1",
+                amount_refunded=1000,
+            ),
+            "invoice": "in_refund_renewal_1",
+        }
+        result = svc.handle_webhook_event(self._event("charge.refunded", obj, event_id="evt_refund_renewal"))
+        assert result["action"] == "processed"
+        assert result["detail"]["status"] == "refunded"
+        assert result["detail"]["units_revoked"] == _PKG_STARTER_UNITS
+        assert svc.get_unit_balance(org).balance == 0
+
+    def test_charge_refunded_without_purchase_row_revokes_payment_intent_credit(self, svc: StripeService) -> None:
+        org = "org-refund-no-purchase"
+        customer = "cus_refund_no_purchase"
+        svc.register_customer_mapping(org, customer)
+        svc.credit_units(
+            org,
+            _PKG_STARTER_UNITS,
+            StripeUnitEventReason.CHECKOUT_COMPLETE,
+            reference_id="cs_refund_no_purchase_1",
+            payment_intent="pi_refund_no_purchase_1",
+        )
+        obj = _make_charge_refunded_obj(
+            charge_id="ch_refund_no_purchase",
+            customer_id=customer,
+            org_id=org,
+            payment_intent="pi_refund_no_purchase_1",
+            amount_refunded=1000,
+        )
+        first = svc.handle_webhook_event(self._event("charge.refunded", obj, event_id="evt_refund_no_purchase_1"))
+        second = svc.handle_webhook_event(self._event("charge.refunded", obj, event_id="evt_refund_no_purchase_2"))
+        assert first["detail"]["status"] == "refunded"
+        assert first["detail"]["purchase_id"] is None
+        assert first["detail"]["units_revoked"] == _PKG_STARTER_UNITS
+        assert second["detail"]["units_revoked"] == 0
+        assert svc.get_unit_balance(org).balance == 0
 
     def test_charge_refunded_event_type_enum_value(self) -> None:
         assert StripeWebhookEventType.CHARGE_REFUNDED == "charge.refunded"

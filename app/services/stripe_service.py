@@ -18,9 +18,15 @@ from uuid import uuid4
 
 from app.core.billing import PLAN_DEFINITIONS, TOKENS_PER_UNIT
 from app.core.install_key_formats import InstallKeyFormatRegistry
-from app.core.install_keys import _read_event_ledger_record, _should_use_memory_fallback, _write_event_ledger_record
+from app.core.install_keys import (
+    _read_event_ledger_record,
+    _should_use_memory_fallback,
+    _write_event_ledger_record,
+    get_install_key_registry,
+)
 from app.core.supabase import get_supabase_service_client
 from app.core.unit_wallet import get_unit_wallet_registry
+from app.services.install_key_handoff import get_install_key_handoff_service
 from app.services.install_key_provisioning import InstallKeyProvisioningService
 from app.services.secrets_vault import vault
 
@@ -1083,6 +1089,7 @@ class StripeService:
         session_id: str,
         unit_credits: int,
         metadata: dict[str, Any] | None = None,
+        payment_intent: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Issue the paid install-key entitlement only after a successful payment confirmation.
 
@@ -1129,6 +1136,8 @@ class StripeService:
             }
         )
         base_metadata["owner_key"] = owner_key
+        if payment_intent:
+            base_metadata["payment_intent"] = payment_intent
 
         supported_programs = tuple(InstallKeyFormatRegistry.list_programs())
 
@@ -1837,6 +1846,8 @@ class StripeService:
         *,
         owner_key: str | None = None,
         package_id: str | None = None,
+        payment_intent: str | None = None,
+        invoice_id: str | None = None,
     ) -> UnitBalanceResponse:
         """
         Credit units to an org's balance and record a ledger entry.
@@ -1857,6 +1868,11 @@ class StripeService:
         }
         if package_id:
             ledger_metadata["package_id"] = package_id
+        # Lets a later charge.refunded map this credit back without a Stripe API call.
+        if payment_intent:
+            ledger_metadata["payment_intent"] = str(payment_intent).strip()
+        if invoice_id:
+            ledger_metadata["invoice_id"] = str(invoice_id).strip()
         wallet = self._wallet_registry.credit_units(
             wallet_owner_key,
             amount,
@@ -2491,6 +2507,8 @@ class StripeService:
         unit_credits: int = integrity["unit_credits"]
         owner_key: str | None = integrity["owner_key"]
         customer_id: str | None = obj.get("customer")
+        payment_intent_raw = obj.get("payment_intent")
+        payment_intent: str | None = payment_intent_raw.strip() if isinstance(payment_intent_raw, str) and payment_intent_raw.strip() else None
         payment_status = obj.get("payment_status")
         if payment_status is None:
             payment_status = obj.get("status")
@@ -2552,6 +2570,7 @@ class StripeService:
                     reference_id=session_id,
                     owner_key=owner_key,
                     package_id=integrity["package_id"],
+                    payment_intent=payment_intent,
                 )
                 result["units_credited"] = unit_credits
                 result["tokens_covered"] = unit_credits * TOKENS_PER_UNIT
@@ -2567,6 +2586,7 @@ class StripeService:
                         "mode": mode,
                         "payment_status": payment_status,
                     },
+                    payment_intent=payment_intent,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.error(
@@ -2576,6 +2596,8 @@ class StripeService:
                     type(exc).__name__,
                 )
                 raise
+
+            self._attach_payment_intent_to_purchase(session_id, payment_intent)
 
             with self._lock:
                 self._processed_event_ids.add(checkout_idem_key)
@@ -2802,12 +2824,15 @@ class StripeService:
 
                 if org_id and renewal_units > 0:
                     renewal_owner_key = str((record.metadata or {}).get("owner_key") or "").strip() or None
+                    renewal_payment_intent = obj.get("payment_intent")
                     self.credit_units(
                         org_id,
                         renewal_units,
                         StripeUnitEventReason.SUBSCRIPTION_RENEWED,
                         reference_id=invoice_id,
                         owner_key=renewal_owner_key,
+                        payment_intent=renewal_payment_intent if isinstance(renewal_payment_intent, str) else None,
+                        invoice_id=invoice_id,
                     )
                     renewal_units_credited = renewal_units
                     logger.info(
@@ -2890,10 +2915,29 @@ class StripeService:
             "amount_due": amount_due,
         }
 
+    def _attach_payment_intent_to_purchase(self, session_id: str, payment_intent: str | None) -> None:
+        if not session_id or not payment_intent:
+            return
+        try:
+            from app.api.routes.billing import _PURCHASE_REPOSITORY
+
+            purchase = _PURCHASE_REPOSITORY.find_for_checkout(session_id=session_id)
+            if purchase is not None:
+                _PURCHASE_REPOSITORY.update_fields(purchase.purchase_id, {"stripe_payment_intent_id": payment_intent})
+        except Exception:  # noqa: BLE001
+            logger.warning("stripe.payment_intent_attach_failed session=%s", session_id, exc_info=True)
+
     def _handle_charge_refunded(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
+        from app.api.routes.billing import _PURCHASE_REPOSITORY
+        from app.services.billing_store import get_billing_store
+
         charge_id: str = obj.get("id", "")
-        customer_id: str = obj.get("customer", "")
-        amount_refunded: int = int(obj.get("amount_refunded", 0))
+        customer_id: str = obj.get("customer", "") or ""
+        amount_refunded: int = int(obj.get("amount_refunded", 0) or 0)
+        payment_intent_raw = obj.get("payment_intent")
+        payment_intent: str | None = payment_intent_raw.strip() if isinstance(payment_intent_raw, str) and payment_intent_raw.strip() else None
+        invoice_raw = obj.get("invoice")
+        invoice_id: str | None = invoice_raw.strip() if isinstance(invoice_raw, str) and invoice_raw.strip() else None
 
         org_id = self.resolve_org_from_customer(customer_id) or ""
 
@@ -2907,12 +2951,92 @@ class StripeService:
             org_id,
             amount_refunded,
         )
-        return {
+        result: dict[str, Any] = {
             "charge_id": charge_id,
             "customer_id": customer_id,
             "org_id": org_id,
             "amount_refunded": amount_refunded,
+            "payment_intent_id": payment_intent,
+            "install_keys_revoked": 0,
+            "units_revoked": 0,
         }
+        if not payment_intent or amount_refunded <= 0:
+            result["status"] = "ignored"
+            return result
+
+        purchase = _PURCHASE_REPOSITORY.find_for_payment_intent(payment_intent)
+        purchase_session_id = str((purchase.metadata or {}).get("checkout_session_id") or "").strip() if purchase else ""
+        if purchase is not None and purchase.payment_status == "refunded":
+            result.update({"status": "already_refunded", "purchase_id": purchase.purchase_id})
+            return result
+
+        revoked = get_install_key_registry().revoke_keys_for_refund(
+            checkout_session_ids={purchase_session_id} if purchase_session_id else set(),
+            payment_intent=payment_intent,
+        )
+
+        owner_candidates: list[str] = []
+        if purchase is not None:
+            owner_candidates.append(purchase.owner_key)
+        owner_candidates.extend(record.owner_key for record in revoked)
+        if org_id:
+            owner_candidates.append(self._resolve_wallet_owner_key(org_id, None))
+        with self._lock:
+            owner_candidates.extend(str((record.metadata or {}).get("owner_key") or "") for record in self._subscriptions.values() if customer_id and record.customer_id == customer_id)
+
+        session_ids: set[str] = {purchase_session_id} if purchase_session_id else set()
+        session_ids.update(record.checkout_session_id for record in revoked if record.checkout_session_id)
+
+        wallet_registry = get_unit_wallet_registry()
+        refunded_units: dict[str, int] = {}
+        for session_value in sorted(session_ids) or [None]:
+            for reference, revoked_units in wallet_registry.revoke_units_for_refund(
+                owner_candidates,
+                payment_intent=payment_intent,
+                invoice_id=invoice_id,
+                checkout_session_id=session_value,
+                reason="refund",
+            ).items():
+                refunded_units[reference] = refunded_units.get(reference, 0) + revoked_units
+        units_revoked = sum(refunded_units.values())
+        for reference, revoked_units in sorted(refunded_units.items()):
+            get_billing_store().revoke_units(
+                f"checkout:{reference}",
+                revoked_units,
+                metadata={"event_id": f"refund_revoke:{reference}", "checkout_session_id": reference, "reason": "refund"},
+            )
+
+        handoff_service = get_install_key_handoff_service()
+        handoff_service.revoke_unredeemed_claims([record.key_id for record in revoked])
+        for session_value in sorted(session_ids):
+            handoff_service.clear_claims_for_purchase(session_value)
+
+        if purchase is not None:
+            _PURCHASE_REPOSITORY.update_fields(
+                purchase.purchase_id,
+                {
+                    "payment_status": "refunded",
+                    "refunded_at": datetime.now(UTC).isoformat(),
+                    "refund_reason": "charge_refunded",
+                },
+            )
+
+        result.update(
+            {
+                "status": "refunded",
+                "purchase_id": purchase.purchase_id if purchase is not None else None,
+                "install_keys_revoked": len(revoked),
+                "units_revoked": units_revoked,
+            }
+        )
+        logger.info(
+            "stripe.charge_refunded_revoked charge=%s purchase=%s keys_revoked=%d units_revoked=%d",
+            charge_id,
+            result["purchase_id"],
+            len(revoked),
+            units_revoked,
+        )
+        return result
 
     def _handle_customer_updated(self, obj: dict[str, Any], _event: dict[str, Any]) -> dict[str, Any]:
         customer_id: str = obj.get("id", "")

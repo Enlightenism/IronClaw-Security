@@ -754,6 +754,18 @@ const Dashboard = () => {
     [installKeyDashboard],
   );
 
+  const installKeyStatusByProgram = useMemo(() => {
+    const statuses = {};
+    if (Array.isArray(data?.install_keys)) {
+      for (const key of data.install_keys) {
+        if (typeof key?.program === "string" && key.program) {
+          statuses[key.program] = key.status;
+        }
+      }
+    }
+    return statuses;
+  }, [data?.install_keys]);
+
   const integrationCards = useMemo(() => {
     const toCardTestId = (program) => {
       switch (program) {
@@ -779,6 +791,8 @@ const Dashboard = () => {
     return INSTALL_KEY_PROGRAMS.map(({ program, label, agentId, tint }) => {
       const integrationId = program.replace(/_/g, "-");
       const metadata = tokens?.install_metadata?.[integrationId];
+      const slotStatus = installKeyStatusByProgram[program];
+      const revoked = slotStatus === "refunded" || slotStatus === "revoked";
 
       return {
         title: label,
@@ -786,21 +800,25 @@ const Dashboard = () => {
         integrationId,
         agentId,
         available:
+          !revoked &&
           metadata?.available === true &&
           metadata?.program === program &&
           metadata?.slug === integrationId &&
           Boolean(metadata?.key_id),
+        revoked,
+        revokedReason: slotStatus === "refunded" ? "refunded" : "revoked",
         savedCommand:
-          typeof metadata?.saved_command === "string"
+          !revoked && typeof metadata?.saved_command === "string"
             ? metadata.saved_command
             : "",
-        savedCommandClaimed: metadata?.saved_command_claimed === true,
+        savedCommandClaimed:
+          !revoked && metadata?.saved_command_claimed === true,
         onCreateClaim: createInstallClaim,
         tint,
         testid: toCardTestId(program),
       };
     });
-  }, [createInstallClaim, tokens?.install_metadata]);
+  }, [createInstallClaim, installKeyStatusByProgram, tokens?.install_metadata]);
 
   const attackFeedItems = securityProps.attacks;
   const blockedActivityTotal = Number.isSafeInteger(
@@ -955,6 +973,8 @@ const Dashboard = () => {
                   integrationId={card.integrationId}
                   agentId={card.agentId}
                   available={card.available}
+                  revoked={card.revoked}
+                  revokedReason={card.revokedReason}
                   onCreateClaim={card.onCreateClaim}
                   savedCommand={card.savedCommand}
                   savedCommandClaimed={card.savedCommandClaimed}
