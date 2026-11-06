@@ -239,6 +239,9 @@ def buildintegrationssettingsview() -> HTMLResponse:
 <head>
   <meta charset="UTF-8" />
   <title>Integration Settings — IronClaw-Security</title>
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="icon" href="/favicon-96x96.png" type="image/png" sizes="96x96">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
 </head>
 <body data-testid="integrations-settings-page">
   <h1>Integration Settings</h1>

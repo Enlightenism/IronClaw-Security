@@ -152,6 +152,9 @@ def _render_html(title: str, body_content: str) -> str:
 <head>
     <meta charset="utf-8" />
     <title>{title}</title>
+    <link rel="icon" href="/favicon.ico" sizes="32x32">
+    <link rel="icon" href="/favicon-96x96.png" type="image/png" sizes="96x96">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
 </head>
 <body data-usage="true">
     <header>

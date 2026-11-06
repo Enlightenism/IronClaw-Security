@@ -214,6 +214,7 @@ def _public_router_configs() -> list[tuple[Any, dict[str, Any]]]:
     stripe_webhook_router = _optional_attr("app.routers.stripe_router", "webhook_router")
     return [
         (_optional_router("app.api.skill_package"), {}),
+        (_optional_router("app.api.favicon"), {}),
         (_optional_router("app.api.system"), {}),
         (_optional_router("app.api.ui_status"), {}),
         (_optional_router("app.api.ui_pages"), {}),
