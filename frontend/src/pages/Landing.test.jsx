@@ -534,6 +534,41 @@ describe("Landing", () => {
     expect(screen.getByTestId("feature-card-13")).toBeInTheDocument();
   });
 
+  it("renders the Platforms Protected ticker between the layers and protection sections", async () => {
+    await renderLanding();
+
+    await act(async () => {
+      fireEvent.scroll(window);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Platforms Protected")).toBeInTheDocument();
+    });
+
+    [
+      "Claude Code",
+      "OpenClaw",
+      "Hermes Agent",
+      "GitHub Copilot",
+      "Gemini CLI",
+      "Cursor",
+      "Goose",
+    ].forEach((name) => {
+      expect(screen.getAllByText(name).length).toBeGreaterThan(0);
+    });
+
+    const layers = screen.getByText("14 enforcement layers");
+    const title = screen.getByText("Platforms Protected");
+    const protection = screen.getByText("Protection From:");
+    expect(
+      layers.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      title.compareDocumentPosition(protection) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("keeps below-fold sections visible without requiring scroll", async () => {
     await renderLanding();
 

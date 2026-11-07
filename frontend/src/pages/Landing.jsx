@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import AuthModal from "@/components/AuthModal";
 import CyberNewsTickers from "@/components/CyberNewsTickers";
+import PlatformsTicker from "@/components/PlatformsTicker";
 import { useAuth } from "@/context/AuthContext";
 import { useCountUp } from "@/hooks/useCountUp";
 import { useLandingCounter } from "@/lib/landingCounters";
@@ -551,6 +552,21 @@ const Landing = () => {
                 );
               })}
             </div>
+          </section>
+
+          <section className="relative z-10 mx-auto max-w-7xl bg-transparent px-6 py-20">
+            <motion.div
+              variants={fadeUp}
+              initial="hidden"
+              whileInView="show"
+              viewport={{ once: true, margin: "-80px" }}
+              className="mb-14 text-center"
+            >
+              <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                <span className="metal-gold-text">Platforms Protected</span>
+              </h2>
+            </motion.div>
+            <PlatformsTicker />
           </section>
 
           <section className="relative z-10 mx-auto max-w-6xl bg-transparent px-6 py-8">

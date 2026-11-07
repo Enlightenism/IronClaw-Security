@@ -1,0 +1,239 @@
+.platforms-ticker {
+  position: relative;
+  z-index: 10;
+  width: 100vw;
+  max-width: 100vw;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 1.5rem;
+}
+
+.platforms-ticker-box {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  overflow: clip;
+  padding: 1.5rem 0;
+  border-top: 1px solid rgba(255, 215, 0, 0.18);
+  border-bottom: 1px solid rgba(255, 215, 0, 0.18);
+  background: rgba(5, 6, 7, 0.6);
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    #000 8%,
+    #000 92%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    #000 8%,
+    #000 92%,
+    transparent 100%
+  );
+}
+
+.platforms-ticker-track {
+  display: flex;
+  width: max-content;
+  white-space: nowrap;
+  animation: platforms-ticker-scroll 60s linear infinite;
+  will-change: transform;
+}
+
+.platforms-ticker-group {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.platforms-ticker-item {
+  --platform-gradient: linear-gradient(135deg, #ffffff 0%, #e5e4e2 50%, #ffffff 100%);
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 40px;
+  line-height: 1;
+}
+
+.platform-logo {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+/* Mono marks use currentColor, so they are drawn as masks to take the platform gradient. */
+.platform-logo-mask {
+  background: var(--platform-gradient);
+  background-size: 200% auto;
+  -webkit-mask: var(--logo-url) center / contain no-repeat;
+  mask: var(--logo-url) center / contain no-repeat;
+  animation: text-shimmer 4s linear infinite;
+}
+
+.platform-name {
+  background: var(--platform-gradient);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-family: var(--platform-font, "Outfit", system-ui, sans-serif);
+  font-weight: var(--platform-weight, 700);
+  letter-spacing: var(--platform-tracking, 0);
+  text-transform: var(--platform-transform, none);
+  font-size: 28px;
+  animation: text-shimmer 4s linear infinite;
+}
+
+.platforms-ticker-divider {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin-left: 14px;
+  background: #ffd700;
+  transform: rotate(45deg);
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.7);
+}
+
+.platform-style-claude-code {
+  --platform-gradient: linear-gradient(
+    135deg,
+    #fde7d4 0%,
+    #d97757 38%,
+    #f4c2a8 60%,
+    #c2643f 100%
+  );
+  --platform-font: Georgia, "Times New Roman", serif;
+  --platform-weight: 700;
+  --platform-tracking: 0.01em;
+}
+
+.platform-style-openclaw {
+  --platform-gradient: linear-gradient(
+    135deg,
+    #ffffff 0%,
+    #00e5cc 35%,
+    #e6fffb 55%,
+    #38bdf8 80%,
+    #ffffff 100%
+  );
+  --platform-weight: 800;
+  --platform-tracking: -0.01em;
+}
+
+.platform-style-hermes-agent {
+  --platform-gradient: linear-gradient(
+    135deg,
+    #ffffff 0%,
+    #e5e4e2 40%,
+    #bfc1c2 70%,
+    #ffffff 100%
+  );
+  --platform-font: "JetBrains Mono", monospace;
+  --platform-weight: 700;
+  --platform-tracking: 0.12em;
+  --platform-transform: uppercase;
+}
+
+.platform-style-github-copilot {
+  --platform-gradient: linear-gradient(
+    135deg,
+    #e0f2fe 0%,
+    #38bdf8 40%,
+    #60a5fa 65%,
+    #e0f2fe 100%
+  );
+  --platform-weight: 700;
+  --platform-tracking: 0.01em;
+}
+
+.platform-style-gemini-cli {
+  --platform-gradient: linear-gradient(
+    90deg,
+    #8ab4f8 0%,
+    #a78bfa 45%,
+    #f0abfc 75%,
+    #8ab4f8 100%
+  );
+  --platform-weight: 500;
+  --platform-tracking: 0.02em;
+}
+
+.platform-style-cursor {
+  --platform-gradient: linear-gradient(
+    135deg,
+    #ffffff 0%,
+    #c0c4c9 40%,
+    #8a8f98 65%,
+    #ffffff 100%
+  );
+  --platform-weight: 600;
+  --platform-tracking: -0.01em;
+}
+
+.platform-style-goose {
+  --platform-gradient: linear-gradient(
+    135deg,
+    #fbe3d6 0%,
+    #d9a48a 40%,
+    #b76e79 65%,
+    #fbe3d6 100%
+  );
+  --platform-weight: 800;
+  --platform-transform: lowercase;
+}
+
+@keyframes platforms-ticker-scroll {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (max-width: 1024px) {
+  .platforms-ticker-item {
+    gap: 12px;
+    padding: 0 30px;
+  }
+
+  .platform-logo {
+    width: 30px;
+    height: 30px;
+  }
+
+  .platform-name {
+    font-size: 24px;
+  }
+}
+
+@media (max-width: 768px) {
+  .platforms-ticker-box {
+    padding: 1.1rem 0;
+  }
+
+  .platforms-ticker-item {
+    gap: 10px;
+    padding: 0 22px;
+  }
+
+  .platform-logo {
+    width: 26px;
+    height: 26px;
+  }
+
+  .platform-name {
+    font-size: 20px;
+  }
+}
+
+/* index.css freezes all animations under reduced motion; re-assert the scroll with !important so the ticker keeps moving on every device. */
+@media (prefers-reduced-motion: reduce) {
+  .platforms-ticker-track {
+    animation: platforms-ticker-scroll 60s linear infinite !important;
+  }
+}
