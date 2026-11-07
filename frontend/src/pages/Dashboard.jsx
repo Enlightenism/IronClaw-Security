@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
+import ContactBubble from "@/components/ContactBubble";
+import ContactModal from "@/components/ContactModal";
 import IntegrationCard from "@/components/dashboard/IntegrationCard";
 import RuntimeBlocksCard from "@/components/dashboard/RuntimeBlocksCard";
 import SecurityAnalysis from "@/components/dashboard/SecurityAnalysis";
@@ -284,6 +286,7 @@ const Dashboard = () => {
   const [pointerGlow, setPointerGlow] = useState({ x: 50, y: 25 });
   const [scrollShift, setScrollShift] = useState(0);
   const [_paymentState, setPaymentState] = useState("idle");
+  const [contactOpen, setContactOpen] = useState(false);
   const polledRef = useRef(false);
   const paymentPollTimeoutRef = useRef(null);
 
@@ -691,7 +694,17 @@ const Dashboard = () => {
           >
             Terms of Service
           </Link>
+          <span className="hidden text-white/15 sm:inline">|</span>
+          <button
+            type="button"
+            onClick={() => setContactOpen(true)}
+            data-testid="footer-contact-link"
+            className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+          >
+            CONTACT
+          </button>
         </div>
+        <ContactModal open={contactOpen} onOpenChange={setContactOpen} />
         <p className="max-w-2xl text-[11px] text-[#737373] sm:text-xs">
           The enforcement layer serious engineers trust with production AI
           systems.
@@ -989,6 +1002,7 @@ const Dashboard = () => {
         </div>
       </main>
       {dashboardFooter}
+      <ContactBubble />
     </div>
   );
 };

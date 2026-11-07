@@ -619,6 +619,17 @@ describe("Landing", () => {
     });
   });
 
+  it("renders the floating contact bubble and opens the contact form", async () => {
+    await renderLanding();
+
+    const bubble = screen.getByTestId("contact-bubble");
+    expect(bubble).toHaveTextContent("CONTACT");
+
+    fireEvent.click(bubble);
+
+    expect(await screen.findByTestId("contact-form")).toBeInTheDocument();
+  });
+
   it("renders free learning resources above the existing footer info", async () => {
     await renderLanding();
 

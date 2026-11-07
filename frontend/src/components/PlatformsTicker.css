@@ -37,7 +37,7 @@
   display: flex;
   width: max-content;
   white-space: nowrap;
-  animation: platforms-ticker-scroll 60s linear infinite;
+  animation: platforms-ticker-scroll 30s linear infinite;
   will-change: transform;
 }
 
@@ -234,6 +234,6 @@
 /* index.css freezes all animations under reduced motion; re-assert the scroll with !important so the ticker keeps moving on every device. */
 @media (prefers-reduced-motion: reduce) {
   .platforms-ticker-track {
-    animation: platforms-ticker-scroll 60s linear infinite !important;
+    animation: platforms-ticker-scroll 30s linear infinite !important;
   }
 }

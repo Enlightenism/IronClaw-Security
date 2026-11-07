@@ -20,6 +20,8 @@ import {
   Check,
 } from "lucide-react";
 import AuthModal from "@/components/AuthModal";
+import ContactBubble from "@/components/ContactBubble";
+import ContactModal from "@/components/ContactModal";
 import CyberNewsTickers from "@/components/CyberNewsTickers";
 import PlatformsTicker from "@/components/PlatformsTicker";
 import { useAuth } from "@/context/AuthContext";
@@ -281,6 +283,7 @@ const Landing = () => {
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState("signin");
   const [showParticleField, setShowParticleField] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
   const [showBelowFold, setShowBelowFold] = useState(true);
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -810,7 +813,17 @@ const Landing = () => {
                 >
                   Terms of Service
                 </Link>
+                <span className="hidden text-white/15 sm:inline">|</span>
+                <button
+                  type="button"
+                  onClick={() => setContactOpen(true)}
+                  data-testid="footer-contact-link"
+                  className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+                >
+                  CONTACT
+                </button>
               </div>
+              <ContactModal open={contactOpen} onOpenChange={setContactOpen} />
               <p className="max-w-2xl text-[11px] text-[#737373] sm:text-xs">
                 The enforcement layer serious engineers trust with production AI
                 systems.
@@ -840,6 +853,7 @@ const Landing = () => {
         onClose={() => setAuthOpen(false)}
         initialMode={authMode}
       />
+      <ContactBubble />
     </div>
   );
 };

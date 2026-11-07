@@ -339,4 +339,8 @@ export const tools = {
   inspect: (payload) => api.post("/tools/inspect", payload),
 };
 
+export const contact = {
+  send: (payload) => api.post("/contact", payload, { timeout: 20000 }),
+};
+
 export default api;

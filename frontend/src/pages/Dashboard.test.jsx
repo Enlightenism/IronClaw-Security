@@ -255,6 +255,12 @@ describe("dashboard navigation", () => {
     expect(screen.queryByText("Policies")).not.toBeInTheDocument();
   });
 
+  it("renders the floating contact bubble", async () => {
+    await renderDashboard();
+
+    expect(screen.getByTestId("contact-bubble")).toHaveTextContent("CONTACT");
+  });
+
   it("does not emit React act warnings while dashboard data resolves", async () => {
     const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 

@@ -1,6 +1,11 @@
+import { useState } from "react";
+
+import ContactModal, { CONTACT_EMAIL } from "@/components/ContactModal";
 import LegalLayout, { Section } from "@/components/LegalLayout";
 
 const Privacy = () => {
+  const [contactOpen, setContactOpen] = useState(false);
+
   return (
     <LegalLayout
       title="Privacy Policy"
@@ -211,8 +216,24 @@ const Privacy = () => {
       <Section heading="14. Contact Us">
         <p>
           For privacy questions or requests, contact us at{" "}
-          <span className="text-[#38BDF8]">privacy@ironclaw-security.com</span>.
+          <button
+            type="button"
+            onClick={() => setContactOpen(true)}
+            className="text-[#38BDF8] underline underline-offset-4 transition hover:text-[#FFD700]"
+          >
+            {CONTACT_EMAIL}
+          </button>{" "}
+          or use our{" "}
+          <button
+            type="button"
+            onClick={() => setContactOpen(true)}
+            className="font-semibold text-[#FFD700] underline underline-offset-4 transition hover:text-white"
+          >
+            CONTACT
+          </button>{" "}
+          form.
         </p>
+        <ContactModal open={contactOpen} onOpenChange={setContactOpen} />
       </Section>
     </LegalLayout>
   );

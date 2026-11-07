@@ -428,6 +428,19 @@ canvas[data-testid="particle-field"] {
 .animate-float-glow {
     animation: float-glow 7s ease-in-out infinite;
 }
+.contact-bubble-knight {
+    filter: drop-shadow(0 0 14px rgba(255, 215, 0, 0.45));
+    animation: contact-bubble-float 4s ease-in-out infinite;
+}
+@keyframes contact-bubble-float {
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-6px);
+    }
+}
 
 @layer base {
     :root {
