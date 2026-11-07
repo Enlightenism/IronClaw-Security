@@ -12,6 +12,7 @@ from app.core.auth import AuthContext, require_auth_context
 from app.core.billing import _reset_billing_registry_for_testing
 import app.core.install_keys as _install_keys_module
 from app.core.install_keys import InstallKeyRegistry
+from app.core.rate_limit import rate_limiter as _rate_limiter
 from app.core.settings import get_settings
 import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import UnitWalletRegistry
@@ -170,6 +171,13 @@ def reset_audit_state() -> Generator[None, None, None]:
     reset_audit_log()
     yield
     reset_audit_log()
+
+
+@pytest.fixture(scope="function", autouse=True)
+def _reset_rate_limiter() -> Generator[None, None, None]:
+    _rate_limiter.reset()
+    yield
+    _rate_limiter.reset()
 
 
 # ---------------------------------------------------------------------------
