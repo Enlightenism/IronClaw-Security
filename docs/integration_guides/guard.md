@@ -7,10 +7,12 @@ your application.
 
 ## Requirements
 
-- Install IronClaw and its declared dependencies:
+- Install IronClaw with the `docker` extra, which provides the `torch` and
+  `transformers` packages used by the classifier. They are not core
+  dependencies, so a plain `pip install -e .` does not include them:
 
   ```bash
-  python -m pip install -e .
+  python -m pip install -e ".[docker]"
   ```
 
 - Make the Prompt Guard checkpoint available to the IronClaw server. The
