@@ -9,6 +9,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, 
 from pydantic import BaseModel, Field
 
 from app.core.auth import AuthContext, get_auth_context
+from app.core.billing import resolve_authenticated_billing_owner
 from app.routers.stripe_router import get_stripe_service
 from app.services.stripe_service import StripeService, StripeServiceError
 from app.supabaseclient import TOKENS_PER_UNIT, get_supabase_client, is_supabase_configured
@@ -348,6 +349,12 @@ def _resolve_org_id_from_request(
     if auth_org_id:
         return auth_org_id
 
+    # Same verified billing owner that checkout uses as its org key, so saved cards
+    # are read from the Stripe customer that checkout created.
+    owner_key = resolve_authenticated_billing_owner(auth) if auth is not None else None
+    if owner_key:
+        return owner_key
+
     if request is not None:
         query_org_id = (request.query_params.get("organizationid") or request.query_params.get("organization_id") or request.query_params.get("organizationId") or "").strip()
         if query_org_id:
@@ -660,7 +667,9 @@ async def get_payment_methods(
             },
         ) from exc
 
-    if not methods and stripe_methods:
+    # Stripe holds the card details (brand, last4, expiry); Supabase rows only hold the
+    # org-to-method link, so Stripe wins whenever the customer has saved methods.
+    if stripe_methods:
         methods = stripe_methods
 
     org_name = _fetch_org_name(organizationid, stripe_customer_id)

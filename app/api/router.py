@@ -61,11 +61,11 @@ OPTIONAL_API_MODULES: Final[tuple[str, ...]] = _dedupe_api_modules(
     )
 )
 
+# unit_wallet and unit_ledger serve hardcoded sample data under /ui/billing and are not
+# backed by UnitWalletRegistry, so they are kept out of the live API aggregator.
 CORE_API_MODULES: Final[tuple[str, ...]] = (
     "app.api.ui_manifest",
     "app.ui.guard_registry",
-    "app.api.routes.unit_wallet",
-    "app.api.routes.unit_ledger",
     "app.api.routes.actionhistorytest",
 )
 

@@ -34,6 +34,18 @@ def registry() -> UnitWalletRegistry:
     return UnitWalletRegistry()
 
 
+def test_credit_units_refuses_memory_repository_when_supabase_required(
+    registry: UnitWalletRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IRONCLAW_PERSISTENCE_MODE", "supabase")
+
+    with pytest.raises(RuntimeError, match="Supabase persistence is required"):
+        registry.credit_units("owner-durable-guard", 5_000, {"event_id": "evt_guard"})
+
+    assert registry.get_wallet("owner-durable-guard") is None
+
+
 # ---------------------------------------------------------------------------
 # UNIT_PACKAGE_CATALOG integrity
 # ---------------------------------------------------------------------------

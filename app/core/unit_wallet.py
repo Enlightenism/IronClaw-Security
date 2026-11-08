@@ -850,6 +850,10 @@ class UnitWalletRegistry:
         self._wallets_by_owner: dict[str, str] = {}
         self._repo: SupabaseUnitWalletRepository | MemoryUnitWalletRepository = _make_repo()
 
+    def _assert_durable_storage(self) -> None:
+        if os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").strip().lower() == "supabase" and not isinstance(self._repo, SupabaseUnitWalletRepository):
+            raise RuntimeError("unit_wallet: Supabase persistence is required but the wallet repository is not durable; refusing to change unit balances in memory")
+
     @staticmethod
     def _is_real_wallet(wallet: Any) -> bool:
         if not isinstance(wallet, RegistryUnitWallet):
@@ -956,6 +960,7 @@ class UnitWalletRegistry:
         units: int,
         metadata: dict[str, Any] | None = None,
     ) -> RegistryUnitWallet:
+        self._assert_durable_storage()
         safe_units = max(0, int(units))
         wallet = self.get_or_create_wallet(owner_key=owner_key)
         normalized_metadata, purchase_id, checkout_session_id, event_id = self._normalize_ledger_metadata(metadata)
@@ -1004,6 +1009,7 @@ class UnitWalletRegistry:
         units: int,
         metadata: dict[str, Any] | None = None,
     ) -> RegistryUnitWallet:
+        self._assert_durable_storage()
         safe_units = max(0, int(units))
         wallet = self.get_or_create_wallet(owner_key=owner_key)
         normalized_metadata, purchase_id, checkout_session_id, event_id = self._normalize_ledger_metadata(metadata)
