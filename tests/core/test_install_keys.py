@@ -11,6 +11,7 @@ from app.core.install_keys import (
     InstallKeyRecord,
     InstallKeyRegistry,
     InstallKeyUsageError,
+    _assert_durable_install_key_storage,
     _mask_key,
     _reset_install_key_registry_for_testing,
 )
@@ -1242,3 +1243,27 @@ class TestSummary(unittest.TestCase):
         s = reg.summary()
         for key in ("total", "active", "revoked", "openclaw_keys", "claude_code_keys"):
             assert key in s
+
+
+class TestInstallKeyDurableStorageGuard(unittest.TestCase):
+    def test_refuses_issuance_when_supabase_required_but_unavailable(self):
+        with (
+            patch.dict(os.environ, {"IRONCLAW_PERSISTENCE_MODE": "supabase"}),
+            patch("app.core.install_keys._should_use_memory_fallback", return_value=True),
+        ):
+            with self.assertRaises(RuntimeError):
+                _assert_durable_install_key_storage()
+
+    def test_allows_issuance_when_supabase_is_available(self):
+        with (
+            patch.dict(os.environ, {"IRONCLAW_PERSISTENCE_MODE": "supabase"}),
+            patch("app.core.install_keys._should_use_memory_fallback", return_value=False),
+        ):
+            _assert_durable_install_key_storage()
+
+    def test_allows_memory_mode_without_supabase_requirement(self):
+        with (
+            patch.dict(os.environ, {"IRONCLAW_PERSISTENCE_MODE": "memory"}),
+            patch("app.core.install_keys._should_use_memory_fallback", return_value=True),
+        ):
+            _assert_durable_install_key_storage()

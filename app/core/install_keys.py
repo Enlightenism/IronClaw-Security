@@ -534,6 +534,13 @@ def _should_use_memory_fallback() -> bool:
         return True
 
 
+def _assert_durable_install_key_storage() -> None:
+    """Refuse to issue paid install keys when Supabase persistence is required but unavailable."""
+    mode = os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").strip().lower()
+    if mode == "supabase" and _should_use_memory_fallback():
+        raise RuntimeError("Install-key issuance requires durable Supabase storage; refusing to keep paid keys in memory only.")
+
+
 def _persist_install_key_update(*, key_id: str, action: str, callback: Any) -> bool:
     if _should_use_memory_fallback():
         _logger.info("install_keys: %s for %s skipped because persistence is running in memory-only mode", action, key_id)
@@ -1089,6 +1096,7 @@ class InstallKeyRegistry:
                 metadata=dict(metadata or {}),
             )
 
+            _assert_durable_install_key_storage()
             use_memory_fallback = _should_use_memory_fallback()
             if not use_memory_fallback:
                 try:

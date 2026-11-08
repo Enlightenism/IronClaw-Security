@@ -1768,6 +1768,7 @@ class StripeService:
             raise StripeServiceError("Stripe returned an invalid checkout session list.")
 
         results: list[dict[str, Any]] = []
+        failed_sessions: list[str] = []
         for row in rows:
             if not isinstance(row, dict):
                 continue
@@ -1779,11 +1780,14 @@ class StripeService:
             try:
                 results.append(self._handle_checkout_completed(row, {}))
             except Exception as exc:  # noqa: BLE001
+                failed_sessions.append(str(row.get("id")))
                 logger.warning(
                     "stripe.checkout_reconcile_failed session=%s error_type=%s",
                     row.get("id"),
                     type(exc).__name__,
                 )
+        if failed_sessions:
+            raise StripeServiceError(f"Payment sync failed for {len(failed_sessions)} checkout session(s); retry refresh after the fault is resolved.")
         return results
 
     def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:

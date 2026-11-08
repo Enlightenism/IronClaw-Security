@@ -1860,6 +1860,15 @@ class TestReconcileCheckoutSession:
         assert owner_wallet.balance_units == 5000
         assert svc_wired.get_unit_balance(_ORG).balance == 0
 
+    def test_reconcile_owner_checkout_sessions_raises_when_a_session_fails(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        owner = "buyer@ironclaw.test"
+        mine = _build_checkout_completed_event(unit_credits=5000, session_id="cs_owner_003", owner_key=owner)["data"]["object"]
+        mock_client.get.return_value = {"object": "list", "data": [mine]}
+
+        with patch.object(svc_wired, "_handle_checkout_completed", side_effect=RuntimeError("wallet unavailable")):
+            with pytest.raises(StripeServiceError, match="Payment sync failed for 1 checkout session"):
+                svc_wired.reconcile_owner_checkout_sessions(owner)
+
 
 # ===========================================================================
 # Section U — dispatch_webhook_event full event dispatch
