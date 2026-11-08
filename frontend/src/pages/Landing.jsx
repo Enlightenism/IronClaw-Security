@@ -17,12 +17,12 @@ import {
   Fingerprint,
   BrainCircuit,
   ArrowRight,
-  Check,
 } from "lucide-react";
 import AuthModal from "@/components/AuthModal";
 import ContactBubble from "@/components/ContactBubble";
 import ContactModal from "@/components/ContactModal";
 import CyberNewsTickers from "@/components/CyberNewsTickers";
+import PackageCarousel from "@/components/PackageCarousel";
 import PlatformsTicker from "@/components/PlatformsTicker";
 import { useAuth } from "@/context/AuthContext";
 import { useCountUp } from "@/hooks/useCountUp";
@@ -684,57 +684,7 @@ const Landing = () => {
             </div>
           </section>
 
-          <section className="relative z-10 mx-auto max-w-4xl bg-transparent px-6 py-20">
-            <motion.div
-              variants={fadeUp}
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true }}
-              className="glass-platinum overflow-hidden rounded-3xl p-10 text-center sm:p-14"
-              data-testid="credits-section"
-            >
-              <div className="mb-3 inline-block rounded-full border border-[#E5E4E2]/30 bg-white/5 px-4 py-1 font-tech text-xs uppercase tracking-[0.3em] text-[#E5E4E2]">
-                Starter Package
-              </div>
-              <h2 className="text-3xl font-bold tracking-tight sm:text-5xl">
-                <span className="text-gold-gradient">$20</span>{" "}
-                <span className="text-[#BFC1C2]">=</span>{" "}
-                <span className="text-platinum-gradient">5,000 units</span>
-              </h2>
-              <p className="mt-3 text-lg text-[#BFC1C2]">
-                Pay only for what you use.
-              </p>
-              <p
-                className="mt-2 font-tech text-sm text-[#FFD700]"
-                data-testid="agents-protected-line"
-              >
-                5,000 units = 5,000 agent calls protected up to 25,000 tokens
-                each, against multiple layers of unsafe behavior. That is up to
-                125,000,000 tokens protected by IronClaw-Security python
-                defense. No subscription. No recurring charge. Idle time cost
-                nothing per month. Scale instantly.
-              </p>
-
-              <div className="mx-auto mt-8 grid max-w-2xl grid-cols-1 gap-3 text-left sm:grid-cols-2">
-                {[
-                  "No subscription",
-                  "No recurring charge",
-                  "Idle months cost nothing",
-                  "Scale instantly",
-                  "Full spend control",
-                  "Transparent per-unit pricing",
-                ].map((b) => (
-                  <div
-                    key={b}
-                    className="flex items-center gap-2 text-sm text-white/90"
-                  >
-                    <Check size={16} className="text-[#FFD700]" /> {b}
-                  </div>
-                ))}
-              </div>
-            </motion.div>
-          </section>
-
+          <PackageCarousel />
           <section className="relative z-10 mx-auto max-w-4xl bg-transparent px-6 pb-24 pt-10 text-center">
             <motion.div
               variants={fadeUp}

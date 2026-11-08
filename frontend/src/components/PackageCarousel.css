@@ -1,0 +1,67 @@
+.package-carousel {
+  position: relative;
+  width: 100vw;
+  max-width: 100vw;
+  left: 50%;
+  transform: translateX(-50%);
+  overflow: hidden;
+  overflow: clip;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    #000 6%,
+    #000 94%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    #000 6%,
+    #000 94%,
+    transparent 100%
+  );
+}
+
+.package-carousel-track {
+  display: flex;
+  width: max-content;
+  animation: package-carousel-scroll 45s linear infinite;
+  will-change: transform;
+}
+
+.package-carousel-group {
+  display: flex;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+
+.package-carousel-item {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: min(56rem, 90vw);
+  padding: 0 1rem;
+  white-space: normal;
+}
+
+@keyframes package-carousel-scroll {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (max-width: 768px) {
+  .package-carousel-track {
+    animation-duration: 24s;
+  }
+}
+
+/* index.css freezes all animations under reduced motion; re-assert the scroll with !important so the carousel keeps moving on every device. */
+@media (prefers-reduced-motion: reduce) {
+  .package-carousel-track {
+    animation: package-carousel-scroll 45s linear infinite !important;
+  }
+}

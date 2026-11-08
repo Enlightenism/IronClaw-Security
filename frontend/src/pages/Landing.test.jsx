@@ -534,6 +534,41 @@ describe("Landing", () => {
     expect(screen.getByTestId("feature-card-13")).toBeInTheDocument();
   });
 
+  it("renders Team and Enterprise package cards with BEST DEAL above Enterprise", async () => {
+    await renderLanding();
+
+    const team = screen.getByTestId("team-package-section");
+    expect(team).toHaveTextContent("Team Package");
+    expect(team).toHaveTextContent("$90");
+    expect(team).toHaveTextContent("25,000 units");
+    expect(screen.getByTestId("team-agents-protected-line")).toHaveTextContent(
+      "625,000,000 tokens",
+    );
+
+    const badge = screen.getByTestId("best-deal-badge");
+    const enterprise = screen.getByTestId("enterprise-agents-protected-line");
+    expect(badge).toHaveTextContent("BEST DEAL");
+    expect(enterprise).toHaveTextContent("1,500,000,000 tokens");
+    const enterpriseCard = screen.getByTestId("enterprise-package-section");
+    expect(enterpriseCard).toHaveTextContent("Enterprise Package");
+    expect(enterpriseCard).toHaveTextContent("$180");
+    expect(enterprise).toHaveTextContent("60,000 units");
+    expect(
+      badge.compareDocumentPosition(enterprise) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("renders the package carousel with the three packages", async () => {
+    await renderLanding();
+
+    const carousel = screen.getByTestId("package-carousel");
+    expect(carousel).toHaveTextContent("Starter Package");
+    expect(carousel).toHaveTextContent("Team Package");
+    expect(carousel).toHaveTextContent("Enterprise Package");
+    expect(screen.getByTestId("credits-section")).toBeInTheDocument();
+  });
+
   it("renders the Platforms Protected ticker between the layers and protection sections", async () => {
     await renderLanding();
 
