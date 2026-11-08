@@ -137,10 +137,13 @@ const BILLING_CATALOGUE_RESPONSE = {
 const DEFAULT_PROPS = {
   balance: 500,
   lastPayment: null,
+  walletHistory: [],
   hasPaid: false,
   onPurchase: jest.fn(),
   purchasingId: null,
-  organizationId: "org-001",
+  onAddPaymentMethod: jest.fn(),
+  addingPaymentMethod: false,
+  organizationId: "",
 };
 
 const ORIGINAL_ENV = process.env;
@@ -397,6 +400,27 @@ describe("last payment display", () => {
 
     expect(screen.queryByText(/Last purchase/i)).not.toBeInTheDocument();
   });
+
+  it("renders wallet activity returned by the dashboard API", async () => {
+    await renderWalletCard({
+      walletHistory: [
+        {
+          entry_type: "credit",
+          label: "Starter",
+          units: 5000,
+          balance_after: 5000,
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      organizationId: "",
+    });
+
+    expect(screen.getByTestId("wallet-history")).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("wallet-history")).getByText("Starter"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("+5,000 units")).toBeInTheDocument();
+  });
 });
 
 // =============================================================================
@@ -409,19 +433,30 @@ describe("Payment method panel — current behavior", () => {
     expect(screen.getByTestId("saved-payment-method")).toBeInTheDocument();
   });
 
-  it("renders the current empty-state copy", async () => {
+  it("explains that a card can be saved without making a purchase", async () => {
     await renderWalletCard({ organizationId: uniqueOrgId() });
 
     await waitFor(() => {
+      expect(screen.getByText(/No saved card yet/i)).toBeInTheDocument();
       expect(
-        screen.getByText(/No payment method on file yet/i),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(
-          /Complete a purchase to securely save one with Stripe/i,
-        ),
+        screen.getByText(/Add one securely without making a purchase/i),
       ).toBeInTheDocument();
     });
+    expect(screen.getByTestId("add-payment-method")).toBeEnabled();
+  });
+
+  it("starts the no-charge card setup flow without triggering a package purchase", async () => {
+    const user = userEvent.setup();
+    const onAddPaymentMethod = jest.fn();
+    await renderWalletCard({
+      organizationId: uniqueOrgId(),
+      onAddPaymentMethod,
+    });
+
+    await user.click(screen.getByTestId("add-payment-method"));
+
+    expect(onAddPaymentMethod).toHaveBeenCalledTimes(1);
+    expect(DEFAULT_PROPS.onPurchase).not.toHaveBeenCalled();
   });
 
   it("renders loading copy while payment methods are being fetched", async () => {
@@ -519,11 +554,11 @@ describe("Payment method panel — current behavior", () => {
     expect(screen.getByTestId("set-default-pm_other")).toBeInTheDocument();
   });
 
-  it("renders add-new-card-btn", async () => {
+  it("does not show an add-card action that can accidentally start a purchase", async () => {
     setupTwoMethods();
     await renderWalletCard({ organizationId: uniqueOrgId() });
 
-    expect(await screen.findByTestId("add-new-card-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("add-new-card-btn")).not.toBeInTheDocument();
   });
 });
 
@@ -563,38 +598,10 @@ describe("Payment method interactions", () => {
     );
   });
 
-  it("falls back to api.post when setDefault fails", async () => {
-    const user = userEvent.setup();
-    const orgId = uniqueOrgId();
-    mockPaymentMethodsSetDefault.mockRejectedValue(new Error("primary failed"));
-    mockApiPost.mockResolvedValue({ data: { status: "ok" } });
-    mockPaymentMethodsList
-      .mockResolvedValueOnce(TWO_METHODS_RESPONSE)
-      .mockResolvedValueOnce(TWO_METHODS_RESPONSE);
-
-    await renderWalletCard({ organizationId: orgId });
-
-    const button = await screen.findByTestId("set-default-pm_other");
-    await user.click(button);
-
-    await waitFor(() => {
-      expect(mockApiPost).toHaveBeenCalledWith(
-        `/billing/payment-methods/pm_other/set-default?organizationid=${orgId}`,
-      );
-    });
-
-    expect(mockToastSuccess).toHaveBeenCalledWith(
-      "Default payment method updated.",
-    );
-  });
-
-  it("shows toast error when setDefault and fallback both fail", async () => {
+  it("shows the Stripe action error without retrying through another endpoint", async () => {
     const user = userEvent.setup();
     mockPaymentMethodsSetDefault.mockRejectedValue({
       response: { data: { detail: "Primary set-default failed." } },
-    });
-    mockApiPost.mockRejectedValue({
-      response: { data: { detail: "Fallback set-default failed." } },
     });
     mockPaymentMethodsList.mockResolvedValueOnce(TWO_METHODS_RESPONSE);
 
@@ -605,9 +612,10 @@ describe("Payment method interactions", () => {
 
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(
-        "Fallback set-default failed.",
+        "Primary set-default failed.",
       );
     });
+    expect(mockApiPost).not.toHaveBeenCalled();
   });
 
   it("removes a payment method", async () => {
@@ -636,38 +644,10 @@ describe("Payment method interactions", () => {
     expect(mockToastSuccess).toHaveBeenCalledWith("Payment method removed.");
   });
 
-  it("falls back to api.post when delete fails", async () => {
-    const user = userEvent.setup();
-    const orgId = uniqueOrgId();
-    mockPaymentMethodsDelete.mockRejectedValue(
-      new Error("primary delete failed"),
-    );
-    mockApiPost.mockResolvedValue({ data: { status: "ok" } });
-    mockPaymentMethodsList
-      .mockResolvedValueOnce(TWO_METHODS_RESPONSE)
-      .mockResolvedValueOnce(TWO_METHODS_RESPONSE);
-
-    await renderWalletCard({ organizationId: orgId });
-
-    const button = await screen.findByTestId("delete-method-pm_other");
-    await user.click(button);
-
-    await waitFor(() => {
-      expect(mockApiPost).toHaveBeenCalledWith(
-        `/billing/payment-methods/pm_other/detach?organizationid=${orgId}`,
-      );
-    });
-
-    expect(mockToastSuccess).toHaveBeenCalledWith("Payment method removed.");
-  });
-
-  it("shows toast error when delete and fallback both fail", async () => {
+  it("shows the Stripe removal error without retrying through another endpoint", async () => {
     const user = userEvent.setup();
     mockPaymentMethodsDelete.mockRejectedValue({
       response: { data: { detail: "Primary delete failed." } },
-    });
-    mockApiPost.mockRejectedValue({
-      response: { data: { detail: "Fallback delete failed." } },
     });
     mockPaymentMethodsList.mockResolvedValueOnce(TWO_METHODS_RESPONSE);
 
@@ -677,21 +657,19 @@ describe("Payment method interactions", () => {
     await user.click(button);
 
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith("Fallback delete failed.");
+      expect(mockToastError).toHaveBeenCalledWith("Primary delete failed.");
     });
+    expect(mockApiPost).not.toHaveBeenCalled();
   });
 
-  it("clicking add-new-card-btn triggers purchase for default add-card package", async () => {
-    const user = userEvent.setup();
+  it("does not expose a card button that can trigger a paid package checkout", async () => {
     const onPurchase = jest.fn();
     setupTwoMethods();
 
     await renderWalletCard({ onPurchase, organizationId: uniqueOrgId() });
 
-    const button = await screen.findByTestId("add-new-card-btn");
-    await user.click(button);
-
-    expect(onPurchase).toHaveBeenCalledWith("pkg_5000");
+    expect(screen.queryByTestId("add-new-card-btn")).not.toBeInTheDocument();
+    expect(onPurchase).not.toHaveBeenCalled();
   });
 });
 
@@ -699,7 +677,7 @@ describe("Payment method interactions", () => {
 // paymentMethods.list silent failure
 // =============================================================================
 
-describe("paymentMethods.list silent failure", () => {
+describe("paymentMethods.list failure", () => {
   beforeEach(() => {
     mockPaymentMethodsList.mockRejectedValue(new Error("Network error"));
   });
@@ -712,16 +690,18 @@ describe("paymentMethods.list silent failure", () => {
     });
   });
 
-  it("falls back to empty methods UI without toast", async () => {
+  it("shows an explicit retrieval error rather than an empty-state message", async () => {
     await renderWalletCard({ organizationId: uniqueOrgId() });
 
     await waitFor(() => {
-      expect(
-        screen.getByText(/No payment method on file yet/i),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /Saved payment methods could not be loaded/i,
+      );
     });
 
+    expect(
+      screen.queryByText(/No payment method on file yet/i),
+    ).not.toBeInTheDocument();
     expect(mockToastSuccess).not.toHaveBeenCalled();
-    expect(mockToastError).not.toHaveBeenCalled();
   });
 });

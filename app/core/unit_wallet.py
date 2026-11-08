@@ -40,6 +40,12 @@ def _normalize_owner_key(owner_key: str) -> str:
     return str(owner_key).strip().lower()
 
 
+def _durable_storage_required() -> bool:
+    persistence_mode = os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").strip().lower()
+    environment_name = (os.environ.get("IRONCLAW_ENV") or os.environ.get("APP_ENV") or os.environ.get("ENVIRONMENT", "")).strip().lower()
+    return persistence_mode == "supabase" or environment_name in {"prod", "production"}
+
+
 def _is_generic_platform_credential(value: str | None) -> bool:
     if value is None:
         return False
@@ -662,6 +668,27 @@ class SupabaseUnitWalletRepository:
             }
         ).execute()
 
+    def credit_units_once(self, entry: RegistryUnitLedgerEntry) -> None:
+        rpc = getattr(self._client, "rpc", None)
+        if not callable(rpc):
+            raise RuntimeError("unit_wallet: Supabase client does not support atomic wallet credits")
+        result = rpc(
+            "credit_unit_wallet_once",
+            {
+                "p_wallet_id": entry.wallet_id,
+                "p_owner_key": entry.owner_key,
+                "p_entry_id": entry.entry_id,
+                "p_units": entry.units,
+                "p_purchase_id": entry.purchase_id,
+                "p_checkout_session_id": entry.checkout_session_id,
+                "p_event_id": entry.event_id,
+                "p_metadata": entry.metadata,
+                "p_created_at": entry.created_at.isoformat(),
+            },
+        ).execute()
+        if result is None or not hasattr(result, "data") or not result.data:
+            raise RuntimeError("unit_wallet: atomic Supabase wallet credit returned no wallet record")
+
     def fetch_ledger_entries(
         self,
         owner_key: str | None = None,
@@ -765,7 +792,8 @@ class MemoryUnitWalletRepository:
 
 def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
     persistence_mode = os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").strip().lower()
-    environment_name = os.environ.get("ENVIRONMENT", "").strip().lower()
+    environment_name = (os.environ.get("IRONCLAW_ENV") or os.environ.get("APP_ENV") or os.environ.get("ENVIRONMENT", "")).strip().lower()
+    durable_storage_required = _durable_storage_required()
 
     if persistence_mode in {"", "auto"}:
         if environment_name == "test":
@@ -778,6 +806,8 @@ def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
         persistence_mode = "supabase"
 
     if persistence_mode in {"memory", "test"}:
+        if durable_storage_required:
+            raise RuntimeError("unit_wallet: durable Supabase storage is required in production")
         logger.info(
             "unit_wallet: persistence mode=%r environment=%r — using MemoryUnitWalletRepository",
             persistence_mode,
@@ -791,6 +821,8 @@ def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
         checker = getattr(supabaseclient, "is_supabase_configured", None)
         if persistence_mode == "supabase":
             if checker is None or not checker():
+                if durable_storage_required:
+                    raise RuntimeError("unit_wallet: production requires configured Supabase wallet storage")
                 logger.info("unit_wallet: explicit Supabase mode selected but Supabase is not configured — using MemoryUnitWalletRepository")
                 return MemoryUnitWalletRepository()
             try:
@@ -804,15 +836,19 @@ def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
                     supabaseclient.reset_supabase_client()
                 try:
                     repo = SupabaseUnitWalletRepository()
-                except Exception:
+                except Exception as exc:
                     logger.exception(
                         "unit_wallet: Supabase initialized with a configured backend but failed validation; falling back to MemoryUnitWalletRepository",
                     )
+                    if durable_storage_required:
+                        raise RuntimeError("unit_wallet: production Supabase wallet storage failed validation") from exc
                     return MemoryUnitWalletRepository()
             logger.info("unit_wallet: SupabaseUnitWalletRepository initialized in explicit supabase mode")
             return repo
 
         if checker is None or not checker():
+            if durable_storage_required:
+                raise RuntimeError("unit_wallet: production requires configured Supabase wallet storage")
             logger.info("unit_wallet: Supabase not configured — using MemoryUnitWalletRepository")
             return MemoryUnitWalletRepository()
 
@@ -827,19 +863,23 @@ def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
                 supabaseclient.reset_supabase_client()
             try:
                 repo = SupabaseUnitWalletRepository()
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "unit_wallet: Supabase initialized with a configured backend but failed validation; falling back to MemoryUnitWalletRepository",
                 )
+                if durable_storage_required:
+                    raise RuntimeError("unit_wallet: production Supabase wallet storage failed validation") from exc
                 return MemoryUnitWalletRepository()
 
         logger.info("unit_wallet: SupabaseUnitWalletRepository initialized")
         return repo
 
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "unit_wallet: Supabase initialized with a configured backend but failed validation; falling back to MemoryUnitWalletRepository",
         )
+        if durable_storage_required:
+            raise RuntimeError("unit_wallet: production Supabase wallet storage is unavailable") from exc
         return MemoryUnitWalletRepository()
 
 
@@ -851,8 +891,8 @@ class UnitWalletRegistry:
         self._repo: SupabaseUnitWalletRepository | MemoryUnitWalletRepository = _make_repo()
 
     def _assert_durable_storage(self) -> None:
-        if os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").strip().lower() == "supabase" and not isinstance(self._repo, SupabaseUnitWalletRepository):
-            raise RuntimeError("unit_wallet: Supabase persistence is required but the wallet repository is not durable; refusing to change unit balances in memory")
+        if _durable_storage_required() and not isinstance(self._repo, SupabaseUnitWalletRepository):
+            raise RuntimeError("unit_wallet: Supabase persistence is required; refusing to change unit balances in memory without durable storage")
 
     @staticmethod
     def _is_real_wallet(wallet: Any) -> bool:
@@ -964,6 +1004,29 @@ class UnitWalletRegistry:
         safe_units = max(0, int(units))
         wallet = self.get_or_create_wallet(owner_key=owner_key)
         normalized_metadata, purchase_id, checkout_session_id, event_id = self._normalize_ledger_metadata(metadata)
+
+        if isinstance(self._repo, SupabaseUnitWalletRepository):
+            entry = RegistryUnitLedgerEntry(
+                entry_id=f"ledger_{uuid.uuid4().hex}",
+                wallet_id=wallet.wallet_id,
+                owner_key=wallet.owner_key,
+                entry_type="credit",
+                units=safe_units,
+                balance_after=wallet.balance_units + safe_units,
+                purchase_id=purchase_id,
+                checkout_session_id=checkout_session_id,
+                event_id=event_id,
+                metadata=normalized_metadata,
+            )
+            self._repo.credit_units_once(entry)
+            updated_wallet = self._repo.fetch_wallet(wallet.owner_key)
+            if updated_wallet is None:
+                raise RuntimeError("unit_wallet: wallet disappeared after atomic Supabase credit")
+            with self._lock:
+                self._wallets[updated_wallet.wallet_id] = updated_wallet
+                self._wallets_by_owner[updated_wallet.owner_key] = updated_wallet.wallet_id
+                self._evict_cache_if_needed()
+            return updated_wallet
 
         with self._lock:
             existing_entry = self._find_existing_event(

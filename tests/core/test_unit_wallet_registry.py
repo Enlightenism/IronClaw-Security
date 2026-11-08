@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -164,10 +165,11 @@ def test_supabase_configured_uses_supabase_repository(monkeypatch: pytest.Monkey
     assert isinstance(registry._repo, wallet_module.SupabaseUnitWalletRepository)
 
 
-def test_supabase_configured_schema_drift_falls_back_to_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_supabase_configured_schema_drift_fails_instead_of_using_memory(monkeypatch: pytest.MonkeyPatch) -> None:
     import app.core.unit_wallet as wallet_module
 
     monkeypatch.setenv("IRONCLAW_PERSISTENCE_MODE", "supabase")
+    monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setattr("app.supabaseclient.is_supabase_configured", lambda settings=None: True, raising=False)
 
     class _BrokenClient:
@@ -176,8 +178,122 @@ def test_supabase_configured_schema_drift_falls_back_to_memory(monkeypatch: pyte
 
     monkeypatch.setattr("app.supabaseclient.get_supabase_client", lambda: _BrokenClient(), raising=False)
 
-    registry = wallet_module.UnitWalletRegistry()
-    assert isinstance(registry._repo, wallet_module.MemoryUnitWalletRepository)
+    with pytest.raises(RuntimeError, match="Supabase"):
+        wallet_module.UnitWalletRegistry()
+
+
+def test_production_rejects_explicit_memory_wallet_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.core.unit_wallet as wallet_module
+
+    monkeypatch.setenv("IRONCLAW_PERSISTENCE_MODE", "memory")
+    monkeypatch.setenv("ENVIRONMENT", "production")
+
+    with pytest.raises(RuntimeError, match="durable Supabase storage is required"):
+        wallet_module.UnitWalletRegistry()
+
+
+def test_supabase_credit_repository_uses_atomic_rpc() -> None:
+    import app.core.unit_wallet as wallet_module
+
+    class _FakeRpc:
+        def __init__(self) -> None:
+            self.name = None
+            self.parameters = None
+
+        def execute(self):
+            return SimpleNamespace(data=[{"wallet_id": "wallet_001"}])
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self.rpc_call = _FakeRpc()
+
+        def rpc(self, name: str, parameters: dict[str, object]):
+            self.rpc_call.name = name
+            self.rpc_call.parameters = parameters
+            return self.rpc_call
+
+    client = _FakeClient()
+    repository = wallet_module.SupabaseUnitWalletRepository.__new__(wallet_module.SupabaseUnitWalletRepository)
+    repository._client = client
+    entry = wallet_module.RegistryUnitLedgerEntry(
+        entry_id="ledger_test_001",
+        wallet_id="wallet_001",
+        owner_key="buyer@ironclaw.test",
+        entry_type="credit",
+        units=5_000,
+        balance_after=5_000,
+        purchase_id="purchase_001",
+        checkout_session_id="cs_test_001",
+        event_id="stripe:checkout.complete:cs_test_001",
+        metadata={"package_id": "pkg_5000"},
+    )
+
+    repository.credit_units_once(entry)
+
+    assert client.rpc_call.name == "credit_unit_wallet_once"
+    assert client.rpc_call.parameters["p_event_id"] == entry.event_id
+    assert client.rpc_call.parameters["p_units"] == 5_000
+
+
+def test_atomic_credit_replay_after_repository_restart_does_not_double_credit() -> None:
+    import app.core.unit_wallet as wallet_module
+
+    class _WalletState:
+        def __init__(self) -> None:
+            self.balance = 0
+            self.events: set[str] = set()
+            self.calls = 0
+
+    state = _WalletState()
+
+    class _StatefulRpc:
+        def __init__(self, parameters: dict[str, object]) -> None:
+            self.parameters = parameters
+
+        def execute(self):
+            state.calls += 1
+            event_id = str(self.parameters["p_event_id"])
+            if event_id not in state.events:
+                state.balance += int(self.parameters["p_units"])
+                state.events.add(event_id)
+            return SimpleNamespace(
+                data=[
+                    {
+                        "wallet_id": self.parameters["p_wallet_id"],
+                        "balance_units": state.balance,
+                    }
+                ]
+            )
+
+    class _PersistentFakeClient:
+        def rpc(self, name: str, parameters: dict[str, object]):
+            assert name == "credit_unit_wallet_once"
+            return _StatefulRpc(parameters)
+
+    entry = wallet_module.RegistryUnitLedgerEntry(
+        entry_id="ledger_restart_001",
+        wallet_id="wallet_restart_001",
+        owner_key="buyer@ironclaw.test",
+        entry_type="credit",
+        units=5_000,
+        balance_after=5_000,
+        purchase_id="purchase_restart_001",
+        checkout_session_id="cs_restart_001",
+        event_id="stripe:checkout.complete:cs_restart_001",
+        metadata={"package_id": "pkg_5000"},
+    )
+    persistent_client = _PersistentFakeClient()
+    first_process = wallet_module.SupabaseUnitWalletRepository.__new__(wallet_module.SupabaseUnitWalletRepository)
+    first_process._client = persistent_client
+    restarted_process = wallet_module.SupabaseUnitWalletRepository.__new__(wallet_module.SupabaseUnitWalletRepository)
+    restarted_process._client = persistent_client
+
+    first_process.credit_units_once(entry)
+    restarted_process.credit_units_once(entry)
+
+    assert state.balance == 5_000
+    assert state.events == {entry.event_id}
+    assert state.calls == 2
 
 
 def test_successful_payment_credit_is_metadata_gated_and_recorded_in_ledger() -> None:

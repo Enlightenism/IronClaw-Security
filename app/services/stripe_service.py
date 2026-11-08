@@ -10,6 +10,7 @@ import hmac
 import json
 import logging
 import math
+import os
 import re
 from threading import Lock
 import time
@@ -48,8 +49,21 @@ _METERED_USAGE_BUFFER_MAX = 500
 _CHECKOUT_SESSION_TTL_SECONDS = 1800  # 30 min
 
 
+def _customer_link_persistence_required() -> bool:
+    persistence_mode = os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").strip().lower()
+    environment_name = (os.environ.get("IRONCLAW_ENV") or os.environ.get("APP_ENV") or os.environ.get("ENVIRONMENT", "")).strip().lower()
+    return persistence_mode == "supabase" or environment_name in {"prod", "production"}
+
+
+def _use_memory_customer_links() -> bool:
+    use_memory = _should_use_memory_fallback()
+    if use_memory and _customer_link_persistence_required():
+        raise StripeServiceError("Stripe customer links require durable Supabase storage.")
+    return use_memory
+
+
 def _load_customer_link(*, org_id: str | None = None, customer_id: str | None = None) -> dict[str, Any] | None:
-    if _should_use_memory_fallback() or not (org_id or customer_id):
+    if not (org_id or customer_id) or _use_memory_customer_links():
         return None
     try:
         query = get_supabase_service_client().table(_STRIPE_CUSTOMER_LINKS_TABLE).select("org_id,customer_id")
@@ -58,13 +72,15 @@ def _load_customer_link(*, org_id: str | None = None, customer_id: str | None = 
         if isinstance(rows, dict):
             rows = [rows]
         return dict(rows[0]) if rows else None
-    except Exception:
+    except Exception as exc:
         logger.warning("stripe.customer_link_load_failed org=%s", org_id or "", exc_info=True)
+        if _customer_link_persistence_required():
+            raise StripeServiceError("Stripe customer link could not be loaded from durable storage.") from exc
         return None
 
 
 def _persist_customer_link(org_id: str, customer_id: str) -> None:
-    if _should_use_memory_fallback():
+    if _use_memory_customer_links():
         return
     try:
         get_supabase_service_client().table(_STRIPE_CUSTOMER_LINKS_TABLE).upsert(
@@ -72,8 +88,10 @@ def _persist_customer_link(org_id: str, customer_id: str) -> None:
             on_conflict="org_id",
             returning="minimal",
         ).execute()
-    except Exception:
+    except Exception as exc:
         logger.warning("stripe.customer_link_persist_failed org=%s", org_id, exc_info=True)
+        if _customer_link_persistence_required():
+            raise StripeServiceError("Stripe customer link could not be persisted to durable storage.") from exc
 
 
 _SCHEMA_VERSION = "1.0"
@@ -1048,13 +1066,14 @@ class StripeService:
             for k, v in metadata.items():
                 params[f"metadata[{k}]"] = str(v)
 
-        resp = self._get_client().post("/customers", params)
+        idempotency_key = f"ironclaw-customer-{hashlib.sha256(org_id.strip().lower().encode()).hexdigest()}"
+        resp = self._get_client().post("/customers", params, idempotency_key=idempotency_key)
         customer_id: str = resp["id"]
 
+        _persist_customer_link(org_id, customer_id)
         with self._lock:
             self._org_customer_map[org_id] = customer_id
             self._customer_org_map[customer_id] = org_id
-        _persist_customer_link(org_id, customer_id)
 
         logger.info("stripe.customer_created org=%s customer=%s", org_id, customer_id)
         return customer_id
@@ -1065,10 +1084,10 @@ class StripeService:
         Used when the mapping is supplied from a webhook event rather than
         an in-process customer creation.
         """
+        _persist_customer_link(org_id, customer_id)
         with self._lock:
             self._org_customer_map[org_id] = customer_id
             self._customer_org_map[customer_id] = org_id
-        _persist_customer_link(org_id, customer_id)
 
     @staticmethod
     def _is_successful_payment_status(value: Any) -> bool:
@@ -1295,10 +1314,61 @@ class StripeService:
         return PaymentMethodResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
 
     def list_payment_methods(self, customer_id: str) -> list[PaymentMethodResponse]:
-        """Return all locally cached payment methods for a customer."""
+        """Return the customer's current saved card methods from Stripe."""
+        customer = self._get_client().get(f"/customers/{customer_id}")
+        if not isinstance(customer, dict):
+            raise StripeServiceError("Stripe returned an invalid customer response.")
+
+        invoice_settings = customer.get("invoice_settings")
+        if not isinstance(invoice_settings, dict):
+            invoice_settings = {}
+        default_method = invoice_settings.get("default_payment_method")
+        default_method_id = default_method.get("id") if isinstance(default_method, dict) else default_method
+        response = self._get_client().get(
+            "/payment_methods",
+            {"customer": customer_id, "type": "card", "limit": "100"},
+        )
+        raw_methods = response.get("data") if isinstance(response, dict) else None
+        if not isinstance(raw_methods, list):
+            raise StripeServiceError("Stripe returned an invalid payment-method list.")
+
+        records: list[_PaymentMethodRecord] = []
+        for raw_method in raw_methods:
+            if not isinstance(raw_method, dict):
+                raise StripeServiceError("Stripe returned an invalid saved payment method.")
+            payment_method_id = str(raw_method.get("id") or "").strip()
+            card = raw_method.get("card")
+            if not payment_method_id or not isinstance(card, dict):
+                raise StripeServiceError("Stripe returned an incomplete saved payment method.")
+            raw_customer_id = raw_method.get("customer")
+            if isinstance(raw_customer_id, dict):
+                raw_customer_id = raw_customer_id.get("id")
+            if raw_customer_id and str(raw_customer_id) != customer_id:
+                raise StripeServiceError("Stripe returned a payment method for a different customer.")
+            created = raw_method.get("created")
+            if isinstance(created, int | float):
+                created_at = datetime.fromtimestamp(created, UTC).isoformat()
+            else:
+                created_at = str(raw_method.get("created_at") or _utcnow_iso())
+            records.append(
+                _PaymentMethodRecord(
+                    payment_method_id=payment_method_id,
+                    customer_id=customer_id,
+                    type=str(raw_method.get("type") or "card"),
+                    brand=str(card.get("brand") or "unknown"),
+                    last4=str(card.get("last4") or ""),
+                    exp_month=int(card.get("exp_month") or 0),
+                    exp_year=int(card.get("exp_year") or 0),
+                    is_default=str(default_method_id or "") == payment_method_id,
+                    created_at=created_at,
+                )
+            )
+
         with self._lock:
-            records = [r for r in self._payment_methods.values() if r.customer_id == customer_id]
-        return [PaymentMethodResponse(**r.to_dict(), schema_version=_SCHEMA_VERSION) for r in records]
+            self._payment_methods = {method_id: record for method_id, record in self._payment_methods.items() if record.customer_id != customer_id}
+            self._payment_methods.update({record.payment_method_id: record for record in records})
+
+        return [PaymentMethodResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION) for record in records]
 
     def set_default_payment_method(
         self,
@@ -1306,16 +1376,21 @@ class StripeService:
         payment_method_id: str,
     ) -> PaymentMethodResponse:
         """
-        Set the specified payment method as the default for the customer.
-        Local state is mutated first (always succeeds if pm exists); the Stripe
-        network call follows and is best-effort — a StripeConfigError in test
-        isolation (no API key) will not prevent the local state from being set.
-        Raises StripePaymentMethodNotFoundError if the pm is not found locally.
+        Set the specified payment method as the Stripe customer default.
+        Raises StripePaymentMethodNotFoundError if the method is not cached for
+        this customer, and propagates Stripe API failures without changing cache.
         """
         with self._lock:
             record = self._payment_methods.get(payment_method_id)
-            if record is None:
+            if record is None or record.customer_id != customer_id:
                 raise StripePaymentMethodNotFoundError(payment_method_id)
+
+        self._get_client().post(
+            f"/customers/{customer_id}",
+            {"invoice_settings[default_payment_method]": payment_method_id},
+        )
+
+        with self._lock:
             for pm_id, pm_record in self._payment_methods.items():
                 if pm_record.customer_id == customer_id and pm_record.is_default:
                     updated = _PaymentMethodRecord(
@@ -1342,19 +1417,6 @@ class StripeService:
                 created_at=record.created_at,
             )
             self._payment_methods[payment_method_id] = new_default
-
-        if self._client is not None:
-            try:
-                self._client.post(
-                    f"/customers/{customer_id}",
-                    {"invoice_settings[default_payment_method]": payment_method_id},
-                )
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "stripe.set_default_payment_method network call failed customer=%s pm=%s",
-                    customer_id,
-                    payment_method_id,
-                )
 
         logger.info("stripe.default_payment_method_set customer=%s pm=%s", customer_id, payment_method_id)
         return PaymentMethodResponse(**new_default.to_dict(), schema_version=_SCHEMA_VERSION)
@@ -1502,6 +1564,52 @@ class StripeService:
             "quantity": quantity,
             "unit_credits": unit_credits,
             "mode": checkout_mode,
+        }
+
+    def create_payment_method_setup_session(
+        self,
+        *,
+        org_id: str,
+        customer_id: str,
+        success_url: str,
+        cancel_url: str,
+    ) -> dict[str, str]:
+        normalized_org_id = str(org_id).strip()
+        normalized_customer_id = str(customer_id).strip()
+        if not normalized_org_id or not normalized_customer_id:
+            raise StripeServiceError("org_id and customer_id are required for payment method setup")
+        if not success_url.strip() or not cancel_url.strip():
+            raise StripeServiceError("success_url and cancel_url are required")
+
+        params = {
+            "mode": StripeCheckoutMode.SETUP.value,
+            "success_url": success_url.strip(),
+            "cancel_url": cancel_url.strip(),
+            "customer": normalized_customer_id,
+            "payment_method_types[0]": "card",
+            "metadata[org_id]": normalized_org_id,
+            "metadata[ironclaw_source]": "ironclaw-security",
+            "metadata[flow]": "saved_payment_method_setup",
+        }
+        try:
+            response = self._get_client().post("/checkout/sessions", params)
+        except StripeAPIError:
+            logger.exception(
+                "stripe.payment_method_setup_session_create_failed org=%s",
+                normalized_org_id,
+            )
+            raise
+
+        session_id = str(response.get("id") or "").strip()
+        checkout_url = str(response.get("url") or "").strip()
+        if not session_id or not checkout_url:
+            raise StripeServiceError("Stripe returned an incomplete payment method setup session.")
+
+        return {
+            "session_id": session_id,
+            "checkout_url": checkout_url,
+            "org_id": normalized_org_id,
+            "mode": StripeCheckoutMode.SETUP.value,
         }
 
     def create_checkout_session(
@@ -2569,6 +2677,15 @@ class StripeService:
         metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
         mode_value = obj.get("mode")
         mode = str(mode_value) if mode_value is not None else ""
+        if mode == StripeCheckoutMode.SETUP.value:
+            if not session_id:
+                raise StripeServiceError("Payment method setup session ID is required.")
+            return {
+                "session_id": session_id,
+                "mode": mode,
+                "payment_method_setup": "completed",
+            }
+
         integrity = self._verify_checkout_integrity_metadata(metadata, mode=mode)
         org_id: str = integrity["org_id"]
         unit_credits: int = integrity["unit_credits"]

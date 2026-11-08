@@ -239,6 +239,58 @@ class TestResolveCustomerIdNone:
         assert body["customer_id"] is None
 
 
+class TestPaymentMethodSetupSession:
+    def test_creates_no_charge_setup_session_for_authenticated_customer(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.get_or_create_stripe_customer.return_value = CUSTOMER_ID
+        mock_svc.create_payment_method_setup_session.return_value = {
+            "session_id": "cs_setup_test_001",
+            "checkout_url": "https://checkout.stripe.com/c/setup_test_001",
+            "org_id": ORG_ID,
+            "mode": "setup",
+        }
+
+        response = client.post(
+            _billing_path("/payment-methods/setup-session"),
+            json={
+                "successUrl": _ALLOWED_SUCCESS_URL,
+                "cancelUrl": _ALLOWED_CANCEL_URL,
+            },
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 201
+        assert response.json()["mode"] == "setup"
+        mock_svc.get_or_create_stripe_customer.assert_called_once()
+        mock_svc.create_payment_method_setup_session.assert_called_once_with(
+            org_id=ORG_ID,
+            customer_id=CUSTOMER_ID,
+            success_url=_ALLOWED_SUCCESS_URL,
+            cancel_url=_ALLOWED_CANCEL_URL,
+        )
+
+    def test_rejects_untrusted_setup_redirect_host(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        response = client.post(
+            _billing_path("/payment-methods/setup-session"),
+            json={
+                "successUrl": "https://attacker.example/complete",
+                "cancelUrl": _ALLOWED_CANCEL_URL,
+            },
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 422
+        mock_svc.get_or_create_stripe_customer.assert_not_called()
+        mock_svc.create_payment_method_setup_session.assert_not_called()
+
+
 class TestDebitUnits:
     def test_debit_units_calls_svc_with_amount_keyword(self, client: TestClient, mock_svc: MagicMock) -> None:
         mock_svc.debit_units.return_value = _make_balance_response(balance=490)
@@ -1166,6 +1218,20 @@ class TestAdditionalRoutes:
 
     def test_set_default_payment_method_success(self, client: TestClient, mock_svc: MagicMock) -> None:
         mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+        mock_svc.list_payment_methods.return_value = [
+            _obj_with_to_dict(
+                payment_method_id=PM_ID,
+                customer_id=CUSTOMER_ID,
+                type="card",
+                brand="visa",
+                last4="4242",
+                exp_month=12,
+                exp_year=2030,
+                is_default=False,
+                created_at="2026-06-28T00:00:00Z",
+                schema_version="1.0",
+            )
+        ]
         mock_svc.set_default_payment_method.return_value = _obj_with_to_dict(
             payment_method_id=PM_ID,
             customer_id=CUSTOMER_ID,

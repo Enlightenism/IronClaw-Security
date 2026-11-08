@@ -308,6 +308,39 @@ class TestCustomerLinkPersistence:
         assert svc_wired.get_or_create_stripe_customer(_ORG) == _CUSTOMER_ID
         mock_client.post.assert_not_called()
 
+    def test_customer_creation_uses_stable_stripe_idempotency_key(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.post.return_value = {"id": _CUSTOMER_ID}
+
+        assert svc_wired.get_or_create_stripe_customer(_ORG) == _CUSTOMER_ID
+
+        call = mock_client.post.call_args
+        assert call.kwargs["idempotency_key"].startswith("ironclaw-customer-")
+        assert len(call.kwargs["idempotency_key"]) == len("ironclaw-customer-") + 64
+
+    def test_customer_link_write_failure_is_not_cached_when_durable_storage_required(
+        self,
+        svc: StripeService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("IRONCLAW_PERSISTENCE_MODE", "supabase")
+        monkeypatch.setattr("app.services.stripe_service._should_use_memory_fallback", lambda: False)
+
+        class _BrokenClient:
+            def table(self, _name: str):
+                raise RuntimeError("database unavailable")
+
+        monkeypatch.setattr("app.services.stripe_service.get_supabase_service_client", lambda: _BrokenClient())
+
+        with pytest.raises(StripeServiceError, match="could not be persisted"):
+            svc.register_customer_mapping(_ORG, _CUSTOMER_ID)
+
+        assert _ORG not in svc._org_customer_map
+        assert _CUSTOMER_ID not in svc._customer_org_map
+
 
 class TestUnitsForTokensBoundary:
     def test_zero_tokens_returns_zero_units(self) -> None:
@@ -1503,69 +1536,65 @@ class TestDetachPaymentMethod:
 
 
 class TestListPaymentMethods:
-    def _seed_payment_methods(self, svc: StripeService, count: int = 3) -> list[str]:
-        ids = []
-        for i in range(count):
-            pm_id = f"pm_svctest_list_{i:03d}"
-            svc._payment_methods[pm_id] = _PaymentMethodRecord(
-                payment_method_id=pm_id,
-                customer_id=_CUSTOMER_ID,
-                type="card",
-                brand="visa",
-                last4=str(1000 + i),
-                exp_month=12,
-                exp_year=2028,
-                is_default=(i == 0),
-                created_at="2026-01-01T00:00:00Z",
-            )
-            ids.append(pm_id)
+    def _configure_stripe_methods(self, mock_client: MagicMock, customer_id: str = _CUSTOMER_ID, count: int = 3) -> list[str]:
+        ids = [f"pm_svctest_list_{i:03d}" for i in range(count)]
+        mock_client.get.side_effect = [
+            {"invoice_settings": {"default_payment_method": ids[0] if ids else None}},
+            {
+                "data": [
+                    {
+                        "id": method_id,
+                        "type": "card",
+                        "customer": customer_id,
+                        "created": 1767225600 + index,
+                        "card": {
+                            "brand": "visa",
+                            "last4": str(1000 + index),
+                            "exp_month": 12,
+                            "exp_year": 2028,
+                        },
+                    }
+                    for index, method_id in enumerate(ids)
+                ]
+            },
+        ]
         return ids
 
-    def test_list_payment_methods_returns_list(self, svc: StripeService) -> None:
-        self._seed_payment_methods(svc)
-        result = svc.list_payment_methods(customer_id=_CUSTOMER_ID)
+    def test_list_payment_methods_returns_list(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        self._configure_stripe_methods(mock_client)
+        result = svc_wired.list_payment_methods(customer_id=_CUSTOMER_ID)
         assert isinstance(result, list)
 
-    def test_list_payment_methods_returns_correct_count(self, svc: StripeService) -> None:
-        self._seed_payment_methods(svc, count=3)
-        result = svc.list_payment_methods(customer_id=_CUSTOMER_ID)
+    def test_list_payment_methods_returns_correct_count(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        self._configure_stripe_methods(mock_client, count=3)
+        result = svc_wired.list_payment_methods(customer_id=_CUSTOMER_ID)
         assert len(result) == 3
 
-    def test_list_payment_methods_empty_for_unknown_customer(self, svc: StripeService) -> None:
-        result = svc.list_payment_methods(customer_id="cus_unknown_xyz")
+    def test_list_payment_methods_empty_for_unknown_customer(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.get.side_effect = [
+            {"invoice_settings": {}},
+            {"data": []},
+        ]
+        result = svc_wired.list_payment_methods(customer_id="cus_unknown_xyz")
         assert result == []
 
-    def test_list_payment_methods_returns_payment_method_responses(self, svc: StripeService) -> None:
-        self._seed_payment_methods(svc, count=2)
-        result = svc.list_payment_methods(customer_id=_CUSTOMER_ID)
+    def test_list_payment_methods_returns_payment_method_responses(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        self._configure_stripe_methods(mock_client, count=2)
+        result = svc_wired.list_payment_methods(customer_id=_CUSTOMER_ID)
         for item in result:
             assert isinstance(item, PaymentMethodResponse)
 
-    def test_list_payment_methods_isolated_per_customer(self, svc: StripeService) -> None:
-        svc._payment_methods["pm_cust_a_001"] = _PaymentMethodRecord(
-            payment_method_id="pm_cust_a_001",
-            customer_id="cus_a",
-            type="card",
-            brand="visa",
-            last4="1111",
-            exp_month=1,
-            exp_year=2030,
-            is_default=False,
-            created_at="2026-01-01T00:00:00Z",
-        )
-        svc._payment_methods["pm_cust_b_001"] = _PaymentMethodRecord(
-            payment_method_id="pm_cust_b_001",
-            customer_id="cus_b",
-            type="card",
-            brand="mastercard",
-            last4="2222",
-            exp_month=2,
-            exp_year=2031,
-            is_default=False,
-            created_at="2026-01-01T00:00:00Z",
-        )
-        assert len(svc.list_payment_methods("cus_a")) == 1
-        assert len(svc.list_payment_methods("cus_b")) == 1
+    def test_list_payment_methods_isolated_per_customer(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.get.side_effect = [
+            {"invoice_settings": {}},
+            {"data": [{"id": "pm_cust_a_001", "type": "card", "customer": "cus_a", "card": {"brand": "visa"}}]},
+            {"invoice_settings": {}},
+            {"data": [{"id": "pm_cust_b_001", "type": "card", "customer": "cus_b", "card": {"brand": "mastercard"}}]},
+        ]
+        assert len(svc_wired.list_payment_methods("cus_a")) == 1
+        assert len(svc_wired.list_payment_methods("cus_b")) == 1
+        assert svc_wired._payment_methods["pm_cust_a_001"].customer_id == "cus_a"
+        assert svc_wired._payment_methods["pm_cust_b_001"].customer_id == "cus_b"
 
 
 # ===========================================================================
@@ -1601,28 +1630,32 @@ class TestSetDefaultPaymentMethod:
         )
         return pm1, pm2
 
-    def test_set_default_marks_correct_pm_as_default(self, svc: StripeService) -> None:
-        pm1, pm2 = self._seed_two_pms(svc)
-        svc.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=pm2)
-        assert svc._payment_methods[pm2].is_default is True
+    def test_set_default_marks_correct_pm_as_default(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        pm1, pm2 = self._seed_two_pms(svc_wired)
+        svc_wired.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=pm2)
+        assert svc_wired._payment_methods[pm2].is_default is True
+        mock_client.post.assert_called_once_with(
+            f"/customers/{_CUSTOMER_ID}",
+            {"invoice_settings[default_payment_method]": pm2},
+        )
 
-    def test_set_default_unsets_previous_default(self, svc: StripeService) -> None:
-        pm1, pm2 = self._seed_two_pms(svc)
-        svc.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=pm2)
-        assert svc._payment_methods[pm1].is_default is False
+    def test_set_default_unsets_previous_default(self, svc_wired: StripeService) -> None:
+        pm1, pm2 = self._seed_two_pms(svc_wired)
+        svc_wired.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=pm2)
+        assert svc_wired._payment_methods[pm1].is_default is False
 
-    def test_set_default_missing_pm_raises_not_found(self, svc: StripeService) -> None:
+    def test_set_default_missing_pm_raises_not_found(self, svc_wired: StripeService) -> None:
         with pytest.raises(StripePaymentMethodNotFoundError):
-            svc.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id="pm_ghost_999")
+            svc_wired.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id="pm_ghost_999")
 
-    def test_set_default_not_found_is_service_error(self, svc: StripeService) -> None:
+    def test_set_default_not_found_is_service_error(self, svc_wired: StripeService) -> None:
         with pytest.raises(StripeServiceError):
-            svc.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id="pm_ghost_999")
+            svc_wired.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id="pm_ghost_999")
 
-    def test_set_default_only_one_default_per_customer(self, svc: StripeService) -> None:
-        pm1, pm2 = self._seed_two_pms(svc)
-        svc.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=pm2)
-        defaults = [pm for pm in svc._payment_methods.values() if pm.customer_id == _CUSTOMER_ID and pm.is_default]
+    def test_set_default_only_one_default_per_customer(self, svc_wired: StripeService) -> None:
+        pm1, pm2 = self._seed_two_pms(svc_wired)
+        svc_wired.set_default_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=pm2)
+        defaults = [pm for pm in svc_wired._payment_methods.values() if pm.customer_id == _CUSTOMER_ID and pm.is_default]
         assert len(defaults) == 1
         assert defaults[0].payment_method_id == pm2
 
@@ -1732,6 +1765,64 @@ class TestListSubscriptionsForOrg:
         result_other = svc_with_sub.list_subscriptions_for_org(org_id="org-other-999")
         assert all(r.org_id == _ORG for r in result_main)
         assert all(r.org_id == "org-other-999" for r in result_other)
+
+
+# ===========================================================================
+# Payment method setup checkout
+# ===========================================================================
+
+
+class TestPaymentMethodSetupSession:
+    def test_setup_session_has_no_line_items_or_payment_intent(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.post.return_value = {
+            "id": "cs_setup_test_001",
+            "url": "https://checkout.stripe.com/c/setup_test_001",
+        }
+
+        result = svc_wired.create_payment_method_setup_session(
+            org_id=_ORG,
+            customer_id=_CUSTOMER_ID,
+            success_url="https://example.com/dashboard?card_setup=success",
+            cancel_url="https://example.com/dashboard?card_setup=cancel",
+        )
+
+        assert result == {
+            "session_id": "cs_setup_test_001",
+            "checkout_url": "https://checkout.stripe.com/c/setup_test_001",
+            "org_id": _ORG,
+            "mode": "setup",
+        }
+        params = mock_client.post.call_args.args[1]
+        assert params["mode"] == "setup"
+        assert params["customer"] == _CUSTOMER_ID
+        assert params["payment_method_types[0]"] == "card"
+        assert not any(key.startswith("line_items[") for key in params)
+        assert not any(key.startswith("payment_intent_data[") for key in params)
+
+    def test_setup_session_webhook_does_not_credit_wallet(self, svc: StripeService) -> None:
+        result = svc.handle_webhook_event(
+            {
+                "id": "evt_setup_test_001",
+                "type": StripeWebhookEventType.CHECKOUT_SESSION_COMPLETED.value,
+                "data": {
+                    "object": {
+                        "id": "cs_setup_test_001",
+                        "mode": "setup",
+                        "customer": _CUSTOMER_ID,
+                        "payment_status": "no_payment_required",
+                        "metadata": {"flow": "saved_payment_method_setup"},
+                    }
+                },
+            }
+        )
+
+        assert result["action"] == "processed"
+        assert result["detail"]["payment_method_setup"] == "completed"
+        assert svc.get_unit_balance(_ORG).balance == 0
 
 
 # ===========================================================================

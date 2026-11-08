@@ -382,6 +382,99 @@ incident criteria.
 
 ---
 
+### Payments and wallet
+
+The dashboard billing endpoints require an authenticated user. Package and
+billing-owner details are resolved by the server; clients must not supply a
+Stripe customer ID or wallet owner as proof of ownership.
+
+#### `POST /billing/checkout/sessions`
+
+Create a one-time Stripe Checkout session for a server-configured IronClaw
+package. `packageId` is the canonical package ID (for example, `pkg_5000`);
+the server selects the Stripe price and unit amount.
+
+**Request body**
+```json
+{
+  "packageId": "pkg_5000",
+  "successUrl": "https://moving-forward.ca/dashboard?session_id={CHECKOUT_SESSION_ID}",
+  "cancelUrl": "https://moving-forward.ca/dashboard?checkout=cancel",
+  "quantity": 1
+}
+```
+
+**Response `201`**
+```json
+{
+  "session_id": "cs_...",
+  "checkout_url": "https://checkout.stripe.com/...",
+  "org_id": "authenticated-organization",
+  "mode": "payment",
+  "price_id": "price_...",
+  "quantity": 1,
+  "unit_credits": 5000
+}
+```
+
+#### Stripe webhook configuration
+
+Configure Stripe to send events to **`POST /webhooks/stripe`**. This is the
+single canonical webhook destination; the legacy
+`/billing/webhooks/stripe` and `/api/billing/webhooks/stripe` aliases exist
+only for compatibility and should not be configured as additional Stripe
+destinations. The endpoint verifies the raw request body against Stripe's
+`Stripe-Signature` header. Signature rejection returns `400`; retryable
+dispatch or fulfillment failures return `502` so Stripe can retry delivery.
+
+#### Checkout status and recovery
+
+The webhook is the normal fulfillment path. If the browser returns before the
+webhook finishes, or fulfillment needs recovery, use these authenticated
+endpoints:
+
+1. `GET /billing/checkout/sessions/{session_id}/status` checks the Stripe
+   session and reports `status`, `payment_status`, `unit_credits`, and
+   `units_credited`.
+2. If `payment_status` is `paid` but `units_credited` is missing or incomplete,
+   call `POST /billing/checkout/sessions/{session_id}/reconcile`. This safely
+   reruns the canonical fulfillment path, including wallet credit and paid
+   install-key issuance.
+3. Read `GET /billing/units/ledger` to confirm the resulting `balance` and
+   ledger entries. A repeated reconcile for the same paid session is
+   idempotent and must not credit units twice.
+
+Do not treat the browser redirect alone as proof of payment. Stripe's verified
+session status is authoritative.
+
+#### Saved payment methods
+
+`POST /billing/payment-methods/setup-session` creates a hosted Stripe Setup
+Checkout session without charging the customer. Its request body contains
+`successUrl` and `cancelUrl`; URLs must use an allowed application host. The
+`201` response contains `session_id`, `checkout_url`, `org_id`, and `mode`.
+After setup, `GET /billing/payment-methods` retrieves the saved methods from
+Stripe and returns redacted card details such as brand, last four digits, and
+expiration. The dashboard displays them through
+`GET /api/ui/billing/payment-methods?organizationid={organization_id}` (also
+available at `/ui/billing/payment-methods`), whose `methods` array is sourced
+from Stripe when a customer is mapped. A retrieval error is returned as `502`,
+not an empty success response. Full card numbers are never stored by IronClaw.
+
+#### Database deployment prerequisites
+
+Apply and verify these migrations in the production Supabase project before
+relying on durable wallet fulfillment and saved-card records:
+
+- [`017_unit_wallets.sql`](../supabase/migrations/017_unit_wallets.sql) — persistent wallet balances and ledger.
+- [`018_billing_payment_methods.sql`](../supabase/migrations/018_billing_payment_methods.sql) — redacted saved-payment-method metadata.
+- [`019_atomic_unit_wallet_credits.sql`](../supabase/migrations/019_atomic_unit_wallet_credits.sql) — atomic, retry-safe wallet credits.
+
+Check the Supabase migration history for all three before enabling this
+workflow in production; repository presence alone does not confirm deployment.
+
+---
+
 ## Error Shapes
 
 All error responses follow this shape:

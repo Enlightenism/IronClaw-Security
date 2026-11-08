@@ -400,6 +400,21 @@ class AttachPaymentMethodRequest(BaseModel):
         return value.strip()
 
 
+class PaymentMethodSetupSessionRequest(BaseModel):
+    success_url: str = Field(..., alias="successUrl")
+    cancel_url: str = Field(..., alias="cancelUrl")
+
+    @field_validator("success_url", "cancel_url")
+    @classmethod
+    def validate_redirect_url(cls, value: str) -> str:
+        normalized = value.strip()
+        if not _is_valid_http_url(normalized):
+            raise ValueError("invalid redirect URL, must be absolute http(s) URL")
+        if not _is_allowed_redirect_url(normalized):
+            raise ValueError("invalid redirect URL host")
+        return normalized
+
+
 class SetDefaultPaymentMethodRequest(BaseModel):
     payment_method_id: str = Field(..., alias="paymentMethodId", description="Stripe PaymentMethod ID to set as default")
 
@@ -1031,6 +1046,67 @@ async def get_or_create_customer_api(
     return await get_or_create_customer(body=body, request=request, auth=auth, svc=svc)
 
 
+@router.post(
+    "/payment-methods/setup-session",
+    status_code=status.HTTP_201_CREATED,
+    tags=["billing", "payment-methods"],
+)
+async def create_payment_method_setup_session(
+    body: PaymentMethodSetupSessionRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    if getattr(auth, "authenticated", False) is not True:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "authentication_required"},
+        )
+
+    owner_key = resolve_authenticated_billing_owner(auth)
+    if not owner_key:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "verified_billing_identity_required"},
+        )
+
+    org_id = _resolve_org_id(auth) or owner_key
+    try:
+        customer_id = svc.get_or_create_stripe_customer(
+            org_id=org_id,
+            metadata={"owner_key": owner_key},
+        )
+        result = svc.create_payment_method_setup_session(
+            org_id=org_id,
+            customer_id=customer_id,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+        )
+    except StripeServiceError as exc:
+        logger.exception("stripe_router.payment_method_setup_session_failed org_id=%s", org_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "error": "payment_method_setup_unavailable",
+                "detail": "Stripe could not start secure card setup. Please try again.",
+            },
+        ) from exc
+
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content=result)
+
+
+@api_router.post(
+    "/payment-methods/setup-session",
+    status_code=status.HTTP_201_CREATED,
+    tags=["billing", "payment-methods"],
+)
+async def create_payment_method_setup_session_api(
+    body: PaymentMethodSetupSessionRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await create_payment_method_setup_session(body=body, auth=auth, svc=svc)
+
+
 @router.post("/checkout/sessions", status_code=status.HTTP_201_CREATED, tags=["billing", "checkout"])
 async def create_checkout_session(
     request: Request,
@@ -1558,11 +1634,23 @@ async def attach_payment_method_api_alias(
 @router.post("/payment-methods/{payment_method_id}/detach", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def detach_payment_method(
     payment_method_id: str,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
+    org_id = _require_org_id(auth=auth, request=request)
+    customer_id = _require_customer_id(svc, org_id)
     try:
+        methods = svc.list_payment_methods(customer_id=customer_id)
+        if not any(method.payment_method_id == payment_method_id for method in methods):
+            raise _http_404(
+                "Payment method not found.",
+                code="payment_method_not_found",
+                extra={"payment_method_id": payment_method_id},
+            )
         result = svc.detach_payment_method(payment_method_id=payment_method_id)
+    except HTTPException:
+        raise
     except StripePaymentMethodNotFoundError as exc:
         raise _http_404(
             "Payment method not found.",
@@ -1581,10 +1669,11 @@ async def detach_payment_method(
 @api_router.post("/payment-methods/{payment_method_id}/detach", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
 async def detach_payment_method_api(
     payment_method_id: str,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
-    return await detach_payment_method(payment_method_id=payment_method_id, auth=auth, svc=svc)
+    return await detach_payment_method(payment_method_id=payment_method_id, request=request, auth=auth, svc=svc)
 
 
 @router.get("/payment-methods", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
@@ -1601,7 +1690,13 @@ async def list_payment_methods(
             content={"org_id": org_id, "customer_id": None, "payment_methods": []},
         )
 
-    results = svc.list_payment_methods(customer_id=customer_id)
+    try:
+        results = svc.list_payment_methods(customer_id=customer_id)
+    except StripeServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "payment_methods_fetch_error", "detail": str(exc)},
+        ) from exc
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content={
@@ -1632,7 +1727,16 @@ async def set_default_payment_method(
     org_id = _require_org_id(auth=auth, request=request)
     customer_id = _require_customer_id(svc, org_id)
     try:
+        methods = svc.list_payment_methods(customer_id=customer_id)
+        if not any(method.payment_method_id == payment_method_id for method in methods):
+            raise _http_404(
+                "Payment method not found.",
+                code="payment_method_not_found",
+                extra={"payment_method_id": payment_method_id},
+            )
         result = svc.set_default_payment_method(customer_id=customer_id, payment_method_id=payment_method_id)
+    except HTTPException:
+        raise
     except StripePaymentMethodNotFoundError as exc:
         raise _http_404(
             "Payment method not found.",

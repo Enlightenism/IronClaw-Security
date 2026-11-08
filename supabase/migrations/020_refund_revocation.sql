@@ -1,4 +1,4 @@
--- 015_refund_revocation.sql
+-- 020_refund_revocation.sql
 -- Refund revocation: map purchases to Stripe payment intents, keep a refund audit trail,
 -- and allow unredeemed install-key claim tokens to be revoked when a refund is processed.
 

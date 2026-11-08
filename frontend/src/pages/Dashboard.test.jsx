@@ -52,6 +52,26 @@ jest.mock("@/lib/api", () => ({
     get: (...args) => mockApiGet(...args),
     post: (...args) => mockApiPost(...args),
   },
+  payments: {
+    getStatus: (sessionId) =>
+      mockApiGet(
+        `/billing/checkout/sessions/${encodeURIComponent(sessionId)}/status`,
+      ),
+    reconcile: (sessionId) =>
+      mockApiPost(
+        `/billing/checkout/sessions/${encodeURIComponent(sessionId)}/reconcile`,
+      ),
+  },
+  paymentMethods: {
+    createSetupSession: (successUrl, cancelUrl) =>
+      mockApiPost("/billing/payment-methods/setup-session", {
+        successUrl,
+        cancelUrl,
+      }),
+  },
+  wallet: {
+    getLedger: () => mockApiGet("/billing/units/ledger"),
+  },
 }));
 
 // ── sonner mock ─────────────────────────────────────────────────────────
@@ -131,6 +151,7 @@ const DEFAULT_DASH = {
   wallet_units: 100,
   organization_id: "org-abc",
   last_payment: null,
+  wallet_history: [],
   has_paid: false,
   metadata: {
     install_key_dashboard: {
@@ -147,6 +168,32 @@ const DEFAULT_DASH = {
 const DEFAULT_TOKENS = {
   status: "locked",
   install_metadata: {},
+};
+
+const PAID_TOKENS = {
+  status: "ok",
+  install_metadata: Object.fromEntries(
+    [
+      "openclaw",
+      "claude_code",
+      "cursor",
+      "goose",
+      "gemini_cli",
+      "copilot",
+      "hermes",
+    ].map((program) => {
+      const slug = program.replace(/_/g, "-");
+      return [
+        slug,
+        {
+          available: true,
+          program,
+          slug,
+          key_id: `ik_${program}_test`,
+        },
+      ];
+    }),
+  ),
 };
 
 const makeInstallMetadata = (programs) =>
@@ -186,6 +233,11 @@ function setupDefaultApis() {
     if (url === "/dashboard/overview") {
       return Promise.resolve({ data: DEFAULT_DASH });
     }
+    if (url === "/billing/units/ledger") {
+      return Promise.resolve({
+        data: { balance: DEFAULT_DASH.wallet_units, ledger: [] },
+      });
+    }
     if (url === "/integrations/token") {
       return Promise.resolve({ data: DEFAULT_TOKENS });
     }
@@ -193,6 +245,48 @@ function setupDefaultApis() {
   });
 
   mockApiPost.mockImplementation((url) => {
+    if (url === "/events/simulate") {
+      return Promise.resolve({ data: {} });
+    }
+    return Promise.resolve({ data: {} });
+  });
+}
+
+function setupPaidCheckoutApis(sessionId) {
+  mockApiGet.mockImplementation((url) => {
+    if (url === `/billing/checkout/sessions/${sessionId}/status`) {
+      return Promise.resolve({ data: { payment_status: "paid" } });
+    }
+    if (url === "/dashboard/overview") {
+      return Promise.resolve({
+        data: { ...DEFAULT_DASH, wallet_units: 5000 },
+      });
+    }
+    if (url === "/billing/units/ledger") {
+      return Promise.resolve({
+        data: {
+          balance: 5000,
+          ledger: [
+            {
+              entry_id: `credit-${sessionId}`,
+              delta: 5000,
+              reference_id: sessionId,
+            },
+          ],
+        },
+      });
+    }
+    if (url === "/integrations/token") {
+      return Promise.resolve({ data: PAID_TOKENS });
+    }
+    return Promise.reject(new Error(`Unexpected GET ${url}`));
+  });
+  mockApiPost.mockImplementation((url) => {
+    if (url === `/billing/checkout/sessions/${sessionId}/reconcile`) {
+      return Promise.resolve({
+        data: { payment_confirmed: true, units_credited: 5000 },
+      });
+    }
     if (url === "/events/simulate") {
       return Promise.resolve({ data: {} });
     }
@@ -412,7 +506,7 @@ describe("loading spinner", () => {
 // WalletCard organizationId prop
 // =============================================================================
 
-describe("WalletCard organizationId prop", () => {
+describe("WalletCard billing owner and wallet history props", () => {
   it("passes organizationId from dashboard API response to WalletCard", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
@@ -435,7 +529,72 @@ describe("WalletCard organizationId prop", () => {
     expect(mockCapturedWalletProps.organizationId).toBe("org-abc");
   });
 
-  it("passes organizationId='org-001' fallback when API response has no organization_id", async () => {
+  it("updates WalletCard organizationId when refreshed dashboard data changes", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    let overviewRequests = 0;
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        overviewRequests += 1;
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            organization_id:
+              overviewRequests === 1 ? "org-initial" : "org-refreshed",
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await renderDashboard();
+    await waitFor(() => {
+      expect(mockCapturedWalletProps.organizationId).toBe("org-initial");
+    });
+
+    await user.click(screen.getByTestId("refresh-btn"));
+
+    await waitFor(() => {
+      expect(mockCapturedWalletProps.organizationId).toBe("org-refreshed");
+    });
+  });
+
+  it("uses the verified wallet owner from dashboard metadata", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            organization_id: "placeholder",
+            metadata: {
+              ...DEFAULT_DASH.metadata,
+              owner_key: "buyer@ironclaw.test",
+            },
+            wallet_history: [{ entry_type: "credit", units: 5000 }],
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await renderDashboard();
+
+    await waitFor(() => {
+      expect(mockCapturedWalletProps).not.toBeNull();
+    });
+
+    expect(mockCapturedWalletProps.organizationId).toBe("buyer@ironclaw.test");
+    expect(mockCapturedWalletProps.walletHistory).toEqual([
+      { entry_type: "credit", units: 5000 },
+    ]);
+  });
+
+  it("passes an empty organizationId when the API response has no owner", async () => {
     const { organization_id: _unused, ...dashWithoutOrg } = DEFAULT_DASH;
 
     mockApiGet.mockImplementation((url) => {
@@ -454,10 +613,10 @@ describe("WalletCard organizationId prop", () => {
       expect(mockCapturedWalletProps).not.toBeNull();
     });
 
-    expect(mockCapturedWalletProps.organizationId).toBe("org-001");
+    expect(mockCapturedWalletProps.organizationId).toBe("");
   });
 
-  it("passes organizationId='org-001' fallback when organization_id is null", async () => {
+  it("passes an empty organizationId when organization_id is null", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
@@ -476,7 +635,7 @@ describe("WalletCard organizationId prop", () => {
       expect(mockCapturedWalletProps).not.toBeNull();
     });
 
-    expect(mockCapturedWalletProps.organizationId).toBe("org-001");
+    expect(mockCapturedWalletProps.organizationId).toBe("");
   });
 });
 
@@ -543,25 +702,7 @@ describe("session_id payment polling", () => {
 
   it("fires toast.loading and navigates replace on session_id in URL", async () => {
     mockLocation.search = "?session_id=cs_test_abc&package_id=pkg_5000";
-
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({ data: DEFAULT_DASH });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({ data: DEFAULT_TOKENS });
-      }
-      if (url === "/billing/checkout/sessions/cs_test_abc/status") {
-        return Promise.resolve({
-          data: {
-            payment_status: "paid",
-            units_credited: 5000,
-            unit_credits: 5000,
-          },
-        });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
+    setupPaidCheckoutApis("cs_test_abc");
 
     await renderDashboard();
 
@@ -574,25 +715,7 @@ describe("session_id payment polling", () => {
 
   it("fires toast.success with unit count when payment_status is paid", async () => {
     mockLocation.search = "?session_id=cs_test_abc&package_id=pkg_5000";
-
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({ data: DEFAULT_DASH });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({ data: DEFAULT_TOKENS });
-      }
-      if (url === "/billing/checkout/sessions/cs_test_abc/status") {
-        return Promise.resolve({
-          data: {
-            payment_status: "paid",
-            units_credited: 5000,
-            unit_credits: 5000,
-          },
-        });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
+    setupPaidCheckoutApis("cs_test_abc");
 
     await renderDashboard();
 
@@ -605,31 +728,83 @@ describe("session_id payment polling", () => {
 
   it("dismisses the pay toast before showing success", async () => {
     mockLocation.search = "?session_id=cs_test_abc&package_id=pkg_5000";
-
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/billing/checkout/sessions/cs_test_abc/status") {
-        return Promise.resolve({
-          data: {
-            payment_status: "paid",
-            units_credited: 5000,
-            unit_credits: 5000,
-          },
-        });
-      }
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({ data: DEFAULT_DASH });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({ data: DEFAULT_TOKENS });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
+    setupPaidCheckoutApis("cs_test_abc");
 
     await renderDashboard();
 
     await waitFor(() => {
       expect(mockToastDismiss).toHaveBeenCalledWith("pay");
     });
+  });
+
+  it("reconciles wallet credits and refreshes all paid platform keys before reporting success", async () => {
+    mockLocation.search = "?session_id=cs_test_abc&package_id=pkg_5000";
+    setupPaidCheckoutApis("cs_test_abc");
+
+    await renderDashboard();
+
+    await waitFor(() => {
+      expect(mockToastSuccess).toHaveBeenCalledWith(
+        expect.stringContaining("install keys refreshed"),
+      );
+    });
+
+    expect(mockApiPost).toHaveBeenCalledWith(
+      "/billing/checkout/sessions/cs_test_abc/reconcile",
+    );
+    expect(mockApiGet).toHaveBeenCalledWith("/billing/units/ledger");
+    expect(mockCapturedWalletProps.balance).toBe(5000);
+    for (const program of [
+      "openclaw",
+      "claude_code",
+      "cursor",
+      "goose",
+      "gemini_cli",
+      "copilot",
+      "hermes",
+    ]) {
+      expect(mockCapturedIntegrationProps[program].available).toBe(true);
+      expect(
+        screen.getByTestId(
+          `${mockCapturedIntegrationProps[program].testid}-generate`,
+        ),
+      ).toBeEnabled();
+    }
+  });
+
+  it("retries reconciliation after a fulfillment error", async () => {
+    mockLocation.search = "?session_id=cs_test_abc&package_id=pkg_5000";
+    setupPaidCheckoutApis("cs_test_abc");
+    let reconcileAttempts = 0;
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/sessions/cs_test_abc/reconcile") {
+        reconcileAttempts += 1;
+        if (reconcileAttempts === 1) {
+          return Promise.reject(new Error("Temporary fulfillment error"));
+        }
+        return Promise.resolve({
+          data: { payment_confirmed: true, units_credited: 5000 },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDashboard();
+    await waitFor(() => {
+      expect(reconcileAttempts).toBe(1);
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(2000);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(mockToastSuccess).toHaveBeenCalledWith(
+        expect.stringContaining("5,000"),
+      );
+    });
+    expect(reconcileAttempts).toBe(2);
   });
 
   it("does not mark checkout as paid when Stripe's session ID is missing", async () => {
@@ -645,6 +820,22 @@ describe("session_id payment polling", () => {
     expect(mockToastSuccess).not.toHaveBeenCalledWith(
       expect.stringContaining("Checkout completed"),
     );
+  });
+});
+
+describe("card setup return", () => {
+  it("refreshes the dashboard after successful no-charge card setup", async () => {
+    mockLocation.search = "?card_setup=success";
+
+    await renderDashboard();
+
+    await waitFor(() => {
+      expect(mockToastSuccess).toHaveBeenCalledWith(
+        "Card setup completed. Refreshing saved payment methods.",
+      );
+    });
+    expect(mockApiGet).toHaveBeenCalledWith("/dashboard/overview");
+    expect(mockNavigate).toHaveBeenCalledWith("/dashboard", { replace: true });
   });
 });
 
@@ -704,6 +895,24 @@ describe("handlePurchase — invalid package", () => {
 
 describe("handlePurchase — valid package", () => {
   it("calls api.post /billing/checkout/sessions with the current request shape used by Dashboard", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: {
+            ...DEFAULT_DASH,
+            organization_id: "placeholder-org",
+            metadata: {
+              ...DEFAULT_DASH.metadata,
+              owner_key: "buyer@ironclaw.test",
+            },
+          },
+        });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
     mockApiPost.mockImplementation((url) => {
       if (url === "/billing/checkout/sessions") {
         return Promise.resolve({
@@ -732,7 +941,7 @@ describe("handlePurchase — valid package", () => {
         "http://localhost/dashboard?checkout=success&package_id=pkg_5000&session_id={CHECKOUT_SESSION_ID}",
       cancelUrl:
         "http://localhost/dashboard?checkout=cancel&package_id=pkg_5000",
-      organizationId: "org-abc",
+      organizationId: "buyer@ironclaw.test",
       mode: "payment",
       quantity: 1,
     });
@@ -928,6 +1137,38 @@ describe("handlePurchase — valid package", () => {
         expect.stringContaining("Missing checkout URL"),
       );
     });
+  });
+
+  it("starts hosted card setup without creating a paid package checkout", async () => {
+    const setupUrl = "https://checkout.stripe.com/c/setup_test_001";
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/payment-methods/setup-session") {
+        return Promise.resolve({ data: { checkout_url: setupUrl } });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDashboard();
+    await waitFor(() => {
+      expect(mockCapturedWalletProps).not.toBeNull();
+    });
+
+    await act(async () => {
+      await mockCapturedWalletProps.onAddPaymentMethod();
+    });
+
+    expect(mockApiPost).toHaveBeenCalledWith(
+      "/billing/payment-methods/setup-session",
+      {
+        successUrl: "http://localhost/dashboard?card_setup=success",
+        cancelUrl: "http://localhost/dashboard?card_setup=cancel",
+      },
+    );
+    expect(mockApiPost).not.toHaveBeenCalledWith(
+      "/billing/checkout/sessions",
+      expect.anything(),
+    );
+    expect(globalThis.location.assign).toHaveBeenCalledWith(setupUrl);
   });
 });
 

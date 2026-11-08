@@ -701,6 +701,10 @@ class TestDashboardWalletKPIs:
             assert body["last_payment"]["label"] == newer_package["name"]
             assert body["last_payment"]["amount"] == float(newer_package["price_usd"])
             assert body["last_payment"]["units"] == newer_package["units"]
+            assert body["wallet_history"][0]["entry_type"] == "debit"
+            assert body["wallet_history"][1]["package_id"] == newer_package["package_id"]
+            assert "metadata" not in body["wallet_history"][1]
+            mock_wallet.list_ledger_entries.assert_called_once_with(owner_key=_OWNER_KEY, limit=500)
         finally:
             _clear_registry_overrides()
 

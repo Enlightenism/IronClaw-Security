@@ -10,7 +10,7 @@ import RuntimeBlocksCard from "@/components/dashboard/RuntimeBlocksCard";
 import SecurityAnalysis from "@/components/dashboard/SecurityAnalysis";
 import WalletCard from "@/components/dashboard/WalletCard";
 import { useAuth } from "@/context/AuthContext";
-import api from "@/lib/api";
+import api, { paymentMethods, payments, wallet } from "@/lib/api";
 
 const ATTACKS_PAGE_SIZE = 25;
 const DASHBOARD_LOGO_SRC = "/images/logo128pxl.svg";
@@ -283,6 +283,7 @@ const Dashboard = () => {
   const [loadingData, setLoadingData] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [purchasingId, setPurchasingId] = useState(null);
+  const [savingPaymentMethod, setSavingPaymentMethod] = useState(false);
   const [pointerGlow, setPointerGlow] = useState({ x: 50, y: 25 });
   const [scrollShift, setScrollShift] = useState(0);
   const [_paymentState, setPaymentState] = useState("idle");
@@ -424,8 +425,10 @@ const Dashboard = () => {
       ]);
       setData(dash.data);
       setTokens(tok.data);
+      return { dashboard: dash.data, tokens: tok.data };
     } catch {
       // handled by interceptor
+      return null;
     } finally {
       setLoadingData(false);
       setRefreshing(false);
@@ -507,6 +510,27 @@ const Dashboard = () => {
           pollPayment(sessionId, attempts + 1);
         }, 2000);
       };
+      const reportFailure = (message) => {
+        toast.dismiss("pay");
+        setPaymentState("fulfillment_error");
+        setPurchasingId(null);
+        toast.error(
+          `${message} Use Retry sync to try again, or contact support with checkout session ${sessionId}.`,
+          {
+            action: {
+              label: "Retry sync",
+              onClick: () => pollPayment(sessionId, 0),
+            },
+          },
+        );
+      };
+      const retryOrReport = (message) => {
+        if (attempts + 1 < maxAttempts) {
+          scheduleRetry();
+          return;
+        }
+        reportFailure(message);
+      };
 
       if (!sessionId) {
         toast.dismiss("pay");
@@ -515,49 +539,79 @@ const Dashboard = () => {
       }
 
       if (attempts >= maxAttempts) {
-        toast.dismiss("pay");
-        toast.error("Payment status check timed out. Refresh in a moment.");
+        reportFailure("Payment status could not be verified.");
         return;
       }
 
       try {
-        const { data: status } = await api.get(
-          `/billing/checkout/sessions/${encodeURIComponent(sessionId)}/status`,
-        );
+        const { data: status } = await payments.getStatus(sessionId);
 
         if (String(status?.payment_status || "").toLowerCase() === "paid") {
-          let credited = Number(status?.units_credited ?? 0);
-          if (!Number.isSafeInteger(credited) || credited <= 0) {
-            try {
-              const { data: reconciled } = await api.post(
-                `/billing/checkout/sessions/${encodeURIComponent(sessionId)}/reconcile`,
+          try {
+            const { data: reconciled } = await payments.reconcile(sessionId);
+            const credited = Number(reconciled?.units_credited ?? 0);
+            if (
+              reconciled?.payment_confirmed !== true ||
+              !Number.isSafeInteger(credited) ||
+              credited <= 0
+            ) {
+              retryOrReport(
+                "Payment is confirmed, but wallet and install-key fulfillment are still pending.",
               );
-              credited = Number(reconciled?.units_credited ?? 0);
-            } catch {
-              // Keep polling below; the webhook may still credit the wallet.
-            }
-          }
-          if (!Number.isSafeInteger(credited) || credited <= 0) {
-            // Stripe reports paid before the webhook credits the wallet; keep polling.
-            if (attempts + 1 < maxAttempts) {
-              scheduleRetry();
               return;
             }
-            toast.dismiss("pay");
-            toast.error(
-              "Payment is confirmed, but units have not been added yet. Refresh in a moment.",
+
+            const [snapshot, ledgerResponse] = await Promise.all([
+              fetchDashboard({ silent: true }),
+              wallet.getLedger(),
+            ]);
+            if (!snapshot) {
+              throw new Error("Dashboard and install-key refresh failed.");
+            }
+
+            const walletBalance = Number(ledgerResponse?.data?.balance);
+            const dashboardBalance = Number(snapshot.dashboard?.wallet_units);
+            if (
+              !Number.isSafeInteger(walletBalance) ||
+              !Number.isSafeInteger(dashboardBalance) ||
+              walletBalance !== dashboardBalance
+            ) {
+              throw new Error(
+                "Wallet balance views have not synchronized yet.",
+              );
+            }
+
+            const installMetadata = snapshot.tokens?.install_metadata;
+            const installKeysReady = INSTALL_KEY_PROGRAMS.every(
+              ({ program }) => {
+                const slug = program.replace(/_/g, "-");
+                const key = installMetadata?.[slug];
+                return (
+                  key?.available === true &&
+                  key.program === program &&
+                  key.slug === slug &&
+                  typeof key.key_id === "string" &&
+                  key.key_id.length > 0
+                );
+              },
             );
-            await fetchDashboard();
+            if (!installKeysReady) {
+              throw new Error(
+                "One or more paid platform keys are not available yet.",
+              );
+            }
+
+            setPaymentState("paid");
+            toast.dismiss("pay");
+            toast.success(
+              `Payment confirmed — ${credited.toLocaleString()} units added and install keys refreshed!`,
+            );
             setPurchasingId(null);
-            return;
+          } catch (error) {
+            retryOrReport(
+              `Payment is confirmed, but wallet or install-key fulfillment is incomplete. ${getErrorMessage(error)}`,
+            );
           }
-          setPaymentState("paid");
-          toast.dismiss("pay");
-          toast.success(
-            `Payment confirmed — ${credited.toLocaleString()} units added!`,
-          );
-          await fetchDashboard();
-          setPurchasingId(null);
           return;
         }
 
@@ -570,9 +624,11 @@ const Dashboard = () => {
         }
 
         setPaymentState("pending");
-        scheduleRetry();
-      } catch {
-        scheduleRetry();
+        retryOrReport("Payment status is still pending.");
+      } catch (error) {
+        retryOrReport(
+          `Payment status could not be verified. ${getErrorMessage(error)}`,
+        );
       }
     },
     [fetchDashboard],
@@ -591,9 +647,25 @@ const Dashboard = () => {
     const params = new URLSearchParams(location.search);
     const sessionId = params.get("session_id");
     const checkoutState = params.get("checkout");
+    const cardSetupState = params.get("card_setup");
 
     if (!sessionId) {
       polledRef.current = false;
+    }
+
+    if (cardSetupState === "success") {
+      setSavingPaymentMethod(false);
+      toast.success("Card setup completed. Refreshing saved payment methods.");
+      fetchDashboard({ silent: true });
+      navigate("/dashboard", { replace: true });
+      return;
+    }
+
+    if (cardSetupState === "cancel") {
+      setSavingPaymentMethod(false);
+      toast.error("Card setup was canceled. No charge was made.");
+      navigate("/dashboard", { replace: true });
+      return;
     }
 
     if (checkoutState === "cancel") {
@@ -634,7 +706,8 @@ const Dashboard = () => {
       setPurchasingId(packageId);
 
       try {
-        const organizationId = data?.organization_id ?? "org-001";
+        const organizationId =
+          data?.metadata?.owner_key ?? data?.organization_id ?? "";
         const successUrl = new URL(`${globalThis.location.origin}/dashboard`);
         successUrl.searchParams.set("checkout", "success");
         successUrl.searchParams.set("package_id", packageId);
@@ -671,6 +744,34 @@ const Dashboard = () => {
     },
     [data],
   );
+
+  const handleAddPaymentMethod = useCallback(async () => {
+    setSavingPaymentMethod(true);
+    const successUrl = new URL(`${globalThis.location.origin}/dashboard`);
+    successUrl.searchParams.set("card_setup", "success");
+    const cancelUrl = new URL(`${globalThis.location.origin}/dashboard`);
+    cancelUrl.searchParams.set("card_setup", "cancel");
+
+    try {
+      const { data: result } = await paymentMethods.createSetupSession(
+        successUrl.toString(),
+        cancelUrl.toString(),
+      );
+      const redirectUrl = result?.checkout_url || result?.url;
+      if (!redirectUrl) {
+        throw new Error("Missing secure card setup URL.");
+      }
+
+      if (typeof globalThis.location.assign === "function") {
+        globalThis.location.assign(redirectUrl);
+      } else {
+        globalThis.location.href = redirectUrl;
+      }
+    } catch (error) {
+      setSavingPaymentMethod(false);
+      toast.error(getErrorMessage(error));
+    }
+  }, []);
 
   const handleSignOut = useCallback(async () => {
     await logout();
@@ -763,18 +864,27 @@ const Dashboard = () => {
     () => ({
       balance: data?.wallet_units ?? 0,
       lastPayment: data?.last_payment,
+      walletHistory: Array.isArray(data?.wallet_history)
+        ? data.wallet_history
+        : [],
       hasPaid: data?.has_paid,
       onPurchase: handlePurchase,
       purchasingId,
-      organizationId: data?.organization_id ?? "org-001",
+      onAddPaymentMethod: handleAddPaymentMethod,
+      addingPaymentMethod: savingPaymentMethod,
+      organizationId: data?.metadata?.owner_key ?? data?.organization_id ?? "",
     }),
     [
       data?.has_paid,
       data?.last_payment,
+      data?.metadata?.owner_key,
       data?.organization_id,
       data?.wallet_units,
+      data?.wallet_history,
+      handleAddPaymentMethod,
       handlePurchase,
       purchasingId,
+      savingPaymentMethod,
     ],
   );
 

@@ -25,7 +25,9 @@ from app.core.unit_wallet import (
     units_required_for_tokens,
 )
 from app.persistencebootstrap import build_store
+from app.routers.stripe_router import get_stripe_service
 from app.services.install_key_provisioning import InstallKeyProvisioningService
+from app.services.stripe_service import StripeService, StripeServiceError
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ router = APIRouter(
     tags=["billing"],
     dependencies=[Depends(require_auth_context)],
 )
+webhook_router = APIRouter(prefix="/billing", tags=["billing"])
 
 _PURCHASES_MAX_SIZE: int = 1_000
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -785,6 +788,7 @@ def _process_checkout_session_completed_webhook(
     *,
     raw_webhook: bytes | None = None,
     stripe_signature: str | None = None,
+    stripe_service: StripeService | None = None,
 ) -> dict[str, Any]:
     if raw_webhook is not None:
         _verify_stripe_signature(raw_webhook, stripe_signature)
@@ -799,6 +803,13 @@ def _process_checkout_session_completed_webhook(
 
     event_data = ((payload or {}).get("data") or {}).get("object") or (payload or {}).get("object") or {}
     session_id = str(event_data.get("id") or (payload or {}).get("id") or "").strip()
+    if str(event_data.get("mode") or "").strip().lower() == "setup":
+        return {
+            "status": "ignored",
+            "event_type": event_type,
+            "session_id": session_id,
+            "reason": "payment_method_setup",
+        }
     if not session_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -816,6 +827,34 @@ def _process_checkout_session_completed_webhook(
         }
 
     metadata = dict(event_data.get("metadata") or {})
+    if "ironclaw_checkout_version" in metadata:
+        if raw_webhook is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"status": "invalid_signature", "reason": "missing_stripe_signature"},
+            )
+        try:
+            result = (stripe_service or get_stripe_service()).handle_webhook_event(payload)
+            if result.get("action") == "error":
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "status": "checkout_fulfillment_failed",
+                        "reason": "canonical_fulfillment_retryable",
+                        "session_id": session_id,
+                    },
+                )
+            return result
+        except StripeServiceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "status": "checkout_fulfillment_failed",
+                    "reason": "canonical_fulfillment_retryable",
+                    "session_id": session_id,
+                },
+            ) from exc
+
     purchase_id = str(metadata.get("purchase_id") or "").strip()
     buyer_email = str((event_data.get("customer_details") or {}).get("email") or metadata.get("buyer_email") or "").strip().lower()
     owner_key = str(metadata.get("owner_key") or buyer_email or "").strip().lower()
@@ -1067,7 +1106,7 @@ def handle_checkout_session_completed_webhook(payload: dict[str, Any]) -> dict[s
     return _process_checkout_session_completed_webhook(payload)
 
 
-@router.post(
+@webhook_router.post(
     "/webhook",
     status_code=status.HTTP_200_OK,
     summary="Process a Stripe checkout completion webhook for a pending purchase",
@@ -1075,6 +1114,7 @@ def handle_checkout_session_completed_webhook(payload: dict[str, Any]) -> dict[s
 async def _handle_checkout_session_completed_webhook_route(
     request: Request,
     stripe_signature: str | None = Header(default=None, alias="stripe-signature"),
+    stripe_service: StripeService = Depends(get_stripe_service),
 ) -> dict[str, Any]:
     raw_webhook = await request.body()
     if not raw_webhook:
@@ -1096,10 +1136,15 @@ async def _handle_checkout_session_completed_webhook_route(
             detail={"status": "invalid_payload", "reason": "event_payload_must_be_object"},
         )
 
-    return _process_checkout_session_completed_webhook(payload, raw_webhook=raw_webhook, stripe_signature=stripe_signature)
+    return _process_checkout_session_completed_webhook(
+        payload,
+        raw_webhook=raw_webhook,
+        stripe_signature=stripe_signature,
+        stripe_service=stripe_service,
+    )
 
 
-@router.post(
+@webhook_router.post(
     "/webhook/stripe",
     status_code=status.HTTP_200_OK,
     summary="Legacy Stripe webhook alias",
@@ -1107,10 +1152,12 @@ async def _handle_checkout_session_completed_webhook_route(
 async def handle_checkout_session_completed_webhook_legacy(
     request: Request,
     stripe_signature: str | None = Header(default=None, alias="stripe-signature"),
+    stripe_service: StripeService = Depends(get_stripe_service),
 ) -> dict[str, Any]:
     return await _handle_checkout_session_completed_webhook_route(
         request=request,
         stripe_signature=stripe_signature,
+        stripe_service=stripe_service,
     )
 
 

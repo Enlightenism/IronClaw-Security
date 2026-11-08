@@ -9,6 +9,7 @@ import pytest
 
 from app.core.billing import PLAN_DEFINITIONS
 from app.main import app as _app
+from app.routers.stripe_router import get_stripe_service
 from app.supabaseclient import TOKENS_PER_UNIT
 from app.ui.billing.payment_methods import (
     _BRAND_DISPLAY,
@@ -477,12 +478,52 @@ class TestUiWriteRoutes:
         body = resp.json()
         assert "detail" in body
 
-    def test_patch_default_returns_503_without_supabase(self, authed_client: TestClient) -> None:
+    def test_patch_default_updates_stripe_without_supabase(
+        self,
+        authed_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        set_default_calls: list[tuple[str, str]] = []
+
+        def set_default(*, customer_id: str, payment_method_id: str) -> None:
+            set_default_calls.append((customer_id, payment_method_id))
+
+        def list_payment_methods(*, customer_id: str) -> list[dict[str, object]]:
+            assert customer_id == "cus-001"
+            return [
+                {
+                    "id": "pm-001",
+                    "type": "card",
+                    "brand": "visa",
+                    "last4": "4242",
+                    "exp_month": 12,
+                    "exp_year": 2028,
+                    "is_default": False,
+                }
+            ]
+
+        stripe_service = SimpleNamespace(
+            resolve_customer_id=lambda _organizationid: "cus-001",
+            list_payment_methods=list_payment_methods,
+            set_default_payment_method=set_default,
+        )
+        monkeypatch.setitem(
+            _app.dependency_overrides,
+            get_stripe_service,
+            lambda: stripe_service,
+        )
+        monkeypatch.setattr(
+            "app.ui.billing.payment_methods.is_supabase_configured",
+            lambda: False,
+        )
+
         resp = authed_client.patch(
             "/ui/billing/payment-methods/pm-001/default",
             params={"organizationid": "org-001"},
         )
-        assert resp.status_code == 503
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "updated"
+        assert set_default_calls == [("cus-001", "pm-001")]
 
     def test_delete_returns_400_without_resolved_org(
         self,

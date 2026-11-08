@@ -11,7 +11,11 @@ from pydantic import BaseModel, Field
 from app.core.auth import AuthContext, get_auth_context
 from app.core.billing import resolve_authenticated_billing_owner
 from app.routers.stripe_router import get_stripe_service
-from app.services.stripe_service import StripeService, StripeServiceError
+from app.services.stripe_service import (
+    StripePaymentMethodNotFoundError,
+    StripeService,
+    StripeServiceError,
+)
 from app.supabaseclient import TOKENS_PER_UNIT, get_supabase_client, is_supabase_configured
 from app.ui.billing.package import (
     PackageCatalogueEntry,
@@ -623,25 +627,9 @@ async def get_payment_methods(
 ) -> BillingPaymentMethodsResponse | BillingPaymentMethodsNotFoundResponse:
     organizationid = _require_org_id(auth=auth, request=request)
 
-    supabase_unavailable = _ensure_supabase_available_for_read(organizationid)
-    if supabase_unavailable is not None:
-        return supabase_unavailable
-
     env = _get_environment()
     generatedat = datetime.now(UTC).isoformat()
     live_catalogue = _build_package_catalogue()
-
-    try:
-        methods = _fetch_payment_methods_from_supabase(organizationid=organizationid)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={
-                "error": "payment_methods_fetch_error",
-                "detail": str(exc),
-                "organizationid": organizationid,
-            },
-        ) from exc
 
     try:
         stripe_customer_id, stripe_methods = _fetch_payment_methods_from_stripe(
@@ -667,10 +655,22 @@ async def get_payment_methods(
             },
         ) from exc
 
-    # Stripe holds the card details (brand, last4, expiry); Supabase rows only hold the
-    # org-to-method link, so Stripe wins whenever the customer has saved methods.
-    if stripe_methods:
+    if stripe_customer_id:
         methods = stripe_methods
+    elif is_supabase_configured():
+        try:
+            methods = _fetch_payment_methods_from_supabase(organizationid=organizationid)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "error": "payment_methods_fetch_error",
+                    "detail": str(exc),
+                    "organizationid": organizationid,
+                },
+            ) from exc
+    else:
+        methods = []
 
     org_name = _fetch_org_name(organizationid, stripe_customer_id)
     methodcount = len(methods)
@@ -850,9 +850,8 @@ async def set_default_payment_method(
     methodid: str,
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
 ) -> SetDefaultPaymentMethodResponse:
-    _ensure_supabase_available_for_write()
-
     organizationid = _require_org_id(auth=auth, request=request)
     env = _get_environment()
     generatedat = datetime.now(UTC).isoformat()
@@ -867,12 +866,9 @@ async def set_default_payment_method(
             },
         )
 
-    client = get_supabase_client()
-    table = _supabase_table(client)
-
     try:
-        current_methods = _fetch_payment_methods_from_supabase(organizationid=organizationid)
-        if not any(method.methodid == normalized_methodid for method in current_methods):
+        customer_id, current_methods = _fetch_payment_methods_from_stripe(svc=svc, organizationid=organizationid)
+        if not customer_id or not any(method.methodid == normalized_methodid for method in current_methods):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={
@@ -880,27 +876,27 @@ async def set_default_payment_method(
                     "detail": f"Payment method '{normalized_methodid}' was not found for organization '{organizationid}'.",
                 },
             )
+        svc.set_default_payment_method(customer_id=customer_id, payment_method_id=normalized_methodid)
+        if is_supabase_configured():
+            table = _supabase_table(get_supabase_client())
+            reset_query = table.update({"is_default": False})
+            reset_query = _apply_eq(reset_query, "organization_id", organizationid)
+            _safe_execute(reset_query)
 
-        reset_query = table.update({"is_default": False})
-        reset_query = _apply_eq(reset_query, "organization_id", organizationid)
-        _safe_execute(reset_query)
-
-        set_query = table.update({"is_default": True})
-        set_query = _apply_eq(set_query, "organization_id", organizationid)
-        set_query = _apply_eq(set_query, "stripe_payment_method_id", normalized_methodid)
-        set_result = _safe_execute(set_query)
-
-        updated_row = _safe_single_row(set_result)
-        if updated_row is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    "error": "payment_method_not_found",
-                    "detail": f"Payment method '{normalized_methodid}' was not found for organization '{organizationid}'.",
-                },
-            )
+            set_query = table.update({"is_default": True})
+            set_query = _apply_eq(set_query, "organization_id", organizationid)
+            set_query = _apply_eq(set_query, "stripe_payment_method_id", normalized_methodid)
+            _safe_execute(set_query)
     except HTTPException:
         raise
+    except StripePaymentMethodNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "payment_method_not_found",
+                "detail": f"Payment method '{normalized_methodid}' was not found for organization '{organizationid}'.",
+            },
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -941,9 +937,8 @@ async def delete_payment_method(
     methodid: str,
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
 ) -> DeletePaymentMethodResponse:
-    _ensure_supabase_available_for_write()
-
     organizationid = _require_org_id(auth=auth, request=request)
     env = _get_environment()
     generatedat = datetime.now(UTC).isoformat()
@@ -958,12 +953,9 @@ async def delete_payment_method(
             },
         )
 
-    client = get_supabase_client()
-    table = _supabase_table(client)
-
     try:
-        current_methods = _fetch_payment_methods_from_supabase(organizationid=organizationid)
-        if not any(method.methodid == normalized_methodid for method in current_methods):
+        customer_id, current_methods = _fetch_payment_methods_from_stripe(svc=svc, organizationid=organizationid)
+        if not customer_id or not any(method.methodid == normalized_methodid for method in current_methods):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={
@@ -971,13 +963,22 @@ async def delete_payment_method(
                     "detail": f"Payment method '{normalized_methodid}' was not found for organization '{organizationid}'.",
                 },
             )
-
-        delete_query = table.delete()
-        delete_query = _apply_eq(delete_query, "organization_id", organizationid)
-        delete_query = _apply_eq(delete_query, "stripe_payment_method_id", normalized_methodid)
-        _safe_execute(delete_query)
+        svc.detach_payment_method(payment_method_id=normalized_methodid)
+        if is_supabase_configured():
+            delete_query = _supabase_table(get_supabase_client()).delete()
+            delete_query = _apply_eq(delete_query, "organization_id", organizationid)
+            delete_query = _apply_eq(delete_query, "stripe_payment_method_id", normalized_methodid)
+            _safe_execute(delete_query)
     except HTTPException:
         raise
+    except StripePaymentMethodNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": "payment_method_not_found",
+                "detail": f"Payment method '{normalized_methodid}' was not found for organization '{organizationid}'.",
+            },
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

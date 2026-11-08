@@ -6,7 +6,6 @@ import {
   Loader2,
   Zap,
   ShieldCheck,
-  PlusCircle,
   Trash2,
   Star,
   AlertTriangle,
@@ -267,10 +266,8 @@ const StripeKeyWarning = ({ stripeMode }) => {
 
 const PaymentMethodPanel = ({
   organizationId,
-  onPurchase,
-  onAddCard,
-  purchasingId,
-  defaultPackageId,
+  onAddPaymentMethod,
+  addingPaymentMethod = false,
 }) => {
   const cachedEntry = useMemo(
     () =>
@@ -285,6 +282,7 @@ const PaymentMethodPanel = ({
   const [loadingMethods, setLoadingMethods] = useState(
     () => !cachedEntry && !!organizationId,
   );
+  const [methodsError, setMethodsError] = useState("");
   const [actionId, setActionId] = useState(null);
   const hasFetchedRef = useRef(!!cachedEntry);
 
@@ -310,11 +308,18 @@ const PaymentMethodPanel = ({
         const normalized = normalizePaymentMethodsResponse(data);
         setMethods(normalized.methods);
         setDefaultId(normalized.defaultId);
+        setMethodsError("");
         syncCache(normalized.methods, normalized.defaultId);
         hasFetchedRef.current = true;
-      } catch {
+      } catch (error) {
         setMethods([]);
         setDefaultId(null);
+        setMethodsError(
+          typeof error?.response?.data?.detail === "string"
+            ? error.response.data.detail
+            : "Saved payment methods could not be loaded. Try again.",
+        );
+        hasFetchedRef.current = false;
       } finally {
         setLoadingMethods(false);
       }
@@ -337,6 +342,7 @@ const PaymentMethodPanel = ({
     hasFetchedRef.current = false;
     setMethods([]);
     setDefaultId(null);
+    setMethodsError("");
     setLoadingMethods(true);
     fetchMethods();
   }, [organizationId, fetchMethods]);
@@ -346,6 +352,29 @@ const PaymentMethodPanel = ({
     await fetchMethods({ force: true });
   }, [fetchMethods]);
 
+  const addPaymentMethodButton = (
+    <button
+      type="button"
+      onClick={onAddPaymentMethod}
+      disabled={
+        !organizationId ||
+        typeof onAddPaymentMethod !== "function" ||
+        addingPaymentMethod
+      }
+      data-testid="add-payment-method"
+      className="self-start rounded-md border border-[#FFD700]/30 px-3 py-1.5 text-xs font-semibold text-[#FFD700] transition hover:bg-[#FFD700]/10 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {addingPaymentMethod ? (
+        <span className="inline-flex items-center gap-2">
+          <Loader2 size={12} className="animate-spin" />
+          Opening secure setup…
+        </span>
+      ) : (
+        "Add card securely"
+      )}
+    </button>
+  );
+
   const handleSetDefault = async (methodId) => {
     if (!organizationId || !methodId) return;
 
@@ -354,20 +383,10 @@ const PaymentMethodPanel = ({
       await paymentMethods.setDefault(methodId, organizationId);
       toast.success("Default payment method updated.");
       await refreshMethods();
-    } catch (e) {
-      try {
-        await api.post(
-          `/billing/payment-methods/${encodeURIComponent(methodId)}/set-default?organizationid=${encodeURIComponent(organizationId)}`,
-        );
-        toast.success("Default payment method updated.");
-        await refreshMethods();
-      } catch (fallbackError) {
-        toast.error(
-          fallbackError?.response?.data?.detail ??
-            e?.response?.data?.detail ??
-            "Could not update default method.",
-        );
-      }
+    } catch (error) {
+      toast.error(
+        error?.response?.data?.detail ?? "Could not update default method.",
+      );
     } finally {
       setActionId(null);
     }
@@ -381,20 +400,10 @@ const PaymentMethodPanel = ({
       await paymentMethods.delete(methodId, organizationId);
       toast.success("Payment method removed.");
       await refreshMethods();
-    } catch (e) {
-      try {
-        await api.post(
-          `/billing/payment-methods/${encodeURIComponent(methodId)}/detach?organizationid=${encodeURIComponent(organizationId)}`,
-        );
-        toast.success("Payment method removed.");
-        await refreshMethods();
-      } catch (fallbackError) {
-        toast.error(
-          fallbackError?.response?.data?.detail ??
-            e?.response?.data?.detail ??
-            "Could not remove payment method.",
-        );
-      }
+    } catch (error) {
+      toast.error(
+        error?.response?.data?.detail ?? "Could not remove payment method.",
+      );
     } finally {
       setActionId(null);
     }
@@ -402,18 +411,44 @@ const PaymentMethodPanel = ({
 
   if (loadingMethods) {
     return (
-      <div className="flex items-center gap-2 py-2 text-xs text-[#737373]">
-        <Loader2 size={13} className="animate-spin" /> Loading saved methods…
+      <div className="flex flex-col items-start gap-2">
+        <div className="flex items-center gap-2 py-2 text-xs text-[#737373]">
+          <Loader2 size={13} className="animate-spin" /> Loading saved methods…
+        </div>
+        {addPaymentMethodButton}
+      </div>
+    );
+  }
+
+  if (methodsError) {
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <div
+          className="flex items-center justify-between gap-3 text-xs text-[#FCA5A5]"
+          role="alert"
+        >
+          <span>{methodsError}</span>
+          <button
+            type="button"
+            onClick={refreshMethods}
+            className="rounded-md border border-white/15 px-2 py-1 text-[#BFC1C2] hover:text-white"
+          >
+            Retry
+          </button>
+        </div>
+        {addPaymentMethodButton}
       </div>
     );
   }
 
   if (methods.length === 0) {
     return (
-      <div className="flex items-center gap-2 text-xs text-[#737373]">
-        <Zap size={14} className="text-[#FFD700]" />
-        No payment method on file yet. Complete a purchase to securely save one
-        with Stripe.
+      <div className="flex flex-col items-start gap-2">
+        <div className="flex items-center gap-2 text-xs text-[#737373]">
+          <Zap size={14} className="text-[#FFD700]" />
+          No saved card yet. Add one securely without making a purchase.
+        </div>
+        {addPaymentMethodButton}
       </div>
     );
   }
@@ -507,22 +542,7 @@ const PaymentMethodPanel = ({
           </div>
         );
       })}
-
-      <button
-        type="button"
-        onClick={() => {
-          if (onAddCard) {
-            onAddCard();
-          } else if (defaultPackageId) {
-            onPurchase(defaultPackageId);
-          }
-        }}
-        disabled={!!purchasingId || !defaultPackageId}
-        data-testid="add-new-card-btn"
-        className="flex items-center gap-1.5 self-end rounded-lg border border-[#E5E4E2]/20 px-3 py-1.5 text-xs text-[#BFC1C2] transition hover:border-[#FFD700]/50 hover:text-white disabled:opacity-50"
-      >
-        <PlusCircle size={12} /> Add new card
-      </button>
+      {addPaymentMethodButton}
     </div>
   );
 };
@@ -530,12 +550,16 @@ const PaymentMethodPanel = ({
 const WalletCard = ({
   balance = 0,
   lastPayment,
+  walletHistory = [],
   hasPaid,
   onPurchase,
   purchasingId,
-  organizationId = "org-001",
+  onAddPaymentMethod,
+  addingPaymentMethod = false,
+  organizationId = "",
 }) => {
   const animated = useCountUp(balance, 1500, [balance]);
+  const recentWalletHistory = Array.isArray(walletHistory) ? walletHistory : [];
   const stripePublishableKey = getStripePublishableKey();
   const stripeMode = getStripeMode(stripePublishableKey);
   const [tiers, setTiers] = useState([]);
@@ -546,8 +570,6 @@ const WalletCard = ({
     () => new Set(tiers.map((tier) => tier.id)),
     [tiers],
   );
-  const defaultPackageId = tiers[0]?.id ?? null;
-
   useEffect(() => {
     let active = true;
 
@@ -594,12 +616,6 @@ const WalletCard = ({
     [onPurchase, packageIds],
   );
 
-  const handleAddCardClick = useCallback(() => {
-    if (defaultPackageId && packageIds.has(defaultPackageId)) {
-      onPurchase(defaultPackageId);
-    }
-  }, [defaultPackageId, onPurchase, packageIds]);
-
   return (
     <div className="glass-platinum rounded-2xl p-7" data-testid="wallet-card">
       <div className="mb-6 flex items-center justify-between">
@@ -631,6 +647,54 @@ const WalletCard = ({
       <p className="mb-6 text-xs text-[#737373]">
         Pay only for what you use. No subscription, no recurring charge.
       </p>
+
+      {recentWalletHistory.length > 0 && (
+        <section
+          className="mb-6 rounded-xl border border-white/10 bg-black/30 p-4"
+          data-testid="wallet-history"
+          aria-label="Recent wallet activity"
+        >
+          <h3 className="mb-3 text-xs uppercase tracking-widest text-[#BFC1C2]">
+            Recent activity
+          </h3>
+          <div className="flex flex-col gap-2">
+            {recentWalletHistory.slice(0, 5).map((entry, index) => {
+              const units = Number(entry?.units);
+              const safeUnits = Number.isFinite(units) ? Math.abs(units) : 0;
+              const isDebit =
+                String(entry?.entry_type).toLowerCase() === "debit";
+              const balanceAfter = Number(entry?.balance_after);
+              return (
+                <div
+                  key={`${entry?.created_at ?? "wallet-entry"}-${index}`}
+                  className="flex items-center justify-between gap-3 text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-white">
+                      {entry?.label || "Wallet activity"}
+                    </div>
+                    <div className="text-[#737373]">
+                      {entry?.created_at || ""}
+                      {Number.isFinite(balanceAfter) &&
+                        ` · balance ${balanceAfter.toLocaleString()}`}
+                    </div>
+                  </div>
+                  <span
+                    className={
+                      isDebit
+                        ? "shrink-0 text-[#BFC1C2]"
+                        : "shrink-0 text-[#22C55E]"
+                    }
+                  >
+                    {isDebit ? "−" : "+"}
+                    {safeUnits.toLocaleString()} units
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {catalogueLoading && (
@@ -710,10 +774,8 @@ const WalletCard = ({
 
         <PaymentMethodPanel
           organizationId={organizationId}
-          onPurchase={handleCheckoutPurchase}
-          onAddCard={handleAddCardClick}
-          purchasingId={purchasingId}
-          defaultPackageId={defaultPackageId}
+          onAddPaymentMethod={onAddPaymentMethod}
+          addingPaymentMethod={addingPaymentMethod}
         />
       </div>
     </div>

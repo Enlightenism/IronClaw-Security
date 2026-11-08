@@ -41,6 +41,7 @@ import {
   integrations,
   paymentMethods,
   payments,
+  wallet,
 } from "@/lib/api";
 
 // ── Capture everything at import time, before clearMocks wipes history ──────
@@ -390,7 +391,7 @@ describe("payments.getStatus", () => {
     mockGet.mockResolvedValueOnce({ data: {} });
     payments.getStatus("cs_test_abc123");
     expect(mockGet).toHaveBeenCalledWith(
-      "/billing/checkout/sessions/cs_test_abc123",
+      "/billing/checkout/sessions/cs_test_abc123/status",
     );
   });
 
@@ -432,6 +433,44 @@ describe("paymentMethods.list", () => {
     expect(url).toContain(
       `organizationid=${encodeURIComponent("org/special chars&more")}`,
     );
+  });
+});
+
+describe("paymentMethods.createSetupSession", () => {
+  it("requests a hosted setup session without any package purchase fields", () => {
+    mockPost.mockResolvedValueOnce({ data: {} });
+    paymentMethods.createSetupSession(
+      "https://moving-forward.ca/dashboard?card_setup=success",
+      "https://moving-forward.ca/dashboard?card_setup=cancel",
+    );
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/billing/payment-methods/setup-session",
+      {
+        successUrl: "https://moving-forward.ca/dashboard?card_setup=success",
+        cancelUrl: "https://moving-forward.ca/dashboard?card_setup=cancel",
+      },
+    );
+  });
+});
+
+describe("payments.reconcile", () => {
+  it("URL-encodes the checkout session ID", () => {
+    mockPost.mockResolvedValueOnce({ data: {} });
+    payments.reconcile("cs/test session");
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/billing/checkout/sessions/cs%2Ftest%20session/reconcile",
+    );
+  });
+});
+
+describe("wallet.getLedger", () => {
+  it("requests the authenticated canonical unit ledger", () => {
+    mockGet.mockResolvedValueOnce({ data: {} });
+    wallet.getLedger();
+
+    expect(mockGet).toHaveBeenCalledWith("/billing/units/ledger");
   });
 });
 

@@ -221,6 +221,32 @@ def _mock_pm_resp(
     }
 
 
+def _configure_mock_payment_method_listing(
+    mock_client: MagicMock,
+    *,
+    methods_by_customer: dict[str, list[dict[str, Any]]] | None = None,
+    default_by_customer: dict[str, str | None] | None = None,
+) -> None:
+    methods_by_customer = methods_by_customer or {}
+    default_by_customer = default_by_customer or {}
+
+    def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        if path.startswith("/customers/"):
+            customer_id = path.rsplit("/", 1)[-1]
+            return {
+                "id": customer_id,
+                "invoice_settings": {
+                    "default_payment_method": default_by_customer.get(customer_id),
+                },
+            }
+        if path == "/payment_methods":
+            customer_id = str((params or {}).get("customer") or "")
+            return {"data": methods_by_customer.get(customer_id, [])}
+        raise AssertionError(f"Unexpected Stripe GET request: {path}")
+
+    mock_client.get.side_effect = _get
+
+
 def _mock_invoice_list(
     customer_id: str = _TEST_CUSTOMER_ID,
     count: int = 2,
@@ -1613,7 +1639,7 @@ class TestServiceReset:
         mock_client.post.return_value = _mock_pm_resp()
         svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
         svc_with_client.reset()
-        assert svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID) == []
+        assert svc_with_client._payment_methods == {}
 
     def test_reset_clears_invoice_cache(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
         svc_with_client.register_customer_mapping(_TEST_ORG, _TEST_CUSTOMER_ID)
@@ -1989,6 +2015,10 @@ class TestPaymentMethods:
 
     def test_attach_payment_method_stores_locally(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
         mock_client.post.return_value = _mock_pm_resp()
+        _configure_mock_payment_method_listing(
+            mock_client,
+            methods_by_customer={_TEST_CUSTOMER_ID: [_mock_pm_resp()]},
+        )
         svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
         methods = svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)
         assert any(m.payment_method_id == _TEST_PM_ID for m in methods)
@@ -2020,6 +2050,10 @@ class TestPaymentMethods:
         mock_client.post.return_value = _mock_pm_resp()
         svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
         mock_client.post.return_value = {}
+        _configure_mock_payment_method_listing(
+            mock_client,
+            methods_by_customer={_TEST_CUSTOMER_ID: []},
+        )
         svc_with_client.detach_payment_method(_TEST_PM_ID)
         methods = svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)
         assert all(m.payment_method_id != _TEST_PM_ID for m in methods)
@@ -2028,11 +2062,23 @@ class TestPaymentMethods:
         with pytest.raises(StripePaymentMethodNotFoundError):
             svc.detach_payment_method("pm_nonexistent")
 
-    def test_list_payment_methods_empty_when_none_attached(self, svc: StripeService) -> None:
-        assert svc.list_payment_methods("cus_empty") == []
+    def test_list_payment_methods_empty_when_none_attached(
+        self,
+        svc_with_client: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        _configure_mock_payment_method_listing(mock_client)
+        assert svc_with_client.list_payment_methods("cus_empty") == []
 
     def test_list_payment_methods_filters_by_customer(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
         mock_client.post.side_effect = [_mock_pm_resp(_TEST_PM_ID, "cus_A"), _mock_pm_resp(_TEST_PM_ID_2, "cus_B")]
+        _configure_mock_payment_method_listing(
+            mock_client,
+            methods_by_customer={
+                "cus_A": [_mock_pm_resp(_TEST_PM_ID, "cus_A")],
+                "cus_B": [_mock_pm_resp(_TEST_PM_ID_2, "cus_B")],
+            },
+        )
         svc_with_client.attach_payment_method("cus_A", _TEST_PM_ID)
         svc_with_client.attach_payment_method("cus_B", _TEST_PM_ID_2)
         methods_a = svc_with_client.list_payment_methods("cus_A")
@@ -2057,6 +2103,16 @@ class TestPaymentMethods:
             _mock_pm_resp(_TEST_PM_ID_2),  # call 3: attach pm2
             {},  # call 4: /customers/{id} for set_default of pm2
         ]
+        _configure_mock_payment_method_listing(
+            mock_client,
+            methods_by_customer={
+                _TEST_CUSTOMER_ID: [
+                    _mock_pm_resp(_TEST_PM_ID),
+                    _mock_pm_resp(_TEST_PM_ID_2),
+                ],
+            },
+            default_by_customer={_TEST_CUSTOMER_ID: _TEST_PM_ID_2},
+        )
         svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID, set_as_default=True)
         svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID_2)
         svc_with_client.set_default_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID_2)

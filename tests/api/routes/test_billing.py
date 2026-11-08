@@ -34,6 +34,7 @@ from app.core.unit_wallet import (
     UnitWalletRegistry,
 )
 from app.main import app as _app  # noqa: E402
+from app.routers.stripe_router import get_stripe_service
 
 _MOCK_API_KEY = "test-api-key"
 _AUTH_HEADERS = {"X-API-Key": _MOCK_API_KEY}
@@ -454,6 +455,122 @@ def test_checkout_session_completed_webhook_fulfills_pending_purchase_and_credit
     credit_entries = [entry for entry in _unit_wallet_module.get_unit_wallet_registry().list_ledger_entries(owner_key=owner, checkout_session_id=checkout_session_id) if entry.entry_type == "credit"]
     assert len(credit_entries) == 1
     assert credit_entries[0].event_id == f"stripe:checkout.complete:{checkout_session_id}"
+
+
+def test_dashboard_checkout_webhook_uses_canonical_fulfillment_without_pending_purchase(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checkout_session_id = "cs_dashboard_checkout_001"
+    payload = {
+        "id": "evt_dashboard_checkout_001",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": checkout_session_id,
+                "payment_status": "paid",
+                "mode": "payment",
+                "metadata": {
+                    "ironclaw_checkout_version": "1",
+                    "owner_key": "dashboard-buyer@ironclaw.test",
+                    "package_id": "pkg_5000",
+                },
+            }
+        },
+    }
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_secret_value_123")
+    canonical_service = MagicMock()
+    canonical_service.handle_webhook_event.return_value = {
+        "status": "fulfilled",
+        "units_credited": 5_000,
+    }
+    _app.dependency_overrides[get_stripe_service] = lambda: canonical_service
+
+    try:
+        client.headers.pop("X-API-Key", None)
+        raw, signature = _signed_stripe_payload(payload, secret="whsec_test_secret_value_123")
+        response = client.post(
+            "/billing/webhook",
+            content=raw,
+            headers={"stripe-signature": signature, "content-type": "application/json"},
+        )
+    finally:
+        _app.dependency_overrides.pop(get_stripe_service, None)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "fulfilled", "units_credited": 5_000}
+    canonical_service.handle_webhook_event.assert_called_once_with(payload)
+
+
+def test_dashboard_checkout_webhook_requests_retry_when_canonical_fulfillment_fails(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "id": "evt_dashboard_checkout_failure_001",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_dashboard_checkout_failure_001",
+                "payment_status": "paid",
+                "mode": "payment",
+                "metadata": {"ironclaw_checkout_version": "1"},
+            }
+        },
+    }
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_secret_value_123")
+    canonical_service = MagicMock()
+    canonical_service.handle_webhook_event.return_value = {"action": "error", "error": "wallet unavailable"}
+    _app.dependency_overrides[get_stripe_service] = lambda: canonical_service
+
+    try:
+        raw, signature = _signed_stripe_payload(payload, secret="whsec_test_secret_value_123")
+        response = client.post(
+            "/billing/webhook",
+            content=raw,
+            headers={"stripe-signature": signature, "content-type": "application/json"},
+        )
+    finally:
+        _app.dependency_overrides.pop(get_stripe_service, None)
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["reason"] == "canonical_fulfillment_retryable"
+
+
+def test_payment_method_setup_webhook_is_ignored_without_wallet_fulfillment(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "id": "evt_setup_session_001",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_setup_session_001",
+                "mode": "setup",
+                "payment_status": "no_payment_required",
+                "metadata": {"flow": "saved_payment_method_setup"},
+            }
+        },
+    }
+    secret = "whsec_setup_test_secret_123"
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", secret)
+    canonical_service = MagicMock()
+    _app.dependency_overrides[get_stripe_service] = lambda: canonical_service
+
+    try:
+        raw, signature = _signed_stripe_payload(payload, secret=secret)
+        response = client.post(
+            "/billing/webhook",
+            content=raw,
+            headers={"stripe-signature": signature, "content-type": "application/json"},
+        )
+    finally:
+        _app.dependency_overrides.pop(get_stripe_service, None)
+
+    assert response.status_code == 200
+    assert response.json()["reason"] == "payment_method_setup"
+    canonical_service.handle_webhook_event.assert_not_called()
 
 
 def test_checkout_session_completed_webhook_rejects_missing_signature_and_replays_are_duplicate(

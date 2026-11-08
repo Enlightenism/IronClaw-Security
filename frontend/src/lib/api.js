@@ -218,6 +218,10 @@ export const dashboard = {
   getRuntimeBlocks: () => api.get("/dashboard/runtime-blocks"),
 };
 
+export const wallet = {
+  getLedger: () => api.get("/billing/units/ledger"),
+};
+
 export const events = {
   simulate: () => api.post("/events/simulate"),
 };
@@ -266,7 +270,13 @@ export const payments = {
   createCheckout: (payload) =>
     api.post("/billing/checkout/sessions", sanitizeCheckoutPayload(payload)),
   getStatus: (sessionId) =>
-    api.get(`/billing/checkout/sessions/${encodeURIComponent(sessionId)}`),
+    api.get(
+      `/billing/checkout/sessions/${encodeURIComponent(sessionId)}/status`,
+    ),
+  reconcile: (sessionId) =>
+    api.post(
+      `/billing/checkout/sessions/${encodeURIComponent(sessionId)}/reconcile`,
+    ),
   getState: (response = {}) => {
     const paymentStatus = getPaymentStatusValue(
       response?.payment_status ?? response?.status ?? response?.state,
@@ -295,6 +305,12 @@ export const payments = {
 
 export const paymentMethods = {
   list: (orgId) => api.get(`/ui/billing/payment-methods?${withOrgId(orgId)}`),
+
+  createSetupSession: (successUrl, cancelUrl) =>
+    api.post("/billing/payment-methods/setup-session", {
+      successUrl,
+      cancelUrl,
+    }),
 
   attach: (paymentMethodId, orgId, options = {}) => {
     const payload = {

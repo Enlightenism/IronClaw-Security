@@ -126,6 +126,15 @@ class DashboardLastPaymentView(BaseModel):
     purchased_at: str
 
 
+class DashboardWalletHistoryEntry(BaseModel):
+    entry_type: str
+    label: str
+    units: int
+    balance_after: int
+    package_id: str | None = None
+    created_at: str
+
+
 class DashboardResponse(BaseModel):
     status: str
     service: str
@@ -134,6 +143,7 @@ class DashboardResponse(BaseModel):
     wallet_units: int = Field(default=0, ge=0)
     has_paid: bool = False
     last_payment: DashboardLastPaymentView | None = None
+    wallet_history: list[DashboardWalletHistoryEntry] = Field(default_factory=list)
     kpis: list[DashboardStatView] = Field(default_factory=list)
     alerts: list[DashboardIncidentView] = Field(default_factory=list)
     activity: list[DashboardQueueView] = Field(default_factory=list)
@@ -545,6 +555,37 @@ def _build_last_payment_view(ledger_entries: list[RegistryUnitLedgerEntry]) -> D
     )
 
 
+def _build_wallet_history_view(
+    ledger_entries: list[RegistryUnitLedgerEntry],
+    *,
+    limit: int = 10,
+) -> list[DashboardWalletHistoryEntry]:
+    recent_entries = sorted(
+        ledger_entries,
+        key=lambda entry: _ledger_timestamp_utc(entry.created_at),
+        reverse=True,
+    )[:limit]
+    history: list[DashboardWalletHistoryEntry] = []
+    package_names = {item["package_id"]: item["name"] for item in UNIT_PACKAGE_CATALOG}
+    for entry in recent_entries:
+        package_id = resolve_package_id(str(entry.metadata.get("package_id") or ""))
+        entry_type = str(entry.entry_type).strip().lower()
+        label = package_names.get(package_id, "") if package_id else ""
+        if not label:
+            label = entry_type.replace("_", " ").title()
+        history.append(
+            DashboardWalletHistoryEntry(
+                entry_type=entry_type,
+                label=label,
+                units=int(entry.units),
+                balance_after=int(entry.balance_after),
+                package_id=package_id,
+                created_at=_ledger_timestamp_utc(entry.created_at).isoformat(),
+            )
+        )
+    return history
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -624,7 +665,9 @@ def get_dashboard_overview(
 
     wallet = wallet_registry.get_wallet(resolved_owner)
     wallet_kpi = _build_wallet_kpi(wallet)
-    last_payment = _build_last_payment_view(wallet_registry.list_ledger_entries(owner_key=resolved_owner, limit=500))
+    ledger_entries = wallet_registry.list_ledger_entries(owner_key=resolved_owner, limit=500)
+    last_payment = _build_last_payment_view(ledger_entries)
+    wallet_history = _build_wallet_history_view(ledger_entries)
     billing_kpi = _build_billing_kpi(billing_registry, resolved_owner)
     install_key_records = install_key_registry.get_keys_for_owner(resolved_owner)
     install_keys = _build_install_key_views(
@@ -674,6 +717,7 @@ def get_dashboard_overview(
         wallet_units=wallet_kpi.unit_balance if wallet_kpi is not None else 0,
         has_paid=last_payment is not None,
         last_payment=last_payment,
+        wallet_history=wallet_history,
         kpis=[
             DashboardStatView(
                 key="protected_requests",

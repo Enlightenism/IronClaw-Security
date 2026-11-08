@@ -214,6 +214,11 @@ def _make_method_dict(
     return payload
 
 
+def _configure_stripe_methods(mock_svc: MagicMock, method_ids: list[str]) -> None:
+    mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
+    mock_svc.list_payment_methods.return_value = [_make_method_dict(methodid=method_id, isdefault=index == 0) for index, method_id in enumerate(method_ids)]
+
+
 def _seed_db_method(
     fake_supabase: FakeSupabaseClient,
     *,
@@ -264,7 +269,7 @@ def test_payment_methods_module_imports_without_stripe_payment_method_view_depen
 # ---------------------------------------------------------------------------
 
 
-def test_get_payment_methods_returns_not_found_when_supabase_not_configured(
+def test_get_payment_methods_is_available_without_supabase(
     client: TestClient,
     mock_svc: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
@@ -273,13 +278,36 @@ def test_get_payment_methods_returns_not_found_when_supabase_not_configured(
     monkeypatch.setattr(payment_methods_module, "is_supabase_configured", lambda: False)
 
     resp = client.get("/ui/billing/payment-methods?organizationid=org-001")
-
     assert resp.status_code == 200
     body = resp.json()
-    assert body["status"] == "not_found"
+    body = resp.json()
     assert body["organizationid"] == "org-001"
-    assert "generatedat" in body
-    assert "environment" in body
+    assert body["organizationid"] == "org-001"
+    assert body["methods"] == []
+
+
+def test_get_payment_methods_returns_stripe_saved_cards_without_supabase(
+    client: TestClient,
+    mock_svc: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_stripe_methods(mock_svc, ["pm_saved_001"])
+    monkeypatch.setattr(payment_methods_module, "is_supabase_configured", lambda: False)
+    supabase_client = MagicMock(side_effect=RuntimeError("Supabase should not be queried"))
+    monkeypatch.setattr(
+        payment_methods_module,
+        "get_supabase_client",
+        supabase_client,
+    )
+
+    response = client.get("/ui/billing/payment-methods?organizationid=org-001")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stripe_customer_id"] == CUSTOMER_ID
+    assert [method["methodid"] for method in body["methods"]] == ["pm_saved_001"]
+    mock_svc.list_payment_methods.assert_called_once_with(customer_id=CUSTOMER_ID)
+    supabase_client.assert_not_called()
 
 
 def test_get_payment_methods_response_shape_when_no_customer_mapping(
@@ -630,6 +658,7 @@ def test_patch_default_sets_requested_row_default(
     mock_svc: MagicMock,
     fake_supabase: FakeSupabaseClient,
 ) -> None:
+    _configure_stripe_methods(mock_svc, ["pm-001", "pm-002"])
     _seed_db_method(
         fake_supabase,
         row_id="row-1",
@@ -653,6 +682,10 @@ def test_patch_default_sets_requested_row_default(
     row_2 = next(row for row in rows if row["id"] == "row-2")
     assert row_1["is_default"] is False
     assert row_2["is_default"] is True
+    mock_svc.set_default_payment_method.assert_called_once_with(
+        customer_id=CUSTOMER_ID,
+        payment_method_id="pm-002",
+    )
 
 
 def test_patch_default_response_shape(
@@ -660,6 +693,7 @@ def test_patch_default_response_shape(
     mock_svc: MagicMock,
     fake_supabase: FakeSupabaseClient,
 ) -> None:
+    _configure_stripe_methods(mock_svc, ["pm-001"])
     _seed_db_method(
         fake_supabase,
         row_id="row-1",
@@ -689,15 +723,16 @@ def test_patch_default_returns_400_when_method_id_blank_after_normalize(
     assert resp.json()["detail"]["error"] == "payment_method_id_required"
 
 
-def test_patch_default_returns_503_when_supabase_not_configured(
+def test_patch_default_returns_404_when_stripe_customer_has_no_method(
     client: TestClient,
+    mock_svc: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(payment_methods_module, "is_supabase_configured", lambda: False)
 
     resp = client.patch("/ui/billing/payment-methods/pm-001/default?organizationid=org-001")
 
-    assert resp.status_code == 503
+    assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -710,6 +745,7 @@ def test_delete_method_deletes_requested_row(
     mock_svc: MagicMock,
     fake_supabase: FakeSupabaseClient,
 ) -> None:
+    _configure_stripe_methods(mock_svc, ["pm-001", "pm-002"])
     _seed_db_method(fake_supabase, row_id="row-1", stripe_payment_method_id="pm-001", payment_method_id="pm-001")
     _seed_db_method(fake_supabase, row_id="row-2", stripe_payment_method_id="pm-002", payment_method_id="pm-002")
 
@@ -720,6 +756,7 @@ def test_delete_method_deletes_requested_row(
     remaining_ids = {row["id"] for row in rows}
     assert "row-1" not in remaining_ids
     assert "row-2" in remaining_ids
+    mock_svc.detach_payment_method.assert_called_once_with(payment_method_id="pm-001")
 
 
 def test_delete_method_response_shape(
@@ -727,6 +764,7 @@ def test_delete_method_response_shape(
     mock_svc: MagicMock,
     fake_supabase: FakeSupabaseClient,
 ) -> None:
+    _configure_stripe_methods(mock_svc, ["pm-001"])
     _seed_db_method(fake_supabase, row_id="row-1", stripe_payment_method_id="pm-001", payment_method_id="pm-001")
 
     resp = client.delete("/ui/billing/payment-methods/pm-001?organizationid=org-001")
@@ -751,12 +789,13 @@ def test_delete_method_returns_400_when_method_id_blank_after_normalize(
     assert resp.json()["detail"]["error"] == "payment_method_id_required"
 
 
-def test_delete_method_returns_503_when_supabase_not_configured(
+def test_delete_method_returns_404_when_stripe_customer_has_no_method(
     client: TestClient,
+    mock_svc: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(payment_methods_module, "is_supabase_configured", lambda: False)
 
     resp = client.delete("/ui/billing/payment-methods/pm-001?organizationid=org-001")
 
-    assert resp.status_code == 503
+    assert resp.status_code == 404
