@@ -17,6 +17,8 @@ from app.services.stripe_service import (
     StripeCheckoutMode,
     StripeInsufficientUnitsError,
     StripeService,
+    StripeServiceError,
+    StripeSessionNotFoundError,
     StripeUnitEventReason,
     UnitBalanceResponse,
     units_for_tokens,
@@ -921,6 +923,113 @@ class TestCheckoutSessionRoutes:
         assert response.status_code == 409
         assert response.json()["detail"]["error"] == "checkout_payment_not_confirmed"
         mock_svc.complete_checkout_session.assert_not_called()
+
+    def test_reconcile_checkout_session_returns_units_credited(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.retrieve_checkout_session.return_value = {
+            "session_id": SESSION_ID,
+            "status": "complete",
+            "payment_status": "paid",
+            "org_id": ORG_ID,
+            "customer_id": CUSTOMER_ID,
+            "metadata": {"owner_key": "buyer@ironclaw.test"},
+        }
+        mock_svc.reconcile_checkout_session.return_value = {"payment_confirmed": True}
+        mock_svc.get_checkout_units_credited.return_value = 5000
+
+        response = client.post(
+            _billing_path(f"/checkout/sessions/{SESSION_ID}/reconcile"),
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 200
+        assert response.json()["payment_status"] == "paid"
+        assert response.json()["units_credited"] == 5000
+        mock_svc.reconcile_checkout_session.assert_called_once_with(SESSION_ID)
+
+    def test_reconcile_checkout_session_rejects_other_owner(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.retrieve_checkout_session.return_value = {
+            "session_id": SESSION_ID,
+            "status": "complete",
+            "payment_status": "paid",
+            "org_id": ORG_ID,
+            "metadata": {"owner_key": "someone-else@ironclaw.test"},
+        }
+
+        response = client.post(
+            _billing_path(f"/checkout/sessions/{SESSION_ID}/reconcile"),
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"]["error"] == "checkout_session_not_accessible"
+        mock_svc.reconcile_checkout_session.assert_not_called()
+
+    def test_reconcile_checkout_session_maps_missing_session_to_404(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.retrieve_checkout_session.return_value = {
+            "session_id": SESSION_ID,
+            "status": "complete",
+            "payment_status": "paid",
+            "org_id": ORG_ID,
+            "metadata": {"owner_key": "buyer@ironclaw.test"},
+        }
+        mock_svc.reconcile_checkout_session.side_effect = StripeSessionNotFoundError("checkout session not found")
+
+        response = client.post(
+            _billing_path(f"/checkout/sessions/{SESSION_ID}/reconcile"),
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 404
+
+    def test_reconcile_checkout_session_maps_stripe_failure_to_502(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.retrieve_checkout_session.return_value = {
+            "session_id": SESSION_ID,
+            "status": "complete",
+            "payment_status": "paid",
+            "org_id": ORG_ID,
+            "metadata": {"owner_key": "buyer@ironclaw.test"},
+        }
+        mock_svc.reconcile_checkout_session.side_effect = StripeServiceError("stripe unavailable")
+
+        response = client.post(
+            _billing_path(f"/checkout/sessions/{SESSION_ID}/reconcile"),
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 502
+        assert response.json()["detail"]["error"] == "reconcile_error"
+
+    def test_reconcile_recent_checkout_sessions_reports_count(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.reconcile_owner_checkout_sessions.return_value = [{"session_id": SESSION_ID}]
+
+        response = client.post(
+            _billing_path("/checkout/reconcile-recent"),
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"sessions_reconciled": 1}
+        mock_svc.reconcile_owner_checkout_sessions.assert_called_once_with("buyer@ironclaw.test")
 
     def test_complete_checkout_session_uses_stripe_customer_id(
         self,

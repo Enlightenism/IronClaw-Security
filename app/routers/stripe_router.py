@@ -1293,6 +1293,84 @@ async def complete_checkout_session_api(
     return await complete_checkout_session(session_id=session_id, body=body, auth=auth, svc=svc)
 
 
+@router.post("/checkout/sessions/{session_id}/reconcile", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
+async def reconcile_checkout_session(
+    session_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    record = _get_checkout_session_record_for_auth(session_id=session_id, auth=auth, svc=svc)
+    try:
+        result = svc.reconcile_checkout_session(session_id)
+    except StripeSessionNotFoundError as exc:
+        raise _http_404(
+            "Checkout session not found.",
+            code="checkout_session_not_found",
+            extra={"session_id": session_id},
+        ) from exc
+    except StripeServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "reconcile_error", "detail": str(exc)},
+        ) from exc
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "session_id": session_id,
+            "payment_status": result.get("payment_status") or record.get("payment_status"),
+            "payment_confirmed": bool(result.get("payment_confirmed")),
+            "units_credited": _units_credited_for_checkout(svc, session_id, record, auth),
+        },
+    )
+
+
+@api_router.post("/checkout/sessions/{session_id}/reconcile", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
+async def reconcile_checkout_session_api(
+    session_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await reconcile_checkout_session(session_id=session_id, auth=auth, svc=svc)
+
+
+@router.post("/checkout/reconcile-recent", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
+async def reconcile_recent_checkout_sessions(
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    if auth is None or getattr(auth, "authenticated", False) is not True:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": "authentication_required",
+                "detail": "Authentication is required to refresh billing status.",
+            },
+        )
+
+    owner_key = resolve_authenticated_billing_owner(auth)
+    if not owner_key:
+        return JSONResponse(status_code=status.HTTP_200_OK, content={"sessions_reconciled": 0})
+
+    try:
+        results = svc.reconcile_owner_checkout_sessions(owner_key)
+    except StripeServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "reconcile_error", "detail": str(exc)},
+        ) from exc
+
+    return JSONResponse(status_code=status.HTTP_200_OK, content={"sessions_reconciled": len(results)})
+
+
+@api_router.post("/checkout/reconcile-recent", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])
+async def reconcile_recent_checkout_sessions_api(
+    auth: AuthContext = Depends(get_auth_context),
+    svc: StripeService = Depends(get_stripe_service),
+) -> JSONResponse:
+    return await reconcile_recent_checkout_sessions(auth=auth, svc=svc)
+
+
 @router.get("/subscriptions/{subscription_id}", status_code=status.HTTP_200_OK, tags=["billing", "subscriptions"])
 async def get_subscription(
     subscription_id: str,

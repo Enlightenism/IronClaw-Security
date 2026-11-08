@@ -1,5 +1,14 @@
+import { useEffect, useRef, useState } from "react";
 import { Check } from "lucide-react";
 import "./PackageCarousel.css";
+
+const HOLD_MS = 5000;
+const DISSOLVE_MS = 1000;
+const APPEAR_CLASSES = [
+  "package-appear-shimmer",
+  "package-appear-spin",
+  "package-appear-sparkle",
+];
 
 const PACKAGE_BENEFITS = [
   "No subscription",
@@ -44,11 +53,11 @@ const PACKAGE_TIERS = [
   },
 ];
 
-function PackageCard({ tier, hidden }) {
+function PackageCard({ tier }) {
   return (
     <div
       className="glass-platinum overflow-hidden rounded-3xl p-10 text-center sm:p-14"
-      data-testid={hidden ? undefined : tier.testId}
+      data-testid={tier.testId}
     >
       <div className="mb-3 inline-block rounded-full border border-[#E5E4E2]/30 bg-white/5 px-4 py-1 font-tech text-xs uppercase tracking-[0.3em] text-[#E5E4E2]">
         {tier.label}
@@ -61,7 +70,7 @@ function PackageCard({ tier, hidden }) {
       <p className="mt-3 text-lg text-[#BFC1C2]">Pay only for what you use.</p>
       <p
         className="mt-2 font-tech text-sm text-[#FFD700]"
-        data-testid={hidden ? undefined : tier.summaryTestId}
+        data-testid={tier.summaryTestId}
       >
         {tier.summary}
       </p>
@@ -80,40 +89,86 @@ function PackageCard({ tier, hidden }) {
   );
 }
 
-function PackageGroup({ hidden = false }) {
-  return (
-    <div className="package-carousel-group" aria-hidden={hidden || undefined}>
-      {PACKAGE_TIERS.map((tier) => (
-        <div className="package-carousel-item" key={tier.key}>
-          {tier.badge && (
-            <div className="mb-6 flex justify-center">
-              <span
-                className="btn-shimmer inline-flex items-center rounded-full bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-6 py-2 font-tech text-xs font-bold uppercase tracking-[0.3em] text-black shadow-[0_0_24px_rgba(255,215,0,0.35)]"
-                data-testid={hidden ? undefined : "best-deal-badge"}
-              >
-                BEST DEAL
-              </span>
-            </div>
-          )}
-          <PackageCard tier={tier} hidden={hidden} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export default function PackageCarousel() {
+  const [active, setActive] = useState(0);
+  const [dissolving, setDissolving] = useState(false);
+  const [started, setStarted] = useState(false);
+  const sectionRef = useRef(null);
+
+  useEffect(() => {
+    const node = sectionRef.current;
+    if (started || !node) {
+      return undefined;
+    }
+    if (typeof IntersectionObserver === "undefined") {
+      setStarted(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setStarted(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.35 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [started]);
+
+  useEffect(() => {
+    if (!started) {
+      return undefined;
+    }
+    const timer = window.setTimeout(
+      () => {
+        if (dissolving) {
+          setActive((index) => (index + 1) % PACKAGE_TIERS.length);
+          setDissolving(false);
+        } else {
+          setDissolving(true);
+        }
+      },
+      dissolving ? DISSOLVE_MS : HOLD_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [started, active, dissolving]);
+
   return (
     <section
-      className="relative z-10 py-20"
+      ref={sectionRef}
+      className="relative z-10 mx-auto max-w-4xl px-6 py-20"
       aria-label="IronClaw-Security package pricing"
       data-testid="package-carousel"
     >
-      <div className="package-carousel">
-        <div className="package-carousel-track">
-          <PackageGroup />
-          <PackageGroup hidden />
-        </div>
+      <div className="package-stage">
+        {PACKAGE_TIERS.map((tier, index) => {
+          const isActive = started && index === active;
+          let motionClass = "";
+          if (isActive) {
+            motionClass = dissolving ? "is-dissolving" : APPEAR_CLASSES[index];
+          }
+          return (
+            <div
+              key={tier.key}
+              className={`package-stage-item ${motionClass}`.trim()}
+              aria-hidden={!isActive || undefined}
+            >
+              {tier.badge && (
+                <div className="mb-6 flex justify-center">
+                  <span
+                    className="btn-shimmer inline-flex items-center rounded-full bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-6 py-2 font-tech text-xs font-bold uppercase tracking-[0.3em] text-black shadow-[0_0_24px_rgba(255,215,0,0.35)]"
+                    data-testid="best-deal-badge"
+                  >
+                    BEST DEAL
+                  </span>
+                </div>
+              )}
+              <PackageCard tier={tier} />
+            </div>
+          );
+        })}
       </div>
     </section>
   );

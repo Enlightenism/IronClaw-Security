@@ -820,6 +820,37 @@ class TestHandleCheckoutCompleted:
         assert all(call.kwargs["owner_key"] == "ic_org_org-runtime-route" for call in provisioning_service.provision_for_program.call_args_list)
         assert all(call.kwargs["payment_confirmed"] is True for call in provisioning_service.provision_for_program.call_args_list)
 
+    def test_issue_paid_install_keys_failure_in_one_program_does_not_block_others(self, svc: StripeService, monkeypatch: pytest.MonkeyPatch) -> None:
+        provisioning_service = MagicMock()
+
+        def fake_provision(**kwargs: Any) -> MagicMock:
+            if kwargs["program"] == "copilot":
+                raise RuntimeError("persistence write-order failure")
+            issued = MagicMock()
+            issued.record = MagicMock(
+                key_id=f"ik_{kwargs['program']}_001",
+                owner_key=kwargs["owner_key"],
+                program=kwargs["program"],
+                active=True,
+                masked_key=f"ic_install_{kwargs['program']}_...1234",
+                subscription_id=kwargs["subscription_id"],
+            )
+            return issued
+
+        provisioning_service.provision_for_program.side_effect = fake_provision
+        monkeypatch.setattr("app.services.stripe_service.provision_install_key_service", lambda *args, **kwargs: provisioning_service)
+
+        with pytest.raises(StripeServiceError, match="copilot"):
+            svc._issue_paid_install_keys_for_checkout(  # noqa: SLF001
+                org_id="org-partial-program",
+                customer_id=_CUSTOMER_ID,
+                session_id="cs_partial_program_001",
+                unit_credits=500,
+                metadata={"payment_status": "paid"},
+            )
+
+        assert provisioning_service.provision_for_program.call_count == 7
+
     def test_issue_paid_install_keys_requires_successful_payment_confirmation(self, svc: StripeService) -> None:
         result = svc._issue_paid_install_keys_for_checkout(  # noqa: SLF001
             org_id="org-no-subscription",
@@ -1775,6 +1806,59 @@ class TestCompleteCheckoutSession:
         svc_wired.complete_checkout_session(session_id=session_id, org_id=_ORG)
         resp = svc_wired.get_unit_balance(_ORG)
         assert any(e["reason"] == StripeUnitEventReason.CHECKOUT_COMPLETE.value for e in resp.ledger_entries)
+
+
+# ===========================================================================
+# Section T2 — reconcile_checkout_session / reconcile_owner_checkout_sessions
+# ===========================================================================
+
+
+class TestReconcileCheckoutSession:
+    def test_reconcile_checkout_session_credits_units(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.get.return_value = _build_checkout_completed_event(unit_credits=5000, session_id="cs_reconcile_001")["data"]["object"]
+
+        result = svc_wired.reconcile_checkout_session("cs_reconcile_001")
+
+        mock_client.get.assert_called_once_with("/checkout/sessions/cs_reconcile_001")
+        assert result["payment_confirmed"] is True
+        assert svc_wired.get_unit_balance(_ORG).balance == 5000
+
+    def test_reconcile_checkout_session_is_idempotent(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.get.return_value = _build_checkout_completed_event(unit_credits=5000, session_id="cs_reconcile_002")["data"]["object"]
+
+        svc_wired.reconcile_checkout_session("cs_reconcile_002")
+        svc_wired.reconcile_checkout_session("cs_reconcile_002")
+
+        assert svc_wired.get_unit_balance(_ORG).balance == 5000
+
+    def test_reconcile_checkout_session_unpaid_does_not_credit(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        session = _build_checkout_completed_event(unit_credits=5000, session_id="cs_reconcile_003")["data"]["object"]
+        session["payment_status"] = "unpaid"
+        mock_client.get.return_value = session
+
+        result = svc_wired.reconcile_checkout_session("cs_reconcile_003")
+
+        assert result["payment_confirmed"] is False
+        assert svc_wired.get_unit_balance(_ORG).balance == 0
+
+    def test_reconcile_checkout_session_rejects_invalid_id(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        with pytest.raises(StripeSessionNotFoundError):
+            svc_wired.reconcile_checkout_session("not-a-session")
+        mock_client.get.assert_not_called()
+
+    def test_reconcile_owner_checkout_sessions_credits_only_matching_owner(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        owner = "buyer@ironclaw.test"
+        mine = _build_checkout_completed_event(unit_credits=5000, session_id="cs_owner_001", owner_key=owner)["data"]["object"]
+        other = _build_checkout_completed_event(unit_credits=2500, session_id="cs_owner_002", owner_key="other@ironclaw.test")["data"]["object"]
+        mock_client.get.return_value = {"object": "list", "data": [mine, other]}
+
+        results = svc_wired.reconcile_owner_checkout_sessions("Buyer@Ironclaw.test")
+
+        assert [r["session_id"] for r in results] == ["cs_owner_001"]
+        owner_wallet = svc_wired._wallet_registry.get_wallet(owner)  # noqa: SLF001
+        assert owner_wallet is not None
+        assert owner_wallet.balance_units == 5000
+        assert svc_wired.get_unit_balance(_ORG).balance == 0
 
 
 # ===========================================================================

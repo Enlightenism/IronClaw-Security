@@ -43,7 +43,8 @@ class InstallKeyClaimRedeemRequest(BaseModel):
 
 
 def _resolve_install_owner(auth: Any) -> str | None:
-    return resolve_authenticated_billing_owner(auth)
+    owner = resolve_authenticated_billing_owner(auth)
+    return owner.strip().lower() if owner else None
 
 
 def _is_valid_install_key_record(record: Any, *, owner_key: str, program: str) -> bool:

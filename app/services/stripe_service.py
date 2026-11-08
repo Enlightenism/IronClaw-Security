@@ -1141,23 +1141,35 @@ class StripeService:
 
         supported_programs = tuple(InstallKeyFormatRegistry.list_programs())
 
+        failed_programs: list[str] = []
         for program in supported_programs:
-            issued = provisioning_service.provision_for_program(
-                owner_key=owner_key,
-                subscription_id=f"checkout:{session_id}",
-                program=program,
-                source="stripe.checkout",
-                label=f"stripe-checkout:{session_id}",
-                metadata={**base_metadata, "program": program},
-                payment_status="paid",
-                entitlements_status="active",
-                issued_after_payment=True,
-                checkout_session_id=session_id,
-                purchase_reference=session_id,
-                customer_id=customer_id,
-                org_id=org_id,
-                payment_confirmed=True,
-            )
+            try:
+                issued = provisioning_service.provision_for_program(
+                    owner_key=owner_key,
+                    subscription_id=f"checkout:{session_id}",
+                    program=program,
+                    source="stripe.checkout",
+                    label=f"stripe-checkout:{session_id}",
+                    metadata={**base_metadata, "program": program},
+                    payment_status="paid",
+                    entitlements_status="active",
+                    issued_after_payment=True,
+                    checkout_session_id=session_id,
+                    purchase_reference=session_id,
+                    customer_id=customer_id,
+                    org_id=org_id,
+                    payment_confirmed=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                failed_programs.append(program)
+                logger.error(
+                    "stripe.checkout_install_key_program_failed org=%s session=%s program=%s error_type=%s",
+                    org_id,
+                    session_id,
+                    program,
+                    type(exc).__name__,
+                )
+                continue
             record = issued.record
             results[program] = {
                 "key_id": record.key_id,
@@ -1167,6 +1179,9 @@ class StripeService:
                 "masked_key": record.masked_key,
                 "subscription_id": record.subscription_id,
             }
+
+        if failed_programs:
+            raise StripeServiceError(f"Install key issuance failed for programs: {', '.join(failed_programs)}.")
 
         return results
 
@@ -1722,6 +1737,54 @@ class StripeService:
         with self._lock:
             record = self._checkout_sessions.get(session_id)
         return record.to_dict() if record else None
+
+    def reconcile_checkout_session(self, session_id: str) -> dict[str, Any]:
+        normalized_session_id = str(session_id).strip()
+        if not _STRIPE_CHECKOUT_SESSION_ID_PATTERN.fullmatch(normalized_session_id):
+            raise StripeSessionNotFoundError("checkout session not found")
+
+        try:
+            payload = self._get_client().get(f"/checkout/sessions/{normalized_session_id}")
+        except StripeAPIError as exc:
+            if exc.http_status == 404:
+                raise StripeSessionNotFoundError("checkout session not found") from exc
+            raise
+
+        if payload.get("id") != normalized_session_id:
+            raise StripeServiceError("Stripe returned a mismatched checkout session.")
+        return self._handle_checkout_completed(payload, {})
+
+    def reconcile_owner_checkout_sessions(self, owner_key: str, *, limit: int = 50) -> list[dict[str, Any]]:
+        normalized_owner = str(owner_key).strip().lower()
+        if not normalized_owner:
+            return []
+
+        payload = self._get_client().get(
+            "/checkout/sessions",
+            params={"limit": max(1, min(int(limit), 100)), "status": "complete"},
+        )
+        rows = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            raise StripeServiceError("Stripe returned an invalid checkout session list.")
+
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if row.get("mode") != StripeCheckoutMode.PAYMENT.value or row.get("payment_status") != "paid":
+                continue
+            metadata = row.get("metadata")
+            if not isinstance(metadata, dict) or str(metadata.get("owner_key") or "").strip().lower() != normalized_owner:
+                continue
+            try:
+                results.append(self._handle_checkout_completed(row, {}))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "stripe.checkout_reconcile_failed session=%s error_type=%s",
+                    row.get("id"),
+                    type(exc).__name__,
+                )
+        return results
 
     def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:
         normalized_session_id = str(session_id).strip()

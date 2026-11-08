@@ -1483,6 +1483,24 @@ describe("refresh behavior", () => {
     });
   });
 
+  it("reconciles recent checkout sessions before re-fetching on Refresh", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+
+    await renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("refresh-btn")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId("refresh-btn"));
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith(
+        "/billing/checkout/reconcile-recent",
+      );
+    });
+  });
+
   it("starts the live polling interval and posts to /events/simulate", async () => {
     await renderDashboard();
 

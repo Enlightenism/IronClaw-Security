@@ -569,6 +569,31 @@ describe("Landing", () => {
     expect(screen.getByTestId("credits-section")).toBeInTheDocument();
   });
 
+  it("cycles the package cards: hold, dissolve, then the next card appears", async () => {
+    jest.useFakeTimers();
+    await renderLanding();
+
+    const starter = screen
+      .getByTestId("credits-section")
+      .closest(".package-stage-item");
+    const team = screen
+      .getByTestId("team-package-section")
+      .closest(".package-stage-item");
+    expect(starter).toHaveClass("package-appear-shimmer");
+    expect(team).not.toHaveClass("package-appear-spin");
+
+    await act(async () => {
+      jest.advanceTimersByTime(5000);
+    });
+    expect(starter).toHaveClass("is-dissolving");
+
+    await act(async () => {
+      jest.advanceTimersByTime(1000);
+    });
+    expect(starter).not.toHaveClass("is-dissolving");
+    expect(team).toHaveClass("package-appear-spin");
+  });
+
   it("renders the Platforms Protected ticker between the layers and protection sections", async () => {
     await renderLanding();
 

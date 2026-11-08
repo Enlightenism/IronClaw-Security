@@ -114,7 +114,10 @@ const ContactModal = ({ open, onOpenChange }) => {
             </DialogTitle>
             <DialogDescription className="text-[#BFC1C2]">
               Describe the issue you are having and we will get back to you at
-              the email you provide.
+              the email you provide. This is a basic email contact form. For
+              security reasons we do not allow other AI APIs on our platform, so
+              our AI brain is fully local with no connection to any other AI
+              source.
             </DialogDescription>
           </div>
         </DialogHeader>

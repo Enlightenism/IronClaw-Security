@@ -526,7 +526,17 @@ const Dashboard = () => {
         );
 
         if (String(status?.payment_status || "").toLowerCase() === "paid") {
-          const credited = Number(status?.units_credited ?? 0);
+          let credited = Number(status?.units_credited ?? 0);
+          if (!Number.isSafeInteger(credited) || credited <= 0) {
+            try {
+              const { data: reconciled } = await api.post(
+                `/billing/checkout/sessions/${encodeURIComponent(sessionId)}/reconcile`,
+              );
+              credited = Number(reconciled?.units_credited ?? 0);
+            } catch {
+              // Keep polling below; the webhook may still credit the wallet.
+            }
+          }
           if (!Number.isSafeInteger(credited) || credited <= 0) {
             // Stripe reports paid before the webhook credits the wallet; keep polling.
             if (attempts + 1 < maxAttempts) {
@@ -726,9 +736,27 @@ const Dashboard = () => {
     </footer>
   );
 
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    fetchDashboard();
+    let reconciled = null;
+    try {
+      const { data } = await api.post("/billing/checkout/reconcile-recent");
+      reconciled = Number(data?.sessions_reconciled ?? 0);
+    } catch {
+      // Reload the dashboard even if payment reconciliation is unavailable.
+    }
+    await fetchDashboard();
+    if (reconciled === null) {
+      toast.error(
+        "Payment sync is unavailable right now. Showing your latest saved status.",
+      );
+    } else if (reconciled > 0) {
+      toast.success(
+        "Payment confirmed. Units and install keys are up to date.",
+      );
+    } else {
+      toast.success("Account refreshed.");
+    }
   }, [fetchDashboard]);
 
   const walletProps = useMemo(
