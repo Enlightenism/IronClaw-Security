@@ -465,6 +465,19 @@ describe("payments.reconcile", () => {
   });
 });
 
+describe("payments.reconcileRecent", () => {
+  it("requests authenticated recent checkout reconciliation", () => {
+    mockPost.mockResolvedValueOnce({ data: {} });
+    payments.reconcileRecent();
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/billing/checkout/reconcile-recent",
+      undefined,
+      { timeout: 90_000 },
+    );
+  });
+});
+
 describe("wallet.getLedger", () => {
   it("requests the authenticated canonical unit ledger", () => {
     mockGet.mockResolvedValueOnce({ data: {} });

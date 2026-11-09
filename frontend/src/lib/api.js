@@ -269,6 +269,10 @@ const getInstallKeyFromResponse = (response = {}) => {
 export const payments = {
   createCheckout: (payload) =>
     api.post("/billing/checkout/sessions", sanitizeCheckoutPayload(payload)),
+  reconcileRecent: () =>
+    api.post("/billing/checkout/reconcile-recent", undefined, {
+      timeout: 90_000,
+    }),
   getStatus: (sessionId) =>
     api.get(
       `/billing/checkout/sessions/${encodeURIComponent(sessionId)}/status`,

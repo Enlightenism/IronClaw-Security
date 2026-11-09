@@ -443,6 +443,42 @@ endpoints:
 3. Read `GET /billing/units/ledger` to confirm the resulting `balance` and
    ledger entries. A repeated reconcile for the same paid session is
    idempotent and must not credit units twice.
+4. The dashboard's Refresh action calls authenticated
+   `POST /billing/checkout/reconcile-recent`. It scans up to five Stripe pages
+   of completed sessions, matches the authenticated billing owner, and runs
+   the same verified fulfillment path. The response includes
+   `sessions_reconciled`, `units_credited` verified from the wallet ledger,
+   per-session `sessions` outcomes, and `truncated`. A `partial` status or
+   `truncated: true` means not all candidate sessions were synced; the
+   dashboard must report that rather than showing success. The scan requires
+   valid signed IronClaw checkout metadata. Sessions without trusted metadata
+   are not automatically credited; contact support with the Stripe Checkout
+   Session ID for verification instead of paying again.
+
+Example success response:
+
+```json
+{
+  "status": "complete",
+  "pages_scanned": 1,
+  "sessions_scanned": 1,
+  "sessions_matched": 1,
+  "sessions_reconciled": 1,
+  "units_credited": 5000,
+  "sessions": [
+    {
+      "session_id": "cs_example",
+      "status": "fulfilled",
+      "units_credited": 5000
+    }
+  ],
+  "truncated": false
+}
+```
+
+`sessions` can also contain a `failed` status and an error for an individual
+session. `status` is `partial` when any session fails or the scan is truncated,
+and `no_paid_sessions_found` when no matching paid sessions were found.
 
 Do not treat the browser redirect alone as proof of payment. Stripe's verified
 session status is authoritative.

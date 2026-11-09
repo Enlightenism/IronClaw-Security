@@ -1426,17 +1426,23 @@ async def reconcile_recent_checkout_sessions(
 
     owner_key = resolve_authenticated_billing_owner(auth)
     if not owner_key:
-        return JSONResponse(status_code=status.HTTP_200_OK, content={"sessions_reconciled": 0})
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "billing_owner_unavailable",
+                "detail": "A verified billing identity is required to sync paid checkout sessions.",
+            },
+        )
 
     try:
-        results = svc.reconcile_owner_checkout_sessions(owner_key)
+        result = svc.reconcile_owner_checkout_sessions(owner_key)
     except StripeServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "reconcile_error", "detail": str(exc)},
         ) from exc
 
-    return JSONResponse(status_code=status.HTTP_200_OK, content={"sessions_reconciled": len(results)})
+    return JSONResponse(status_code=status.HTTP_200_OK, content=result)
 
 
 @api_router.post("/checkout/reconcile-recent", status_code=status.HTTP_200_OK, tags=["billing", "checkout"])

@@ -70,7 +70,7 @@
     "dev": "craco start",
     "preview": "wrangler dev",
     "deploy": "yarn build && wrangler deploy",
-    "test": "craco test",
+    "test": "craco test --runInBand",
     "analyze": "source-map-explorer 'build/static/js/*.js'",
     "analyze:build": "cross-env NODE_ENV=production craco build && source-map-explorer 'build/static/js/*.js'"
   },

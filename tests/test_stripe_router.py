@@ -1067,12 +1067,28 @@ class TestCheckoutSessionRoutes:
         assert response.status_code == 502
         assert response.json()["detail"]["error"] == "reconcile_error"
 
-    def test_reconcile_recent_checkout_sessions_reports_count(
+    def test_reconcile_recent_checkout_sessions_returns_wallet_verified_results(
         self,
         client: TestClient,
         mock_svc: MagicMock,
     ) -> None:
-        mock_svc.reconcile_owner_checkout_sessions.return_value = [{"session_id": SESSION_ID}]
+        result = {
+            "status": "complete",
+            "pages_scanned": 1,
+            "sessions_scanned": 1,
+            "sessions_matched": 1,
+            "sessions_reconciled": 1,
+            "units_credited": 5000,
+            "sessions": [
+                {
+                    "session_id": SESSION_ID,
+                    "status": "fulfilled",
+                    "units_credited": 5000,
+                },
+            ],
+            "truncated": False,
+        }
+        mock_svc.reconcile_owner_checkout_sessions.return_value = result
 
         response = client.post(
             _billing_path("/checkout/reconcile-recent"),
@@ -1080,8 +1096,84 @@ class TestCheckoutSessionRoutes:
         )
 
         assert response.status_code == 200
-        assert response.json() == {"sessions_reconciled": 1}
+        assert response.json() == result
         mock_svc.reconcile_owner_checkout_sessions.assert_called_once_with("buyer@ironclaw.test")
+
+    def test_reconcile_recent_checkout_sessions_returns_partial_failures(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        result = {
+            "status": "partial",
+            "pages_scanned": 1,
+            "sessions_scanned": 2,
+            "sessions_matched": 2,
+            "sessions_reconciled": 1,
+            "units_credited": 5000,
+            "sessions": [
+                {
+                    "session_id": SESSION_ID,
+                    "status": "failed",
+                    "error": "Checkout session integrity verification failed.",
+                },
+                {
+                    "session_id": "cs_test_002",
+                    "status": "fulfilled",
+                    "units_credited": 5000,
+                },
+            ],
+            "truncated": False,
+        }
+        mock_svc.reconcile_owner_checkout_sessions.return_value = result
+
+        response = client.post(
+            _billing_path("/checkout/reconcile-recent"),
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 200
+        assert response.json() == result
+
+    def test_reconcile_recent_checkout_sessions_requires_billing_owner(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "app.routers.stripe_router.resolve_authenticated_billing_owner",
+            lambda _auth: None,
+        )
+
+        response = client.post(
+            _billing_path("/checkout/reconcile-recent"),
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"]["error"] == "billing_owner_unavailable"
+        mock_svc.reconcile_owner_checkout_sessions.assert_not_called()
+
+    def test_reconcile_recent_checkout_sessions_exposes_service_failure(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.reconcile_owner_checkout_sessions.side_effect = StripeServiceError(
+            "STRIPE_SECRET_KEY is not configured.",
+        )
+
+        response = client.post(
+            _billing_path("/checkout/reconcile-recent"),
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 502
+        assert response.json()["detail"] == {
+            "error": "reconcile_error",
+            "detail": "STRIPE_SECRET_KEY is not configured.",
+        }
 
     def test_complete_checkout_session_uses_stripe_customer_id(
         self,

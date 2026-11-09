@@ -47,6 +47,8 @@ _STRIPE_TIMEOUT_SECONDS = 15
 _STRIPE_CUSTOMER_LINKS_TABLE = "stripe_customer_links"
 _METERED_USAGE_BUFFER_MAX = 500
 _CHECKOUT_SESSION_TTL_SECONDS = 1800  # 30 min
+_CHECKOUT_RECONCILE_PAGE_SIZE = 100
+_CHECKOUT_RECONCILE_MAX_PAGES = 5
 
 
 def _customer_link_persistence_required() -> bool:
@@ -1862,41 +1864,137 @@ class StripeService:
             raise StripeServiceError("Stripe returned a mismatched checkout session.")
         return self._handle_checkout_completed(payload, {})
 
-    def reconcile_owner_checkout_sessions(self, owner_key: str, *, limit: int = 50) -> list[dict[str, Any]]:
+    def reconcile_owner_checkout_sessions(self, owner_key: str) -> dict[str, Any]:
         normalized_owner = str(owner_key).strip().lower()
         if not normalized_owner:
-            return []
+            return {
+                "status": "owner_unavailable",
+                "pages_scanned": 0,
+                "sessions_scanned": 0,
+                "sessions_matched": 0,
+                "sessions_reconciled": 0,
+                "units_credited": 0,
+                "sessions": [],
+                "truncated": False,
+            }
 
-        payload = self._get_client().get(
-            "/checkout/sessions",
-            params={"limit": max(1, min(int(limit), 100)), "status": "complete"},
-        )
-        rows = payload.get("data") if isinstance(payload, dict) else None
-        if not isinstance(rows, list):
-            raise StripeServiceError("Stripe returned an invalid checkout session list.")
+        pages_scanned = 0
+        sessions_scanned = 0
+        sessions_matched = 0
+        sessions: list[dict[str, Any]] = []
+        cursor: str | None = None
+        has_more = False
+        seen_cursors: set[str] = set()
 
-        results: list[dict[str, Any]] = []
-        failed_sessions: list[str] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            if row.get("mode") != StripeCheckoutMode.PAYMENT.value or row.get("payment_status") != "paid":
-                continue
-            metadata = row.get("metadata")
-            if not isinstance(metadata, dict) or str(metadata.get("owner_key") or "").strip().lower() != normalized_owner:
-                continue
-            try:
-                results.append(self._handle_checkout_completed(row, {}))
-            except Exception as exc:  # noqa: BLE001
-                failed_sessions.append(str(row.get("id")))
-                logger.warning(
-                    "stripe.checkout_reconcile_failed session=%s error_type=%s",
-                    row.get("id"),
-                    type(exc).__name__,
-                )
-        if failed_sessions:
-            raise StripeServiceError(f"Payment sync failed for {len(failed_sessions)} checkout session(s); retry refresh after the fault is resolved.")
-        return results
+        for _ in range(_CHECKOUT_RECONCILE_MAX_PAGES):
+            params: dict[str, Any] = {
+                "limit": _CHECKOUT_RECONCILE_PAGE_SIZE,
+                "status": "complete",
+            }
+            if cursor:
+                params["starting_after"] = cursor
+
+            payload = self._get_client().get("/checkout/sessions", params=params)
+            rows = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(rows, list):
+                raise StripeServiceError("Stripe returned an invalid checkout session list.")
+            has_more_value = payload.get("has_more", False)
+            if not isinstance(has_more_value, bool):
+                raise StripeServiceError("Stripe returned an invalid checkout session page status.")
+
+            pages_scanned += 1
+            sessions_scanned += len(rows)
+            has_more = has_more_value
+
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                if row.get("mode") != StripeCheckoutMode.PAYMENT.value or row.get("payment_status") != "paid":
+                    continue
+                metadata = row.get("metadata")
+                if not isinstance(metadata, dict) or str(metadata.get("owner_key") or "").strip().lower() != normalized_owner:
+                    continue
+
+                sessions_matched += 1
+                session_id = row.get("id")
+                try:
+                    if not isinstance(session_id, str) or not _STRIPE_CHECKOUT_SESSION_ID_PATTERN.fullmatch(session_id):
+                        raise StripeServiceError("Stripe returned an invalid checkout session ID.")
+                    fulfillment = self._handle_checkout_completed(row, {})
+                    if fulfillment.get("payment_confirmed") is not True:
+                        raise StripeServiceError("Stripe has not confirmed payment for this checkout session.")
+
+                    org_id = metadata.get("org_id")
+                    if not isinstance(org_id, str) or not org_id.strip():
+                        raise StripeServiceError("Checkout session is missing its trusted organization identity.")
+                    integrity = self._verify_checkout_integrity_metadata(metadata, mode=row.get("mode"))
+                    expected_units = int(integrity["unit_credits"])
+                    credited_units = self.get_checkout_units_credited(
+                        session_id,
+                        org_id,
+                        owner_key=normalized_owner,
+                    )
+                    if credited_units != expected_units:
+                        raise StripeServiceError(f"Stripe confirmed payment for {expected_units} units, but the wallet ledger shows {credited_units}.")
+                    sessions.append(
+                        {
+                            "session_id": session_id,
+                            "status": "fulfilled",
+                            "units_credited": credited_units,
+                        },
+                    )
+                except StripeServiceError as exc:
+                    logger.warning(
+                        "stripe.checkout_reconcile_failed session=%s error_type=%s",
+                        session_id or "",
+                        type(exc).__name__,
+                    )
+                    sessions.append(
+                        {
+                            "session_id": session_id,
+                            "status": "failed",
+                            "error": str(exc),
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception(
+                        "stripe.checkout_reconcile_unexpected_error session=%s error_type=%s",
+                        session_id or "",
+                        type(exc).__name__,
+                    )
+                    sessions.append(
+                        {
+                            "session_id": session_id,
+                            "status": "failed",
+                            "error": "Checkout fulfillment failed unexpectedly. Retry or contact support.",
+                        },
+                    )
+
+            if not has_more:
+                break
+            if not rows:
+                raise StripeServiceError("Stripe returned an empty checkout page while more sessions were available.")
+            next_cursor = rows[-1].get("id") if isinstance(rows[-1], dict) else None
+            if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
+                raise StripeServiceError("Stripe returned an invalid checkout pagination cursor.")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+
+        successful_sessions = [session for session in sessions if session["status"] == "fulfilled"]
+        failed_sessions = [session for session in sessions if session["status"] == "failed"]
+        status_value = "partial" if failed_sessions or has_more else "complete"
+        if sessions_matched == 0 and not has_more:
+            status_value = "no_paid_sessions_found"
+        return {
+            "status": status_value,
+            "pages_scanned": pages_scanned,
+            "sessions_scanned": sessions_scanned,
+            "sessions_matched": sessions_matched,
+            "sessions_reconciled": len(successful_sessions),
+            "units_credited": sum(int(session["units_credited"]) for session in successful_sessions),
+            "sessions": sessions,
+            "truncated": has_more,
+        }
 
     def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:
         normalized_session_id = str(session_id).strip()

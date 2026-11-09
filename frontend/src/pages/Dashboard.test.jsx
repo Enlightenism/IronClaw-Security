@@ -53,6 +53,7 @@ jest.mock("@/lib/api", () => ({
     post: (...args) => mockApiPost(...args),
   },
   payments: {
+    reconcileRecent: () => mockApiPost("/billing/checkout/reconcile-recent"),
     getStatus: (sessionId) =>
       mockApiGet(
         `/billing/checkout/sessions/${encodeURIComponent(sessionId)}/status`,
@@ -245,6 +246,18 @@ function setupDefaultApis() {
   });
 
   mockApiPost.mockImplementation((url) => {
+    if (url === "/billing/checkout/reconcile-recent") {
+      return Promise.resolve({
+        data: {
+          status: "no_paid_sessions_found",
+          sessions_matched: 0,
+          sessions_reconciled: 0,
+          units_credited: 0,
+          sessions: [],
+          truncated: false,
+        },
+      });
+    }
     if (url === "/events/simulate") {
       return Promise.resolve({ data: {} });
     }
@@ -1738,6 +1751,139 @@ describe("refresh behavior", () => {
     await waitFor(() => {
       expect(mockApiPost).toHaveBeenCalledWith(
         "/billing/checkout/reconcile-recent",
+      );
+    });
+  });
+
+  it("reports a completed reconciliation only after wallet and platform keys are confirmed", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: { ...DEFAULT_DASH, wallet_units: 5000 },
+        });
+      }
+      if (url === "/billing/units/ledger") {
+        return Promise.resolve({ data: { balance: 5000, ledger: [] } });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({ data: PAID_TOKENS });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/reconcile-recent") {
+        return Promise.resolve({
+          data: {
+            status: "complete",
+            sessions_matched: 1,
+            sessions_reconciled: 1,
+            units_credited: 5000,
+            sessions: [
+              {
+                session_id: "cs_refresh_001",
+                status: "fulfilled",
+                units_credited: 5000,
+              },
+            ],
+            truncated: false,
+          },
+        });
+      }
+      if (url === "/events/simulate") {
+        return Promise.resolve({ data: {} });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDashboard();
+    await user.click(screen.getByTestId("refresh-btn"));
+
+    await waitFor(() => {
+      expect(mockToastSuccess).toHaveBeenCalledWith(
+        expect.stringContaining("5,000 units are in your wallet"),
+      );
+    });
+  });
+
+  it("shows the backend reconciliation failure instead of a generic sync message", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/reconcile-recent") {
+        return Promise.reject({
+          response: {
+            data: {
+              detail: {
+                error: "reconcile_error",
+                detail: "STRIPE_SECRET_KEY is not configured.",
+              },
+            },
+          },
+        });
+      }
+      if (url === "/events/simulate") {
+        return Promise.resolve({ data: {} });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDashboard();
+    await user.click(screen.getByTestId("refresh-btn"));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        "Payment sync failed. STRIPE_SECRET_KEY is not configured.",
+      );
+    });
+  });
+
+  it("reports a partial Stripe recovery without claiming payment fulfillment", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/reconcile-recent") {
+        return Promise.resolve({
+          data: {
+            status: "partial",
+            sessions_matched: 1,
+            sessions_reconciled: 0,
+            units_credited: 0,
+            sessions: [
+              {
+                session_id: "cs_untrusted_001",
+                status: "failed",
+                error: "Checkout session integrity verification failed.",
+              },
+            ],
+            truncated: false,
+          },
+        });
+      }
+      if (url === "/events/simulate") {
+        return Promise.resolve({ data: {} });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDashboard();
+    await user.click(screen.getByTestId("refresh-btn"));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        "Payment sync is incomplete. Checkout session integrity verification failed.",
+      );
+    });
+    expect(mockToastSuccess).not.toHaveBeenCalled();
+  });
+
+  it("does not report success when Stripe finds no paid checkout", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+
+    await renderDashboard();
+    await user.click(screen.getByTestId("refresh-btn"));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        expect.stringContaining("No paid checkout was found"),
       );
     });
   });

@@ -1943,22 +1943,132 @@ class TestReconcileCheckoutSession:
         other = _build_checkout_completed_event(unit_credits=2500, session_id="cs_owner_002", owner_key="other@ironclaw.test")["data"]["object"]
         mock_client.get.return_value = {"object": "list", "data": [mine, other]}
 
-        results = svc_wired.reconcile_owner_checkout_sessions("Buyer@Ironclaw.test")
+        reconciliation = svc_wired.reconcile_owner_checkout_sessions("Buyer@Ironclaw.test")
 
-        assert [r["session_id"] for r in results] == ["cs_owner_001"]
+        assert reconciliation["status"] == "complete"
+        assert reconciliation["sessions_reconciled"] == 1
+        assert reconciliation["units_credited"] == 5000
+        assert [r["session_id"] for r in reconciliation["sessions"]] == ["cs_owner_001"]
         owner_wallet = svc_wired._wallet_registry.get_wallet(owner)  # noqa: SLF001
         assert owner_wallet is not None
         assert owner_wallet.balance_units == 5000
         assert svc_wired.get_unit_balance(_ORG).balance == 0
 
-    def test_reconcile_owner_checkout_sessions_raises_when_a_session_fails(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+    def test_reconcile_owner_checkout_sessions_paginates(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
         owner = "buyer@ironclaw.test"
-        mine = _build_checkout_completed_event(unit_credits=5000, session_id="cs_owner_003", owner_key=owner)["data"]["object"]
-        mock_client.get.return_value = {"object": "list", "data": [mine]}
+        first = _build_checkout_completed_event(
+            unit_credits=5000,
+            session_id="cs_owner_page_001",
+            owner_key=owner,
+        )["data"]["object"]
+        second = _build_checkout_completed_event(
+            unit_credits=2500,
+            session_id="cs_owner_page_002",
+            owner_key=owner,
+        )["data"]["object"]
+        mock_client.get.side_effect = [
+            {"object": "list", "data": [first], "has_more": True},
+            {"object": "list", "data": [second], "has_more": False},
+        ]
 
-        with patch.object(svc_wired, "_handle_checkout_completed", side_effect=RuntimeError("wallet unavailable")):
-            with pytest.raises(StripeServiceError, match="Payment sync failed for 1 checkout session"):
-                svc_wired.reconcile_owner_checkout_sessions(owner)
+        reconciliation = svc_wired.reconcile_owner_checkout_sessions(owner)
+
+        assert reconciliation["status"] == "complete"
+        assert reconciliation["pages_scanned"] == 2
+        assert reconciliation["sessions_scanned"] == 2
+        assert reconciliation["sessions_reconciled"] == 2
+        assert reconciliation["units_credited"] == 7500
+        assert mock_client.get.call_args_list[0].kwargs["params"] == {
+            "limit": 100,
+            "status": "complete",
+        }
+        assert mock_client.get.call_args_list[1].kwargs["params"] == {
+            "limit": 100,
+            "status": "complete",
+            "starting_after": "cs_owner_page_001",
+        }
+
+    def test_reconcile_owner_checkout_sessions_retry_reports_existing_ledger_credit(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        owner = "buyer@ironclaw.test"
+        session = _build_checkout_completed_event(
+            unit_credits=5000,
+            session_id="cs_owner_retry_001",
+            owner_key=owner,
+        )["data"]["object"]
+        mock_client.get.return_value = {"object": "list", "data": [session], "has_more": False}
+
+        first = svc_wired.reconcile_owner_checkout_sessions(owner)
+        retry = svc_wired.reconcile_owner_checkout_sessions(owner)
+
+        assert first["units_credited"] == retry["units_credited"] == 5000
+        assert retry["sessions_reconciled"] == 1
+        owner_wallet = svc_wired._wallet_registry.get_wallet(owner)  # noqa: SLF001
+        assert owner_wallet is not None
+        assert owner_wallet.balance_units == 5000
+
+    def test_reconcile_owner_checkout_sessions_reports_page_limit(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.get.side_effect = [
+            {
+                "object": "list",
+                "data": [{"id": f"cs_unmatched_page_{index}"}],
+                "has_more": True,
+            }
+            for index in range(5)
+        ]
+
+        reconciliation = svc_wired.reconcile_owner_checkout_sessions("buyer@ironclaw.test")
+
+        assert reconciliation["status"] == "partial"
+        assert reconciliation["pages_scanned"] == 5
+        assert reconciliation["sessions_scanned"] == 5
+        assert reconciliation["sessions_matched"] == 0
+        assert reconciliation["truncated"] is True
+        assert mock_client.get.call_count == 5
+
+    def test_reconcile_owner_checkout_sessions_reports_failure_without_blocking_others(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        owner = "buyer@ironclaw.test"
+        failing = _build_checkout_completed_event(
+            unit_credits=5000,
+            session_id="cs_owner_003",
+            owner_key=owner,
+        )["data"]["object"]
+        successful = _build_checkout_completed_event(
+            unit_credits=2500,
+            session_id="cs_owner_004",
+            owner_key=owner,
+        )["data"]["object"]
+        mock_client.get.return_value = {
+            "object": "list",
+            "data": [failing, successful],
+            "has_more": False,
+        }
+        original_handler = svc_wired._handle_checkout_completed  # noqa: SLF001
+
+        def _handle_checkout_completed(row: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+            if row.get("id") == "cs_owner_003":
+                raise RuntimeError("wallet unavailable")
+            return original_handler(row, event)
+
+        with patch.object(svc_wired, "_handle_checkout_completed", side_effect=_handle_checkout_completed):
+            reconciliation = svc_wired.reconcile_owner_checkout_sessions(owner)
+
+        assert reconciliation["status"] == "partial"
+        assert reconciliation["sessions_reconciled"] == 1
+        assert reconciliation["units_credited"] == 2500
+        assert reconciliation["sessions"][0]["status"] == "failed"
+        assert reconciliation["sessions"][1]["status"] == "fulfilled"
 
 
 # ===========================================================================

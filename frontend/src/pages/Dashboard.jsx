@@ -839,24 +839,89 @@ const Dashboard = () => {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    let reconciled = null;
     try {
-      const { data } = await api.post("/billing/checkout/reconcile-recent");
-      reconciled = Number(data?.sessions_reconciled ?? 0);
-    } catch {
-      // Reload the dashboard even if payment reconciliation is unavailable.
-    }
-    await fetchDashboard();
-    if (reconciled === null) {
-      toast.error(
-        "Payment sync is unavailable right now. Showing your latest saved status.",
+      const { data: reconciliation } = await payments.reconcileRecent();
+      const [snapshot, ledgerResponse] = await Promise.all([
+        fetchDashboard({ silent: true }),
+        wallet.getLedger(),
+      ]);
+      if (!snapshot) {
+        throw new Error("Dashboard and install-key refresh failed.");
+      }
+
+      const walletBalance = Number(ledgerResponse?.data?.balance);
+      const dashboardBalance = Number(snapshot.dashboard?.wallet_units);
+      if (
+        !Number.isSafeInteger(walletBalance) ||
+        !Number.isSafeInteger(dashboardBalance) ||
+        walletBalance !== dashboardBalance
+      ) {
+        throw new Error("Wallet balance views have not synchronized yet.");
+      }
+
+      const sessions = Array.isArray(reconciliation?.sessions)
+        ? reconciliation.sessions
+        : [];
+      const failures = sessions.filter(
+        (session) => session?.status === "failed",
       );
-    } else if (reconciled > 0) {
-      toast.success(
-        "Payment confirmed. Units and install keys are up to date.",
-      );
-    } else {
-      toast.success("Account refreshed.");
+      if (reconciliation?.truncated === true) {
+        toast.error(
+          "Payment sync is incomplete because the Stripe session scan reached its limit. Retry or contact support.",
+        );
+      } else if (failures.length > 0 || reconciliation?.status === "partial") {
+        const detail = failures.find((session) => session?.error)?.error;
+        toast.error(
+          detail
+            ? `Payment sync is incomplete. ${detail}`
+            : "Payment sync is incomplete. Retry or contact support.",
+        );
+      } else if (
+        reconciliation?.status === "no_paid_sessions_found" ||
+        Number(reconciliation?.sessions_matched) === 0
+      ) {
+        toast.error(
+          "No paid checkout was found for this account. No new charge was made; contact support if Stripe shows a completed payment.",
+        );
+      } else {
+        const installKeysReady = INSTALL_KEY_PROGRAMS.every(({ program }) => {
+          const slug = program.replace(/_/g, "-");
+          const key = snapshot.tokens?.install_metadata?.[slug];
+          return (
+            key?.available === true &&
+            key.program === program &&
+            key.slug === slug &&
+            typeof key.key_id === "string" &&
+            key.key_id.length > 0
+          );
+        });
+        if (!installKeysReady) {
+          throw new Error(
+            "One or more paid platform keys are not available yet.",
+          );
+        }
+
+        const sessionsReconciled = Number(reconciliation?.sessions_reconciled);
+        const unitsCredited = Number(reconciliation?.units_credited);
+        if (
+          !Number.isSafeInteger(sessionsReconciled) ||
+          sessionsReconciled < 1 ||
+          !Number.isSafeInteger(unitsCredited) ||
+          unitsCredited < 1
+        ) {
+          throw new Error(
+            "Stripe found a paid session, but wallet credit could not be confirmed.",
+          );
+        }
+        toast.success(
+          `Payment confirmed — ${unitsCredited.toLocaleString()} units are in your wallet and install keys are refreshed.`,
+        );
+      }
+    } catch (error) {
+      await fetchDashboard({ silent: true });
+      toast.error(`Payment sync failed. ${getErrorMessage(error)}`);
+    } finally {
+      setRefreshing(false);
     }
   }, [fetchDashboard]);
 
