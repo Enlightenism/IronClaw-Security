@@ -35,6 +35,7 @@ from app.services.stripe_service import (
     StripeIdempotencyError,
     StripeInsufficientUnitsError,
     StripePaymentMethodNotFoundError,
+    StripePersistenceError,
     StripeService,
     StripeServiceError,
     StripeSessionNotFoundError,
@@ -581,6 +582,38 @@ class TestCustomerManagement:
     def test_resolve_customer_id_missing_returns_none(self, svc: StripeService) -> None:
         result = svc.resolve_customer_id("org-never-registered")
         assert result is None
+
+    def test_resolve_customer_id_storage_failure_raises_persistence_error(
+        self,
+        svc: StripeService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("IRONCLAW_PERSISTENCE_MODE", "supabase")
+        monkeypatch.setenv("ENVIRONMENT", "test")
+        monkeypatch.setattr("app.services.stripe_service._should_use_memory_fallback", lambda: False)
+        monkeypatch.setattr(
+            "app.services.stripe_service.get_supabase_service_client",
+            MagicMock(side_effect=RuntimeError("storage unavailable")),
+        )
+
+        with pytest.raises(StripePersistenceError, match="could not be loaded from durable storage"):
+            svc.resolve_customer_id("org-storage-error")
+
+    def test_register_customer_mapping_storage_failure_raises_persistence_error(
+        self,
+        svc: StripeService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("IRONCLAW_PERSISTENCE_MODE", "supabase")
+        monkeypatch.setenv("ENVIRONMENT", "test")
+        monkeypatch.setattr("app.services.stripe_service._should_use_memory_fallback", lambda: False)
+        monkeypatch.setattr(
+            "app.services.stripe_service.get_supabase_service_client",
+            MagicMock(side_effect=RuntimeError("storage unavailable")),
+        )
+
+        with pytest.raises(StripePersistenceError, match="could not be persisted to durable storage"):
+            svc.register_customer_mapping("org-storage-error", "cus_storage_error")
 
     def test_resolve_customer_id_after_stripe_create(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
         mock_client.post.return_value = {"id": "cus_stripe_id_lookup"}

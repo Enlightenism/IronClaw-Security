@@ -1214,7 +1214,7 @@ async def create_checkout_session(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
-                "error": "checkout_fulfillment_storage_unavailable",
+                "error": "checkout_storage_unavailable",
                 "detail": str(exc),
                 "retryable": True,
             },

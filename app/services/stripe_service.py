@@ -77,7 +77,7 @@ def _load_customer_link(*, org_id: str | None = None, customer_id: str | None = 
     except Exception as exc:
         logger.warning("stripe.customer_link_load_failed org=%s", org_id or "", exc_info=True)
         if _customer_link_persistence_required():
-            raise StripeServiceError("Stripe customer link could not be loaded from durable storage.") from exc
+            raise StripePersistenceError("Stripe customer link could not be loaded from durable storage.") from exc
         return None
 
 
@@ -93,7 +93,7 @@ def _persist_customer_link(org_id: str, customer_id: str) -> None:
     except Exception as exc:
         logger.warning("stripe.customer_link_persist_failed org=%s", org_id, exc_info=True)
         if _customer_link_persistence_required():
-            raise StripeServiceError("Stripe customer link could not be persisted to durable storage.") from exc
+            raise StripePersistenceError("Stripe customer link could not be persisted to durable storage.") from exc
 
 
 _SCHEMA_VERSION = "1.0"
@@ -753,7 +753,7 @@ class StripeServiceError(Exception):
 
 
 class StripePersistenceError(StripeServiceError):
-    """Raised when durable Stripe fulfillment state cannot be read or written."""
+    """Raised when durable Stripe state cannot be read or written."""
 
 
 class StripeAPIError(StripeServiceError):
