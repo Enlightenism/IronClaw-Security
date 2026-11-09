@@ -16,6 +16,7 @@ os.environ.setdefault("SUPABASE_ANON_KEY", "")
 import pytest
 
 import app.api.routes.billing as billing_routes
+from app.core.supabase import SupabaseAPIError
 from app.services.billing_store import (
     StripeCheckoutFulfillmentStore,
     SubscriptionMeterStore,
@@ -126,6 +127,40 @@ def test_stripe_checkout_fulfillment_store_persists_trusted_session_fields(
             "p_metadata": {"source": "stripe.checkout"},
         },
     )
+
+
+def test_stripe_checkout_fulfillment_store_verifies_rpc_functions_without_writing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MagicMock()
+    client.rpc.return_value.execute.side_effect = SupabaseAPIError(
+        "rejected by validation",
+        status_code=400,
+        postgrest_code="P0001",
+    )
+    monkeypatch.setattr("app.services.billing_store.get_supabase_service_client", lambda: client)
+
+    StripeCheckoutFulfillmentStore().verify_rpc_functions()
+
+    assert [call.args[0] for call in client.rpc.call_args_list] == [
+        "register_stripe_checkout_fulfillment",
+        "mark_stripe_checkout_fulfillment",
+    ]
+
+
+def test_stripe_checkout_fulfillment_store_reports_missing_rpc_functions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MagicMock()
+    client.rpc.return_value.execute.side_effect = SupabaseAPIError(
+        "function not found",
+        status_code=404,
+        postgrest_code="PGRST202",
+    )
+    monkeypatch.setattr("app.services.billing_store.get_supabase_service_client", lambda: client)
+
+    with pytest.raises(SupabaseAPIError):
+        StripeCheckoutFulfillmentStore().verify_rpc_functions()
 
 
 # ---------------------------------------------------------------------------

@@ -84,7 +84,10 @@ class SupabaseRequestError(SupabaseClientError):
 
 
 class SupabaseAPIError(SupabaseClientError):
-    pass
+    def __init__(self, message: str, *, status_code: int | None = None, postgrest_code: str | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.postgrest_code = postgrest_code
 
 
 @dataclass(frozen=True)
@@ -553,13 +556,18 @@ class SupabaseClient:
             except ValueError:
                 body = None
 
+            postgrest_code: str | None = None
             if isinstance(body, dict):
                 detail = body.get("message") or body.get("error_description") or body.get("error") or response.text
+                code = body.get("code")
+                postgrest_code = str(code) if code else None
             else:
                 detail = response.text
 
             raise SupabaseAPIError(
                 f"supabase request failed with status {response.status_code}: {detail}",
+                status_code=response.status_code,
+                postgrest_code=postgrest_code,
             )
 
         if not response.content:

@@ -657,6 +657,17 @@ class TestSupabaseClientRequest:
         with pytest.raises(SupabaseAPIError, match="column not found"):
             client.request("GET", f"{_VALID_URL}/rest/v1/scan_history")
 
+    def test_api_error_carries_status_and_postgrest_code(self) -> None:
+        client = _make_client()
+        client.session.request = MagicMock(
+            return_value=_mock_response(404, {"code": "42P01", "message": "relation does not exist"}),
+        )
+        with pytest.raises(SupabaseAPIError) as exc_info:
+            client.request("GET", f"{_VALID_URL}/rest/v1/stripe_customer_links")
+
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.postgrest_code == "42P01"
+
 
 # ---------------------------------------------------------------------------
 # SupabaseClient.healthcheck

@@ -31,6 +31,7 @@ from app.services.stripe_service import (
     StripeIdempotencyError,
     StripeInsufficientUnitsError,
     StripePaymentMethodNotFoundError,
+    StripePersistenceError,
     StripeService,
     StripeServiceError,
     StripeSessionNotFoundError,
@@ -274,6 +275,7 @@ def svc(monkeypatch: pytest.MonkeyPatch) -> StripeService:
 
     monkeypatch.setattr(s, "_is_payment_intent_refunded", lambda _: False)
     monkeypatch.setattr(s, "_record_checkout_fulfillment", record_checkout)
+    monkeypatch.setattr(s, "_verify_checkout_fulfillment_storage", lambda: None)
     monkeypatch.setattr(s, "_mark_checkout_fulfillment", mark_checkout)
     monkeypatch.setattr(
         s,
@@ -2096,6 +2098,38 @@ class TestCheckoutSessionCreation:
         assert persisted["units"] == 5_000
         assert persisted["payment_intent"] == "pi_save_card_consent_001"
         assert persisted["save_card"] is save_card
+
+    def test_checkout_preflight_failure_skips_stripe_session_creation(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            svc_wired,
+            "_verify_checkout_fulfillment_storage",
+            MagicMock(
+                side_effect=StripePersistenceError(
+                    "durable fulfillment storage is unavailable",
+                    error_code="checkout_fulfillment_storage_unavailable",
+                ),
+            ),
+        )
+
+        with pytest.raises(StripePersistenceError) as exc_info:
+            svc_wired.create_checkout_session(
+                org_id=_ORG,
+                price_id="price_preflight_001",
+                unit_credits=5_000,
+                success_url="https://example.com/ok",
+                cancel_url="https://example.com/cancel",
+                customer_id=_CUSTOMER_ID,
+                owner_key="buyer@ironclaw.test",
+                metadata={"package_id": "pkg_5000"},
+            )
+
+        assert exc_info.value.error_code == "checkout_fulfillment_storage_unavailable"
+        mock_client.post.assert_not_called()
 
 
 class TestCompleteCheckoutSession:

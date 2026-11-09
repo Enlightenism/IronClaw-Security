@@ -32,6 +32,8 @@ PlanName = Literal["starter", "team", "enterprise"]
 
 class StripeCheckoutFulfillmentStore:
     _TABLE: Final[str] = "stripe_checkout_fulfillments"
+    _PROBE_SESSION_ID: Final[str] = "cs_storage_preflight"
+    _VALIDATION_SQLSTATE: Final[str] = "P0001"
 
     @staticmethod
     def _row(data: Any, *, operation: str) -> dict[str, Any]:
@@ -129,6 +131,49 @@ class StripeCheckoutFulfillmentStore:
             .execute()
         )
         return self._row(getattr(result, "data", None), operation="mark checkout")
+
+    def verify_rpc_functions(self) -> None:
+        """Confirm the migration 021 RPCs are installed without writing anything.
+
+        Each probe fails the SQL argument validation before any read or write. A P0001
+        response means the function exists; a missing function is reported as PGRST202.
+        """
+        client = get_supabase_service_client()
+        probes: tuple[tuple[str, dict[str, Any]], ...] = (
+            (
+                "register_stripe_checkout_fulfillment",
+                {
+                    "p_session_id": self._PROBE_SESSION_ID,
+                    "p_owner_key": "",
+                    "p_org_id": "",
+                    "p_package_id": "",
+                    "p_units": 0,
+                    "p_payment_intent": None,
+                    "p_customer_id": None,
+                    "p_save_card": False,
+                    "p_metadata": {},
+                },
+            ),
+            (
+                "mark_stripe_checkout_fulfillment",
+                {
+                    "p_session_id": self._PROBE_SESSION_ID,
+                    "p_fulfillment_status": "probe",
+                    "p_units_credited": None,
+                    "p_install_keys_provisioned": None,
+                    "p_last_error": None,
+                    "p_metadata": {},
+                },
+            ),
+        )
+        for function_name, payload in probes:
+            try:
+                client.rpc(function_name, payload).execute()
+            except SupabaseAPIError as exc:
+                if exc.postgrest_code == self._VALIDATION_SQLSTATE:
+                    continue
+                raise
+            raise RuntimeError(f"billing_store: {function_name} accepted a probe that must be rejected")
 
 
 _stripe_checkout_fulfillment_store: StripeCheckoutFulfillmentStore | None = None

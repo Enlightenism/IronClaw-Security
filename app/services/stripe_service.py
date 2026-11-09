@@ -45,6 +45,10 @@ logger = logging.getLogger(__name__)
 _STRIPE_API_BASE = "https://api.stripe.com/v1"
 _STRIPE_TIMEOUT_SECONDS = 15
 _STRIPE_CUSTOMER_LINKS_TABLE = "stripe_customer_links"
+_CHECKOUT_CUSTOMER_LOOKUP_ERROR = "checkout_customer_lookup_unavailable"
+_CHECKOUT_CUSTOMER_PERSIST_ERROR = "checkout_customer_persist_unavailable"
+_CHECKOUT_FULFILLMENT_STORAGE_ERROR = "checkout_fulfillment_storage_unavailable"
+_CHECKOUT_FULFILLMENT_PREFLIGHT_SESSION_ID = "cs_storage_preflight"
 _METERED_USAGE_BUFFER_MAX = 500
 _CHECKOUT_SESSION_TTL_SECONDS = 1800  # 30 min
 _CHECKOUT_RECONCILE_PAGE_SIZE = 100
@@ -75,9 +79,18 @@ def _load_customer_link(*, org_id: str | None = None, customer_id: str | None = 
             rows = [rows]
         return dict(rows[0]) if rows else None
     except Exception as exc:
-        logger.warning("stripe.customer_link_load_failed org=%s", org_id or "", exc_info=True)
+        logger.warning(
+            "stripe.customer_link_load_failed org=%s http_status=%s postgrest_code=%s",
+            org_id or "",
+            getattr(exc, "status_code", None),
+            getattr(exc, "postgrest_code", None),
+            exc_info=True,
+        )
         if _customer_link_persistence_required():
-            raise StripePersistenceError("Stripe customer link could not be loaded from durable storage.") from exc
+            raise StripePersistenceError(
+                "Stripe customer link could not be loaded from durable storage.",
+                error_code=_CHECKOUT_CUSTOMER_LOOKUP_ERROR,
+            ) from exc
         return None
 
 
@@ -91,9 +104,18 @@ def _persist_customer_link(org_id: str, customer_id: str) -> None:
             returning="minimal",
         ).execute()
     except Exception as exc:
-        logger.warning("stripe.customer_link_persist_failed org=%s", org_id, exc_info=True)
+        logger.warning(
+            "stripe.customer_link_persist_failed org=%s http_status=%s postgrest_code=%s",
+            org_id,
+            getattr(exc, "status_code", None),
+            getattr(exc, "postgrest_code", None),
+            exc_info=True,
+        )
         if _customer_link_persistence_required():
-            raise StripePersistenceError("Stripe customer link could not be persisted to durable storage.") from exc
+            raise StripePersistenceError(
+                "Stripe customer link could not be persisted to durable storage.",
+                error_code=_CHECKOUT_CUSTOMER_PERSIST_ERROR,
+            ) from exc
 
 
 _SCHEMA_VERSION = "1.0"
@@ -754,6 +776,10 @@ class StripeServiceError(Exception):
 
 class StripePersistenceError(StripeServiceError):
     """Raised when durable Stripe state cannot be read or written."""
+
+    def __init__(self, message: str, *, error_code: str = "checkout_storage_unavailable") -> None:
+        super().__init__(message)
+        self.error_code = error_code
 
 
 class StripeAPIError(StripeServiceError):
@@ -1706,7 +1732,24 @@ class StripeService:
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("stripe.checkout_fulfillment_record_write_failed session=%s", session_id)
-            raise StripePersistenceError("The durable checkout fulfillment record could not be saved; retry or contact support.") from exc
+            raise StripePersistenceError(
+                "The durable checkout fulfillment record could not be saved; retry or contact support.",
+                error_code=_CHECKOUT_FULFILLMENT_STORAGE_ERROR,
+            ) from exc
+
+    def _verify_checkout_fulfillment_storage(self) -> None:
+        from app.services.billing_store import get_stripe_checkout_fulfillment_store
+
+        try:
+            store = get_stripe_checkout_fulfillment_store()
+            store.get_by_session(_CHECKOUT_FULFILLMENT_PREFLIGHT_SESSION_ID)
+            store.verify_rpc_functions()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("stripe.checkout_fulfillment_preflight_failed")
+            raise StripePersistenceError(
+                "The durable checkout fulfillment storage is unavailable; no checkout session was created.",
+                error_code=_CHECKOUT_FULFILLMENT_STORAGE_ERROR,
+            ) from exc
 
     def _mark_checkout_fulfillment(
         self,
@@ -1935,6 +1978,9 @@ class StripeService:
         for k, v in session_meta.items():
             params[f"metadata[{k}]"] = str(v)
 
+        if mode == StripeCheckoutMode.PAYMENT and unit_credits > 0:
+            self._verify_checkout_fulfillment_storage()
+
         try:
             resp = self._get_client().post("/checkout/sessions", params)
         except StripeAPIError as exc:
@@ -1953,6 +1999,8 @@ class StripeService:
         session_id: str = resp["id"]
         checkout_url: str = resp.get("url", "")
         checkout_customer_id = customer_id or resp.get("customer")
+        if not customer_id and checkout_customer_id:
+            _persist_customer_link(org_id, str(checkout_customer_id))
         expires_at: str | None = None
         if resp.get("expires_at"):
             try:

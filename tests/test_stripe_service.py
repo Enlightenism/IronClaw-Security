@@ -412,6 +412,7 @@ def svc(monkeypatch: pytest.MonkeyPatch) -> StripeService:
         )
 
     monkeypatch.setattr(service, "_record_checkout_fulfillment", record_checkout)
+    monkeypatch.setattr(service, "_verify_checkout_fulfillment_storage", lambda: None)
     monkeypatch.setattr(service, "_mark_checkout_fulfillment", mark_checkout)
     monkeypatch.setattr(
         service,
@@ -596,8 +597,10 @@ class TestCustomerManagement:
             MagicMock(side_effect=RuntimeError("storage unavailable")),
         )
 
-        with pytest.raises(StripePersistenceError, match="could not be loaded from durable storage"):
+        with pytest.raises(StripePersistenceError, match="could not be loaded from durable storage") as exc_info:
             svc.resolve_customer_id("org-storage-error")
+
+        assert exc_info.value.error_code == "checkout_customer_lookup_unavailable"
 
     def test_register_customer_mapping_storage_failure_raises_persistence_error(
         self,
@@ -612,8 +615,10 @@ class TestCustomerManagement:
             MagicMock(side_effect=RuntimeError("storage unavailable")),
         )
 
-        with pytest.raises(StripePersistenceError, match="could not be persisted to durable storage"):
+        with pytest.raises(StripePersistenceError, match="could not be persisted to durable storage") as exc_info:
             svc.register_customer_mapping("org-storage-error", "cus_storage_error")
+
+        assert exc_info.value.error_code == "checkout_customer_persist_unavailable"
 
     def test_resolve_customer_id_after_stripe_create(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
         mock_client.post.return_value = {"id": "cus_stripe_id_lookup"}

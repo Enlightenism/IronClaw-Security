@@ -915,6 +915,7 @@ class TestCheckoutSessionRoutes:
     ) -> None:
         mock_svc.resolve_customer_id.side_effect = StripePersistenceError(
             "Stripe customer link could not be loaded from durable storage.",
+            error_code="checkout_customer_lookup_unavailable",
         )
 
         with pytest.MonkeyPatch.context() as mp:
@@ -930,10 +931,36 @@ class TestCheckoutSessionRoutes:
             )
 
         assert response.status_code == 503
-        assert response.json()["detail"]["error"] == "checkout_storage_unavailable"
+        assert response.json()["detail"]["error"] == "checkout_customer_lookup_unavailable"
         assert response.json()["detail"]["retryable"] is True
         assert "customer link" in response.json()["detail"]["detail"]
         mock_svc.create_checkout_session.assert_not_called()
+
+    def test_create_checkout_session_returns_distinct_code_for_customer_persist_failure(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.create_checkout_session.side_effect = StripePersistenceError(
+            "Stripe customer link could not be persisted to durable storage.",
+            error_code="checkout_customer_persist_unavailable",
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.routers.stripe_router.vault.get", MagicMock(side_effect=_TEST_PRICE_IDS.get))
+            response = client.post(
+                _billing_path("/checkout/sessions"),
+                json={
+                    "packageId": "pkg5000",
+                    "successUrl": _ALLOWED_SUCCESS_URL,
+                    "cancelUrl": _ALLOWED_CANCEL_URL,
+                },
+                headers=_auth_headers(),
+            )
+
+        assert response.status_code == 503
+        assert response.json()["detail"]["error"] == "checkout_customer_persist_unavailable"
+        assert response.json()["detail"]["retryable"] is True
 
     def test_checkout_session_status_checks_owner_and_redacts_owner_metadata(
         self,
