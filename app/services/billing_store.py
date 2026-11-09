@@ -21,10 +21,133 @@ __all__ = [
     "reset_subscription_meter_store",
     "get_billing_store",
     "reset_billing_store",
+    "StripeCheckoutFulfillmentStore",
+    "get_stripe_checkout_fulfillment_store",
+    "reset_stripe_checkout_fulfillment_store",
 ]
 
 
 PlanName = Literal["starter", "team", "enterprise"]
+
+
+class StripeCheckoutFulfillmentStore:
+    _TABLE: Final[str] = "stripe_checkout_fulfillments"
+
+    @staticmethod
+    def _row(data: Any, *, operation: str) -> dict[str, Any]:
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return dict(data[0])
+        if isinstance(data, dict):
+            return dict(data)
+        raise RuntimeError(f"billing_store: {operation} returned no checkout fulfillment record")
+
+    def record_checkout(
+        self,
+        *,
+        session_id: str,
+        owner_key: str,
+        org_id: str,
+        package_id: str,
+        units: int,
+        payment_intent: str | None,
+        customer_id: str | None,
+        save_card: bool,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized_session_id = str(session_id or "").strip()
+        normalized_owner_key = str(owner_key or "").strip().lower()
+        normalized_org_id = str(org_id or "").strip().lower()
+        normalized_package_id = str(package_id or "").strip()
+        if not normalized_session_id or not normalized_owner_key or not normalized_org_id or not normalized_package_id:
+            raise ValueError("billing_store: checkout session, owner, organization, and package are required")
+        if int(units) <= 0:
+            raise ValueError("billing_store: checkout units must be greater than zero")
+
+        result = (
+            get_supabase_service_client()
+            .rpc(
+                "register_stripe_checkout_fulfillment",
+                {
+                    "p_session_id": normalized_session_id,
+                    "p_owner_key": normalized_owner_key,
+                    "p_org_id": normalized_org_id,
+                    "p_package_id": normalized_package_id,
+                    "p_units": int(units),
+                    "p_payment_intent": str(payment_intent or "").strip() or None,
+                    "p_customer_id": str(customer_id or "").strip() or None,
+                    "p_save_card": bool(save_card),
+                    "p_metadata": metadata or {},
+                },
+            )
+            .execute()
+        )
+        return self._row(getattr(result, "data", None), operation="record checkout")
+
+    def get_by_session(self, session_id: str) -> dict[str, Any] | None:
+        normalized_session_id = str(session_id or "").strip()
+        if not normalized_session_id:
+            raise ValueError("billing_store: session_id is required")
+        result = get_supabase_service_client().table(self._TABLE).select("*").eq("session_id", normalized_session_id).limit(1).execute()
+        data = getattr(result, "data", None)
+        return dict(data[0]) if isinstance(data, list) and data and isinstance(data[0], dict) else None
+
+    def get_by_payment_intent(self, payment_intent: str) -> dict[str, Any] | None:
+        normalized_payment_intent = str(payment_intent or "").strip()
+        if not normalized_payment_intent:
+            raise ValueError("billing_store: payment_intent is required")
+        result = get_supabase_service_client().table(self._TABLE).select("*").eq("payment_intent", normalized_payment_intent).limit(1).execute()
+        data = getattr(result, "data", None)
+        return dict(data[0]) if isinstance(data, list) and data and isinstance(data[0], dict) else None
+
+    def mark(
+        self,
+        session_id: str,
+        *,
+        status: str,
+        units_credited: bool | None = None,
+        install_keys_provisioned: bool | None = None,
+        last_error: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized_session_id = str(session_id or "").strip()
+        normalized_status = str(status or "").strip().lower()
+        if not normalized_session_id:
+            raise ValueError("billing_store: session_id is required")
+        result = (
+            get_supabase_service_client()
+            .rpc(
+                "mark_stripe_checkout_fulfillment",
+                {
+                    "p_session_id": normalized_session_id,
+                    "p_fulfillment_status": normalized_status,
+                    "p_units_credited": units_credited,
+                    "p_install_keys_provisioned": install_keys_provisioned,
+                    "p_last_error": last_error,
+                    "p_metadata": metadata or {},
+                },
+            )
+            .execute()
+        )
+        return self._row(getattr(result, "data", None), operation="mark checkout")
+
+
+_stripe_checkout_fulfillment_store: StripeCheckoutFulfillmentStore | None = None
+_stripe_checkout_fulfillment_store_lock = RLock()
+
+
+def get_stripe_checkout_fulfillment_store() -> StripeCheckoutFulfillmentStore:
+    global _stripe_checkout_fulfillment_store
+    if _stripe_checkout_fulfillment_store is None:
+        with _stripe_checkout_fulfillment_store_lock:
+            if _stripe_checkout_fulfillment_store is None:
+                _stripe_checkout_fulfillment_store = StripeCheckoutFulfillmentStore()
+    return _stripe_checkout_fulfillment_store
+
+
+def reset_stripe_checkout_fulfillment_store() -> None:
+    global _stripe_checkout_fulfillment_store
+    with _stripe_checkout_fulfillment_store_lock:
+        _stripe_checkout_fulfillment_store = None
 
 
 def _normalize_status(value: str | None, *, default: str) -> str:

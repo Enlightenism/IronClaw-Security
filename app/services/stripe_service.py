@@ -99,6 +99,8 @@ def _persist_customer_link(org_id: str, customer_id: str) -> None:
 _SCHEMA_VERSION = "1.0"
 _INVOICE_CACHE_MAX = 200
 _STRIPE_CHECKOUT_SESSION_ID_PATTERN = re.compile(r"cs_[A-Za-z0-9_]{1,250}\Z")
+_STRIPE_PAYMENT_INTENT_ID_PATTERN = re.compile(r"pi_[A-Za-z0-9_]{1,250}\Z")
+_STRIPE_CHARGE_ID_PATTERN = re.compile(r"ch_[A-Za-z0-9_]{1,250}\Z")
 _CHECKOUT_INTEGRITY_VERSION = "1"
 _CHECKOUT_INTEGRITY_VERSION_KEY = "ironclaw_checkout_version"
 _CHECKOUT_INTEGRITY_SIGNATURE_KEY = "ironclaw_checkout_signature"
@@ -748,6 +750,10 @@ class _StripeHTTPClient:
 
 class StripeServiceError(Exception):
     """Base for all StripeService errors."""
+
+
+class StripePersistenceError(StripeServiceError):
+    """Raised when durable Stripe fulfillment state cannot be read or written."""
 
 
 class StripeAPIError(StripeServiceError):
@@ -1498,6 +1504,8 @@ class StripeService:
             "unit_credits": str(metadata.get("unit_credits") or ""),
             "mode": str(metadata.get(_CHECKOUT_MODE_KEY) or ""),
         }
+        if "save_card" in metadata:
+            payload["save_card"] = str(metadata.get("save_card") or "").lower()
         return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
 
     def _sign_checkout_integrity_metadata(self, metadata: dict[str, Any]) -> str:
@@ -1551,6 +1559,10 @@ class StripeService:
         if package_id is not None and not isinstance(package_id, str):
             raise StripeServiceError("Checkout session contains an invalid trusted package.")
 
+        raw_save_card = metadata.get("save_card")
+        if raw_save_card not in {None, "true", "false"}:
+            raise StripeServiceError("Checkout session contains invalid saved-payment-method consent metadata.")
+
         signature = metadata.get(_CHECKOUT_INTEGRITY_SIGNATURE_KEY)
         if not isinstance(signature, str) or not hmac.compare_digest(
             signature,
@@ -1566,6 +1578,215 @@ class StripeService:
             "quantity": quantity,
             "unit_credits": unit_credits,
             "mode": checkout_mode,
+            "save_card": raw_save_card == "true",
+        }
+
+    def _is_payment_intent_refunded(self, payment_intent_id: str) -> bool:
+        normalized_id = str(payment_intent_id or "").strip()
+        if not _STRIPE_PAYMENT_INTENT_ID_PATTERN.fullmatch(normalized_id):
+            raise StripeServiceError("Paid checkout contains an invalid PaymentIntent ID.")
+
+        try:
+            if self._wallet_registry.is_payment_refunded(normalized_id):
+                return True
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stripe.checkout_refund_marker_lookup_failed payment_intent=%s",
+                hashlib.sha256(normalized_id.encode("utf-8")).hexdigest()[:12],
+            )
+            raise StripePersistenceError("The durable refund status is unavailable; checkout fulfillment was not applied.") from exc
+
+        try:
+            payment_intent = self._get_client().get(
+                f"/payment_intents/{normalized_id}",
+                params={"expand[]": "latest_charge"},
+            )
+        except StripeAPIError as exc:
+            fingerprint = hashlib.sha256(normalized_id.encode("utf-8")).hexdigest()[:12]
+            logger.warning(
+                "stripe.checkout_refund_status_unavailable payment_intent=%s http_status=%s",
+                fingerprint,
+                exc.http_status,
+            )
+            raise StripeServiceError("Stripe could not verify the payment refund status; fulfillment was not applied.") from exc
+
+        if payment_intent.get("id") != normalized_id:
+            raise StripeServiceError("Stripe returned a mismatched PaymentIntent.")
+        if payment_intent.get("status") != "succeeded":
+            raise StripeServiceError("Stripe has not confirmed a successful PaymentIntent.")
+
+        latest_charge = payment_intent.get("latest_charge")
+        if isinstance(latest_charge, str):
+            charge_id = latest_charge.strip()
+            if not _STRIPE_CHARGE_ID_PATTERN.fullmatch(charge_id):
+                raise StripeServiceError("Stripe returned an invalid charge for the PaymentIntent.")
+            try:
+                charge = self._get_client().get(f"/charges/{charge_id}")
+            except StripeAPIError as exc:
+                fingerprint = hashlib.sha256(normalized_id.encode("utf-8")).hexdigest()[:12]
+                logger.warning(
+                    "stripe.checkout_refund_status_unavailable payment_intent=%s http_status=%s",
+                    fingerprint,
+                    exc.http_status,
+                )
+                raise StripeServiceError("Stripe could not verify the payment refund status; fulfillment was not applied.") from exc
+            if charge.get("id") != charge_id:
+                raise StripeServiceError("Stripe returned a mismatched charge for the PaymentIntent.")
+        elif isinstance(latest_charge, dict):
+            charge = latest_charge
+            charge_id = str(charge.get("id") or "").strip()
+            if not _STRIPE_CHARGE_ID_PATTERN.fullmatch(charge_id):
+                raise StripeServiceError("Stripe returned an invalid charge for the PaymentIntent.")
+        else:
+            raise StripeServiceError("Stripe did not return a charge for the PaymentIntent.")
+
+        charge_payment_intent = charge.get("payment_intent")
+        if isinstance(charge_payment_intent, dict):
+            charge_payment_intent = charge_payment_intent.get("id")
+        if charge_payment_intent != normalized_id:
+            raise StripeServiceError("Stripe returned a charge for a different PaymentIntent.")
+
+        refunded = charge.get("refunded")
+        if not isinstance(refunded, bool):
+            raise StripeServiceError("Stripe returned an invalid charge refund status.")
+        try:
+            amount_refunded = int(charge.get("amount_refunded", 0) or 0)
+        except (TypeError, ValueError) as exc:
+            raise StripeServiceError("Stripe returned an invalid refunded amount.") from exc
+        if amount_refunded < 0:
+            raise StripeServiceError("Stripe returned an invalid refunded amount.")
+
+        if refunded or amount_refunded > 0:
+            if amount_refunded <= 0:
+                raise StripeServiceError("Stripe reported a refund without a positive refunded amount.")
+            try:
+                self._wallet_registry.mark_payment_refunded(
+                    normalized_id,
+                    charge_id=charge_id,
+                    amount_refunded=amount_refunded,
+                    reason="stripe_refund_status_confirmed",
+                    metadata={"source": "payment_intent_verification"},
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "stripe.checkout_refund_marker_write_failed payment_intent=%s",
+                    hashlib.sha256(normalized_id.encode("utf-8")).hexdigest()[:12],
+                )
+                raise StripePersistenceError("Stripe confirmed a refund, but the durable refund marker could not be saved.") from exc
+            return True
+
+        return False
+
+    def _record_checkout_fulfillment(
+        self,
+        *,
+        session_id: str,
+        org_id: str,
+        owner_key: str,
+        package_id: str,
+        units: int,
+        payment_intent: str | None,
+        customer_id: str | None,
+        save_card: bool,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        from app.services.billing_store import get_stripe_checkout_fulfillment_store
+
+        try:
+            return get_stripe_checkout_fulfillment_store().record_checkout(
+                session_id=session_id,
+                owner_key=owner_key,
+                org_id=org_id,
+                package_id=package_id,
+                units=units,
+                payment_intent=payment_intent,
+                customer_id=customer_id,
+                save_card=save_card,
+                metadata=metadata,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("stripe.checkout_fulfillment_record_write_failed session=%s", session_id)
+            raise StripePersistenceError("The durable checkout fulfillment record could not be saved; retry or contact support.") from exc
+
+    def _mark_checkout_fulfillment(
+        self,
+        session_id: str,
+        *,
+        status: str,
+        units_credited: bool | None = None,
+        install_keys_provisioned: bool | None = None,
+        last_error: str | None = None,
+    ) -> dict[str, Any]:
+        from app.services.billing_store import get_stripe_checkout_fulfillment_store
+
+        try:
+            return get_stripe_checkout_fulfillment_store().mark(
+                session_id,
+                status=status,
+                units_credited=units_credited,
+                install_keys_provisioned=install_keys_provisioned,
+                last_error=last_error,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("stripe.checkout_fulfillment_status_write_failed session=%s status=%s", session_id, status)
+            raise StripePersistenceError("The durable checkout fulfillment status could not be saved; retry or contact support.") from exc
+
+    def _get_checkout_fulfillment_by_payment_intent(self, payment_intent: str) -> dict[str, Any] | None:
+        from app.services.billing_store import get_stripe_checkout_fulfillment_store
+
+        try:
+            return get_stripe_checkout_fulfillment_store().get_by_payment_intent(payment_intent)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "stripe.checkout_fulfillment_lookup_failed payment_intent=%s",
+                hashlib.sha256(payment_intent.encode("utf-8")).hexdigest()[:12],
+            )
+            raise StripePersistenceError("The durable checkout fulfillment record could not be loaded.") from exc
+
+    def _revoke_checkout_entitlements_for_refund(
+        self,
+        *,
+        session_id: str,
+        payment_intent: str,
+        owner_key: str,
+    ) -> dict[str, int]:
+        from app.core.install_keys import get_install_key_registry
+        from app.services.billing_store import get_billing_store
+        from app.services.install_key_handoff import get_install_key_handoff_service
+
+        normalized_owner = str(owner_key or "").strip().lower()
+        if not normalized_owner:
+            raise StripeServiceError("A verified wallet owner is required to revoke refunded checkout entitlements.")
+
+        revoked_keys = get_install_key_registry().revoke_keys_for_refund(
+            checkout_session_ids={session_id},
+            payment_intent=payment_intent,
+        )
+        revoked_units = self._wallet_registry.revoke_units_for_refund(
+            [normalized_owner],
+            payment_intent=payment_intent,
+            checkout_session_id=session_id,
+            reason="refund",
+        )
+        units_revoked = sum(revoked_units.values())
+        for reference, amount in sorted(revoked_units.items()):
+            get_billing_store().revoke_units(
+                f"checkout:{reference}",
+                amount,
+                metadata={
+                    "event_id": f"refund_revoke:{reference}",
+                    "checkout_session_id": reference,
+                    "payment_intent": payment_intent,
+                    "reason": "refund",
+                },
+            )
+
+        handoff_service = get_install_key_handoff_service()
+        handoff_service.revoke_unredeemed_claims([record.key_id for record in revoked_keys])
+        handoff_service.clear_claims_for_purchase(session_id)
+        return {
+            "install_keys_revoked": len(revoked_keys),
+            "units_revoked": units_revoked,
         }
 
     def create_payment_method_setup_session(
@@ -1627,6 +1848,7 @@ class StripeService:
         customer_id: str | None = None,
         owner_key: str | None = None,
         metadata: dict[str, Any] | None = None,
+        save_card: bool = False,
     ) -> CheckoutSessionResponse:
         """
         Create a Stripe Checkout Session.
@@ -1654,6 +1876,11 @@ class StripeService:
             raise StripeServiceError("cancel_url is required")
         if mode == StripeCheckoutMode.PAYMENT and not str(org_id).strip():
             raise StripeServiceError("org_id is required for payment checkout")
+        if mode == StripeCheckoutMode.PAYMENT and unit_credits > 0:
+            if not owner_key or not str(owner_key).strip():
+                raise StripeServiceError("An authenticated billing owner is required for unit package checkout")
+            if not str((metadata or {}).get("package_id") or "").strip():
+                raise StripeServiceError("A trusted package_id is required for unit package checkout")
 
         now = _utcnow_iso()
         price_id = price_id.strip()
@@ -1677,6 +1904,10 @@ class StripeService:
             session_meta["owner_key"] = normalized_owner_key
         else:
             session_meta.pop("owner_key", None)
+        if mode == StripeCheckoutMode.PAYMENT:
+            session_meta["save_card"] = "true" if save_card else "false"
+        else:
+            session_meta.pop("save_card", None)
         session_meta[_CHECKOUT_INTEGRITY_SIGNATURE_KEY] = self._sign_checkout_integrity_metadata(session_meta)
 
         params: dict[str, Any] = {
@@ -1687,10 +1918,10 @@ class StripeService:
             "line_items[0][quantity]": str(quantity),
         }
 
-        # Save the buyer's card for future purchases so Stripe can auto-fill it on checkout.
         if mode == StripeCheckoutMode.PAYMENT:
             params["payment_method_types[0]"] = "card"
-            params["payment_intent_data[setup_future_usage]"] = "off_session"
+            if save_card:
+                params["payment_intent_data[setup_future_usage]"] = "off_session"
             if not customer_id:
                 params["customer_creation"] = "always"
 
@@ -1721,6 +1952,7 @@ class StripeService:
 
         session_id: str = resp["id"]
         checkout_url: str = resp.get("url", "")
+        checkout_customer_id = customer_id or resp.get("customer")
         expires_at: str | None = None
         if resp.get("expires_at"):
             try:
@@ -1728,10 +1960,27 @@ class StripeService:
             except (ValueError, TypeError):
                 expires_at = None
 
+        if mode == StripeCheckoutMode.PAYMENT and unit_credits > 0:
+            payment_intent_raw = resp.get("payment_intent")
+            if isinstance(payment_intent_raw, dict):
+                payment_intent_raw = payment_intent_raw.get("id")
+            payment_intent_id = str(payment_intent_raw or "").strip() or None
+            self._record_checkout_fulfillment(
+                session_id=session_id,
+                org_id=org_id,
+                owner_key=str(session_meta["owner_key"]),
+                package_id=str(session_meta["package_id"]),
+                units=unit_credits,
+                payment_intent=payment_intent_id,
+                customer_id=checkout_customer_id,
+                save_card=save_card,
+                metadata=session_meta,
+            )
+
         record = _CheckoutSessionRecord(
             session_id=session_id,
             org_id=org_id,
-            customer_id=customer_id or resp.get("customer"),
+            customer_id=checkout_customer_id,
             mode=mode.value,
             price_id=price_id,
             quantity=quantity,
@@ -1774,74 +2023,9 @@ class StripeService:
         customer_id: str | None = None,
         org_id: str | None = None,
     ) -> dict[str, Any]:
-        """
-        Manually mark an open checkout session as complete and credit units.
-        Idempotent — returns existing result if already complete.
-        Raises StripeSessionNotFoundError if the session is not in local state.
-        org_id is accepted for API compatibility but the session record's own
-        org_id takes precedence.
-        """
-        with self._lock:
-            record = self._checkout_sessions.get(session_id)
-        if record is None:
-            raise StripeSessionNotFoundError(f"checkout session not found: {session_id}")
-
-        if record.status == "complete":
-            return {
-                "session_id": session_id,
-                "org_id": record.org_id,
-                "already_complete": True,
-                "units_credited": 0,
-            }
-
-        resolved_customer = customer_id or record.customer_id
-        resolved_org = record.org_id or org_id or ""
-        if resolved_customer and resolved_org:
-            self.register_customer_mapping(resolved_org, resolved_customer)
-
-        with self._lock:
-            completed = _CheckoutSessionRecord(
-                session_id=record.session_id,
-                org_id=record.org_id,
-                customer_id=resolved_customer,
-                mode=record.mode,
-                price_id=record.price_id,
-                quantity=record.quantity,
-                unit_credits=record.unit_credits,
-                success_url=record.success_url,
-                cancel_url=record.cancel_url,
-                metadata=record.metadata,
-                status="complete",
-                created_at=record.created_at,
-                expires_at=record.expires_at,
-            )
-            self._checkout_sessions[session_id] = completed
-
-        units_credited = 0
-        if resolved_org and record.unit_credits > 0:
-            checkout_owner_key = str(record.metadata.get("owner_key") or "").strip() or None
-            self.credit_units(
-                resolved_org,
-                record.unit_credits,
-                StripeUnitEventReason.CHECKOUT_COMPLETE,
-                reference_id=session_id,
-                owner_key=checkout_owner_key,
-            )
-            units_credited = record.unit_credits
-
-        logger.info(
-            "stripe.checkout_session_completed_manual session=%s org=%s units=%d",
-            session_id,
-            resolved_org,
-            units_credited,
-        )
-        return {
-            "session_id": session_id,
-            "org_id": resolved_org,
-            "already_complete": False,
-            "units_credited": units_credited,
-            "tokens_covered": units_credited * TOKENS_PER_UNIT,
-        }
+        """Compatibility wrapper using verified Stripe state and canonical fulfillment."""
+        del customer_id, org_id
+        return self.reconcile_checkout_session(session_id)
 
     def get_checkout_session(self, session_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -1921,6 +2105,19 @@ class StripeService:
                     if not isinstance(session_id, str) or not _STRIPE_CHECKOUT_SESSION_ID_PATTERN.fullmatch(session_id):
                         raise StripeServiceError("Stripe returned an invalid checkout session ID.")
                     fulfillment = self._handle_checkout_completed(row, {})
+                    if fulfillment.get("fulfillment_status") == "refunded":
+                        sessions.append(
+                            {
+                                "session_id": session_id,
+                                "status": "refunded",
+                                "fulfillment_status": "refunded",
+                                "units_credited": 0,
+                                "action": "contact_support",
+                                "support_reference": session_id,
+                                "error": ("Stripe confirms this checkout payment was refunded; no active wallet credit or install keys remain."),
+                            },
+                        )
+                        continue
                     if fulfillment.get("payment_confirmed") is not True:
                         raise StripeServiceError("Stripe has not confirmed payment for this checkout session.")
 
@@ -1940,7 +2137,10 @@ class StripeService:
                         {
                             "session_id": session_id,
                             "status": "fulfilled",
+                            "fulfillment_status": "fulfilled",
                             "units_credited": credited_units,
+                            "action": "none",
+                            "support_reference": session_id,
                         },
                     )
                 except StripeServiceError as exc:
@@ -1953,7 +2153,10 @@ class StripeService:
                         {
                             "session_id": session_id,
                             "status": "failed",
+                            "fulfillment_status": "failed",
                             "error": str(exc),
+                            "action": "retry_sync",
+                            "support_reference": session_id,
                         },
                     )
                 except Exception as exc:  # noqa: BLE001
@@ -1966,7 +2169,10 @@ class StripeService:
                         {
                             "session_id": session_id,
                             "status": "failed",
+                            "fulfillment_status": "failed",
                             "error": "Checkout fulfillment failed unexpectedly. Retry or contact support.",
+                            "action": "contact_support",
+                            "support_reference": session_id,
                         },
                     )
 
@@ -1981,7 +2187,7 @@ class StripeService:
             cursor = next_cursor
 
         successful_sessions = [session for session in sessions if session["status"] == "fulfilled"]
-        failed_sessions = [session for session in sessions if session["status"] == "failed"]
+        failed_sessions = [session for session in sessions if session["status"] != "fulfilled"]
         status_value = "partial" if failed_sessions or has_more else "complete"
         if sessions_matched == 0 and not has_more:
             status_value = "no_paid_sessions_found"
@@ -2251,13 +2457,19 @@ class StripeService:
         *,
         owner_key: str | None = None,
     ) -> int:
-        """Return units actually credited to the wallet for a checkout session."""
+        """Return active checkout units, excluding any session with a durable refund marker."""
         wallet_owner_key = self._resolve_wallet_owner_key(org_id, owner_key)
         entries = self._wallet_registry.list_ledger_entries(
             owner_key=wallet_owner_key,
             limit=500,
             checkout_session_id=session_id,
         )
+        for entry in entries:
+            if entry.entry_type != "credit":
+                continue
+            payment_intent = str(entry.metadata.get("payment_intent") or "").strip()
+            if payment_intent and self._wallet_registry.is_payment_refunded(payment_intent):
+                return 0
         return sum(int(entry.units) for entry in entries if entry.entry_type == "credit")
 
     def adjust_unit_balance(
@@ -2787,15 +2999,20 @@ class StripeService:
         integrity = self._verify_checkout_integrity_metadata(metadata, mode=mode)
         org_id: str = integrity["org_id"]
         unit_credits: int = integrity["unit_credits"]
-        owner_key: str | None = integrity["owner_key"]
+        owner_key: str = integrity["owner_key"] or self._resolve_wallet_owner_key(org_id, None)
         customer_id: str | None = obj.get("customer")
         payment_intent_raw = obj.get("payment_intent")
-        payment_intent: str | None = payment_intent_raw.strip() if isinstance(payment_intent_raw, str) and payment_intent_raw.strip() else None
+        if isinstance(payment_intent_raw, str):
+            payment_intent = payment_intent_raw.strip() or None
+        elif isinstance(payment_intent_raw, dict):
+            payment_intent_id = payment_intent_raw.get("id")
+            payment_intent = payment_intent_id.strip() if isinstance(payment_intent_id, str) and payment_intent_id.strip() else None
+        else:
+            payment_intent = None
         payment_status = obj.get("payment_status")
         if payment_status is None:
             payment_status = obj.get("status")
 
-        checkout_idem_key = f"checkout_completed:{session_id}"
         payment_confirmed = self._is_successful_payment_status(payment_status)
 
         if payment_confirmed and not session_id:
@@ -2808,9 +3025,27 @@ class StripeService:
             raise StripeServiceError("Paid unit package checkout is missing its trusted unit amount.")
         if payment_confirmed and not integrity["package_id"]:
             raise StripeServiceError("Paid unit package checkout is missing its trusted package identity.")
+        payment_intent_refunded = False
+        fulfillment_record: dict[str, Any] | None = None
+        if payment_confirmed:
+            if payment_intent is None:
+                raise StripeServiceError("Paid unit package checkout is missing its Stripe PaymentIntent.")
+            fulfillment_record = self._record_checkout_fulfillment(
+                session_id=session_id,
+                org_id=org_id,
+                owner_key=owner_key or "",
+                package_id=integrity["package_id"],
+                units=unit_credits,
+                payment_intent=payment_intent,
+                customer_id=customer_id,
+                save_card=integrity["save_card"],
+                metadata=metadata,
+            )
+            payment_intent_refunded = fulfillment_record.get("fulfillment_status") == "refunded"
+            if not payment_intent_refunded:
+                payment_intent_refunded = self._is_payment_intent_refunded(payment_intent)
 
         with self._lock:
-            already_credited = checkout_idem_key in self._processed_event_ids
             record = self._checkout_sessions.get(session_id)
             if record is not None:
                 updated = _CheckoutSessionRecord(
@@ -2842,20 +3077,75 @@ class StripeService:
             "payment_confirmed": payment_confirmed,
         }
 
+        if payment_intent_refunded:
+            self._mark_checkout_fulfillment(
+                session_id,
+                status="refunded",
+                last_error="stripe_payment_refunded",
+            )
+            result.update(
+                {
+                    "fulfillment_status": "refunded",
+                    "units_credited": 0,
+                    "tokens_covered": 0,
+                    "action": "contact_support",
+                    "support_reference": session_id,
+                }
+            )
+            return result
+
         install_key_issuance: dict[str, dict[str, Any]] = {}
-        if org_id and payment_confirmed and not already_credited:
-            if payment_confirmed and unit_credits > 0:
-                self.credit_units(
-                    org_id,
-                    unit_credits,
-                    StripeUnitEventReason.CHECKOUT_COMPLETE,
-                    reference_id=session_id,
-                    owner_key=owner_key,
-                    package_id=integrity["package_id"],
-                    payment_intent=payment_intent,
+        if org_id and payment_confirmed:
+            payment_state = self._mark_checkout_fulfillment(
+                session_id,
+                status="payment_confirmed",
+            )
+            if payment_state.get("fulfillment_status") == "refunded":
+                result.update(
+                    {
+                        "fulfillment_status": "refunded",
+                        "units_credited": 0,
+                        "tokens_covered": 0,
+                        "action": "contact_support",
+                        "support_reference": session_id,
+                    }
                 )
-                result["units_credited"] = unit_credits
-                result["tokens_covered"] = unit_credits * TOKENS_PER_UNIT
+                return result
+
+            self.credit_units(
+                org_id,
+                unit_credits,
+                StripeUnitEventReason.CHECKOUT_COMPLETE,
+                reference_id=session_id,
+                owner_key=owner_key,
+                package_id=integrity["package_id"],
+                payment_intent=payment_intent,
+            )
+            result["units_credited"] = unit_credits
+            result["tokens_covered"] = unit_credits * TOKENS_PER_UNIT
+
+            wallet_state = self._mark_checkout_fulfillment(
+                session_id,
+                status="wallet_credited",
+                units_credited=True,
+            )
+            if wallet_state.get("fulfillment_status") == "refunded" or self._wallet_registry.is_payment_refunded(payment_intent):
+                revocation = self._revoke_checkout_entitlements_for_refund(
+                    session_id=session_id,
+                    payment_intent=payment_intent,
+                    owner_key=owner_key or "",
+                )
+                result.update(
+                    {
+                        "fulfillment_status": "refunded",
+                        "units_credited": 0,
+                        "units_revoked": revocation["units_revoked"],
+                        "tokens_covered": 0,
+                        "action": "contact_support",
+                        "support_reference": session_id,
+                    }
+                )
+                return result
 
             try:
                 install_key_issuance = self._issue_paid_install_keys_for_checkout(
@@ -2877,12 +3167,64 @@ class StripeService:
                     session_id,
                     type(exc).__name__,
                 )
+                self._mark_checkout_fulfillment(
+                    session_id,
+                    status="failed",
+                    units_credited=True,
+                    last_error="install_key_provisioning_failed",
+                )
                 raise
 
             self._attach_payment_intent_to_purchase(session_id, payment_intent)
 
+            if self._wallet_registry.is_payment_refunded(payment_intent):
+                revocation = self._revoke_checkout_entitlements_for_refund(
+                    session_id=session_id,
+                    payment_intent=payment_intent,
+                    owner_key=owner_key or "",
+                )
+                result.update(
+                    {
+                        "fulfillment_status": "refunded",
+                        "units_credited": 0,
+                        "units_revoked": revocation["units_revoked"],
+                        "install_keys_revoked": revocation["install_keys_revoked"],
+                        "tokens_covered": 0,
+                        "action": "contact_support",
+                        "support_reference": session_id,
+                    }
+                )
+                return result
+
+            final_state = self._mark_checkout_fulfillment(
+                session_id,
+                status="fulfilled",
+                units_credited=True,
+                install_keys_provisioned=True,
+            )
+            if final_state.get("fulfillment_status") == "refunded":
+                revocation = self._revoke_checkout_entitlements_for_refund(
+                    session_id=session_id,
+                    payment_intent=payment_intent,
+                    owner_key=owner_key or "",
+                )
+                result.update(
+                    {
+                        "fulfillment_status": "refunded",
+                        "units_credited": 0,
+                        "units_revoked": revocation["units_revoked"],
+                        "install_keys_revoked": revocation["install_keys_revoked"],
+                        "tokens_covered": 0,
+                        "action": "contact_support",
+                        "support_reference": session_id,
+                    }
+                )
+                return result
+
+            result["fulfillment_status"] = "fulfilled"
+            result["support_reference"] = session_id
             with self._lock:
-                self._processed_event_ids.add(checkout_idem_key)
+                self._processed_event_ids.add(f"checkout_completed:{session_id}")
 
         if install_key_issuance:
             result["install_key_issuance"] = install_key_issuance
@@ -3217,11 +3559,22 @@ class StripeService:
         customer_id: str = obj.get("customer", "") or ""
         amount_refunded: int = int(obj.get("amount_refunded", 0) or 0)
         payment_intent_raw = obj.get("payment_intent")
+        if isinstance(payment_intent_raw, dict):
+            payment_intent_raw = payment_intent_raw.get("id")
         payment_intent: str | None = payment_intent_raw.strip() if isinstance(payment_intent_raw, str) and payment_intent_raw.strip() else None
         invoice_raw = obj.get("invoice")
         invoice_id: str | None = invoice_raw.strip() if isinstance(invoice_raw, str) and invoice_raw.strip() else None
 
-        org_id = self.resolve_org_from_customer(customer_id) or ""
+        if payment_intent and amount_refunded > 0:
+            self._wallet_registry.mark_payment_refunded(
+                payment_intent,
+                charge_id=charge_id or None,
+                amount_refunded=amount_refunded,
+                reason="charge_refunded",
+                metadata={"source": "stripe_webhook", "invoice_id": invoice_id},
+            )
+        checkout_fulfillment = self._get_checkout_fulfillment_by_payment_intent(payment_intent) if payment_intent else None
+        org_id = self.resolve_org_from_customer(customer_id) or str((checkout_fulfillment or {}).get("org_id") or "")
 
         if org_id:
             self.invalidate_invoice_cache(org_id)
@@ -3248,9 +3601,7 @@ class StripeService:
 
         purchase = _PURCHASE_REPOSITORY.find_for_payment_intent(payment_intent)
         purchase_session_id = str((purchase.metadata or {}).get("checkout_session_id") or "").strip() if purchase else ""
-        if purchase is not None and purchase.payment_status == "refunded":
-            result.update({"status": "already_refunded", "purchase_id": purchase.purchase_id})
-            return result
+        purchase_session_id = purchase_session_id or str((checkout_fulfillment or {}).get("session_id") or "").strip()
 
         revoked = get_install_key_registry().revoke_keys_for_refund(
             checkout_session_ids={purchase_session_id} if purchase_session_id else set(),
@@ -3260,6 +3611,9 @@ class StripeService:
         owner_candidates: list[str] = []
         if purchase is not None:
             owner_candidates.append(purchase.owner_key)
+        fulfillment_owner = str((checkout_fulfillment or {}).get("owner_key") or "").strip()
+        if fulfillment_owner:
+            owner_candidates.append(fulfillment_owner)
         owner_candidates.extend(record.owner_key for record in revoked)
         if org_id:
             owner_candidates.append(self._resolve_wallet_owner_key(org_id, None))
@@ -3269,7 +3623,7 @@ class StripeService:
         session_ids: set[str] = {purchase_session_id} if purchase_session_id else set()
         session_ids.update(record.checkout_session_id for record in revoked if record.checkout_session_id)
 
-        wallet_registry = get_unit_wallet_registry()
+        wallet_registry = self._wallet_registry
         refunded_units: dict[str, int] = {}
         for session_value in sorted(session_ids) or [None]:
             for reference, revoked_units in wallet_registry.revoke_units_for_refund(
@@ -3285,7 +3639,12 @@ class StripeService:
             get_billing_store().revoke_units(
                 f"checkout:{reference}",
                 revoked_units,
-                metadata={"event_id": f"refund_revoke:{reference}", "checkout_session_id": reference, "reason": "refund"},
+                metadata={
+                    "event_id": f"refund_revoke:{reference}",
+                    "checkout_session_id": reference,
+                    "payment_intent": payment_intent,
+                    "reason": "refund",
+                },
             )
 
         handoff_service = get_install_key_handoff_service()
@@ -3293,7 +3652,8 @@ class StripeService:
         for session_value in sorted(session_ids):
             handoff_service.clear_claims_for_purchase(session_value)
 
-        if purchase is not None:
+        purchase_was_already_refunded = purchase is not None and purchase.payment_status == "refunded"
+        if purchase is not None and not purchase_was_already_refunded:
             _PURCHASE_REPOSITORY.update_fields(
                 purchase.purchase_id,
                 {
@@ -3305,7 +3665,7 @@ class StripeService:
 
         result.update(
             {
-                "status": "refunded",
+                "status": "already_refunded" if purchase_was_already_refunded else "refunded",
                 "purchase_id": purchase.purchase_id if purchase is not None else None,
                 "install_keys_revoked": len(revoked),
                 "units_revoked": units_revoked,

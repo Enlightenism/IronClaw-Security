@@ -124,6 +124,7 @@ class DashboardLastPaymentView(BaseModel):
     units: int
     package_id: str
     purchased_at: str
+    support_reference: str | None = None
 
 
 class DashboardWalletHistoryEntry(BaseModel):
@@ -133,6 +134,7 @@ class DashboardWalletHistoryEntry(BaseModel):
     balance_after: int
     package_id: str | None = None
     created_at: str
+    support_reference: str | None = None
 
 
 class DashboardResponse(BaseModel):
@@ -141,6 +143,7 @@ class DashboardResponse(BaseModel):
     timestamp: str
     environment: str
     wallet_units: int = Field(default=0, ge=0)
+    wallet_status: str = "unavailable"
     has_paid: bool = False
     last_payment: DashboardLastPaymentView | None = None
     wallet_history: list[DashboardWalletHistoryEntry] = Field(default_factory=list)
@@ -552,6 +555,7 @@ def _build_last_payment_view(ledger_entries: list[RegistryUnitLedgerEntry]) -> D
         units=latest_entry.units,
         package_id=latest_package_id,
         purchased_at=_ledger_timestamp_utc(latest_entry.created_at).isoformat(),
+        support_reference=latest_entry.checkout_session_id or latest_entry.purchase_id,
     )
 
 
@@ -581,6 +585,7 @@ def _build_wallet_history_view(
                 balance_after=int(entry.balance_after),
                 package_id=package_id,
                 created_at=_ledger_timestamp_utc(entry.created_at).isoformat(),
+                support_reference=entry.checkout_session_id or entry.purchase_id,
             )
         )
     return history
@@ -684,7 +689,11 @@ def get_dashboard_overview(
 
     runtime_block_views = _build_runtime_block_views(resolved_owner)
 
-    wallet_meta: dict[str, Any] = {"owner_key": resolved_owner}
+    wallet_status = "not_created" if wallet is None else "active" if wallet.balance_units > 0 else "empty"
+    wallet_meta: dict[str, Any] = {
+        "owner_key": resolved_owner,
+        "status": wallet_status,
+    }
     if wallet_kpi is not None:
         wallet_meta.update(
             {
@@ -715,6 +724,7 @@ def get_dashboard_overview(
         timestamp=now,
         environment=settings.environment,
         wallet_units=wallet_kpi.unit_balance if wallet_kpi is not None else 0,
+        wallet_status=wallet_status,
         has_paid=last_payment is not None,
         last_payment=last_payment,
         wallet_history=wallet_history,

@@ -169,6 +169,7 @@ const withOrgId = (orgId) => `organizationid=${encodeURIComponent(orgId)}`;
 
 const sanitizeCheckoutPayload = (payload = {}) => {
   const safePayload = { ...payload };
+  safePayload.saveCard = safePayload.saveCard === true;
 
   if (safePayload.card) {
     delete safePayload.card;
@@ -201,6 +202,15 @@ const sanitizeCheckoutPayload = (payload = {}) => {
   delete safePayload.cardNumber;
   delete safePayload.pan;
   delete safePayload.last4_raw;
+  delete safePayload.ownerKey;
+  delete safePayload.owner_key;
+  delete safePayload.organizationId;
+  delete safePayload.organizationid;
+  delete safePayload.organization_id;
+  delete safePayload.orgId;
+  delete safePayload.org_id;
+  delete safePayload.unitCredits;
+  delete safePayload.unit_credits;
 
   return safePayload;
 };

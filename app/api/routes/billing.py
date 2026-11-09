@@ -783,6 +783,86 @@ def purchase_package(
     )
 
 
+def _dispatch_canonical_stripe_webhook(
+    payload: dict[str, Any],
+    *,
+    raw_webhook: bytes | None = None,
+    stripe_signature: str | None = None,
+    stripe_service: StripeService | None = None,
+) -> dict[str, Any]:
+    svc = stripe_service or get_stripe_service()
+    event_payload = payload
+    if raw_webhook is not None:
+        if not stripe_signature or not stripe_signature.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "invalid_payload",
+                    "reason": "missing_stripe_signature",
+                },
+            )
+        verification = svc.verify_webhook_signature(
+            payload=raw_webhook,
+            signature_header=stripe_signature,
+        )
+        if not verification.valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "invalid_payload",
+                    "reason": "stripe_signature_invalid",
+                    "detail": verification.error,
+                },
+            )
+        event_payload = verification.payload
+
+    event_type = str(event_payload.get("type") or event_payload.get("event_type") or "").strip().lower()
+    if event_type == "checkout.session.completed":
+        event_container = event_payload.get("data")
+        event_container = event_container if isinstance(event_container, dict) else {}
+        event_data = event_container.get("object") or event_payload.get("object") or {}
+        event_data = event_data if isinstance(event_data, dict) else {}
+        is_setup = str(event_data.get("mode") or "").strip().lower() == "setup"
+        payment_status = _parse_checkout_status(event_data.get("payment_status") or event_data.get("status"))
+        payment_confirmed = payment_status in {"paid", "succeeded", "success", "complete", "completed"}
+
+        if is_setup or not payment_confirmed:
+            return _process_checkout_session_completed_webhook(event_payload, stripe_service=svc)
+
+        metadata = event_data.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        session_id = str(event_data.get("id") or "").strip()
+        if "ironclaw_checkout_version" not in metadata:
+            if str(metadata.get("purchase_id") or "").strip():
+                return {
+                    "status": "unfulfilled",
+                    "event_type": event_type,
+                    "session_id": session_id,
+                    "reason": "legacy_checkout_requires_review",
+                    "action": "contact_support",
+                    "support_reference": session_id,
+                }
+            return {
+                "status": "ignored",
+                "event_type": event_type,
+                "session_id": session_id,
+                "reason": "not_ironclaw_checkout",
+            }
+
+    result = svc.handle_webhook_event(event_payload)
+    if result.get("action") == "error":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "status": "checkout_fulfillment_failed",
+                "reason": "canonical_fulfillment_retryable",
+                "event_id": result.get("event_id"),
+                "event_type": result.get("event_type"),
+            },
+        )
+    return result
+
+
 def _process_checkout_session_completed_webhook(
     payload: dict[str, Any],
     *,
@@ -1103,7 +1183,7 @@ def _process_checkout_session_completed_webhook(
 
 def handle_checkout_session_completed_webhook(payload: dict[str, Any]) -> dict[str, Any]:
     """Synchronous compatibility wrapper for direct use in tests and legacy callers."""
-    return _process_checkout_session_completed_webhook(payload)
+    return _dispatch_canonical_stripe_webhook(payload)
 
 
 @webhook_router.post(
@@ -1136,7 +1216,7 @@ async def _handle_checkout_session_completed_webhook_route(
             detail={"status": "invalid_payload", "reason": "event_payload_must_be_object"},
         )
 
-    return _process_checkout_session_completed_webhook(
+    return _dispatch_canonical_stripe_webhook(
         payload,
         raw_webhook=raw_webhook,
         stripe_signature=stripe_signature,

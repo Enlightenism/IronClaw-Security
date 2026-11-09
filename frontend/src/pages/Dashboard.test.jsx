@@ -53,6 +53,8 @@ jest.mock("@/lib/api", () => ({
     post: (...args) => mockApiPost(...args),
   },
   payments: {
+    createCheckout: (payload) =>
+      mockApiPost("/billing/checkout/sessions", payload),
     reconcileRecent: () => mockApiPost("/billing/checkout/reconcile-recent"),
     getStatus: (sessionId) =>
       mockApiGet(
@@ -150,6 +152,7 @@ import Dashboard from "./Dashboard";
 // ── Default API responses ──────────────────────────────────────────────
 const DEFAULT_DASH = {
   wallet_units: 100,
+  wallet_status: "active",
   organization_id: "org-abc",
   last_payment: null,
   wallet_history: [],
@@ -297,7 +300,11 @@ function setupPaidCheckoutApis(sessionId) {
   mockApiPost.mockImplementation((url) => {
     if (url === `/billing/checkout/sessions/${sessionId}/reconcile`) {
       return Promise.resolve({
-        data: { payment_confirmed: true, units_credited: 5000 },
+        data: {
+          payment_confirmed: true,
+          fulfillment_status: "fulfilled",
+          units_credited: 5000,
+        },
       });
     }
     if (url === "/events/simulate") {
@@ -796,7 +803,11 @@ describe("session_id payment polling", () => {
           return Promise.reject(new Error("Temporary fulfillment error"));
         }
         return Promise.resolve({
-          data: { payment_confirmed: true, units_credited: 5000 },
+          data: {
+            payment_confirmed: true,
+            fulfillment_status: "fulfilled",
+            units_credited: 5000,
+          },
         });
       }
       return Promise.resolve({ data: {} });
@@ -945,7 +956,7 @@ describe("handlePurchase — valid package", () => {
     });
 
     await act(async () => {
-      await mockCapturedWalletProps.onPurchase("pkg_5000");
+      await mockCapturedWalletProps.onPurchase("pkg_5000", true);
     });
 
     expect(mockApiPost).toHaveBeenCalledWith("/billing/checkout/sessions", {
@@ -954,9 +965,9 @@ describe("handlePurchase — valid package", () => {
         "http://localhost/dashboard?checkout=success&package_id=pkg_5000&session_id={CHECKOUT_SESSION_ID}",
       cancelUrl:
         "http://localhost/dashboard?checkout=cancel&package_id=pkg_5000",
-      organizationId: "buyer@ironclaw.test",
       mode: "payment",
       quantity: 1,
+      saveCard: true,
     });
   });
 
@@ -1783,6 +1794,7 @@ describe("refresh behavior", () => {
               {
                 session_id: "cs_refresh_001",
                 status: "fulfilled",
+                fulfillment_status: "fulfilled",
                 units_credited: 5000,
               },
             ],
@@ -1869,7 +1881,54 @@ describe("refresh behavior", () => {
 
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(
-        "Payment sync is incomplete. Checkout session integrity verification failed.",
+        expect.stringContaining(
+          "Payment sync is incomplete. Checkout session integrity verification failed.",
+        ),
+      );
+    });
+    expect(mockToastSuccess).not.toHaveBeenCalled();
+  });
+
+  it("directs refunded checkout outcomes to support without claiming wallet credit", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/reconcile-recent") {
+        return Promise.resolve({
+          data: {
+            status: "partial",
+            sessions_matched: 1,
+            sessions_reconciled: 0,
+            units_credited: 0,
+            sessions: [
+              {
+                session_id: "cs_refunded_001",
+                status: "refunded",
+                fulfillment_status: "refunded",
+                units_credited: 0,
+                action: "contact_support",
+                support_reference: "cs_refunded_001",
+                error: "Stripe confirms this checkout payment was refunded.",
+              },
+            ],
+            truncated: false,
+          },
+        });
+      }
+      if (url === "/events/simulate") {
+        return Promise.resolve({ data: {} });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDashboard();
+    await user.click(screen.getByTestId("refresh-btn"));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        expect.stringContaining("Support reference: cs_refunded_001"),
+      );
+      expect(mockToastError).toHaveBeenCalledWith(
+        expect.stringContaining("Contact support."),
       );
     });
     expect(mockToastSuccess).not.toHaveBeenCalled();

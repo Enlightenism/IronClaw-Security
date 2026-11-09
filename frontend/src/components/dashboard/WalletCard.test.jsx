@@ -290,6 +290,17 @@ describe("balance display", () => {
     await renderWalletCard({ balance: 0, organizationId: "" });
     expect(screen.getByTestId("wallet-balance")).toHaveTextContent("0");
   });
+
+  it("does not claim the wallet is active when health is unavailable", async () => {
+    await renderWalletCard({ balance: 12500, organizationId: "" });
+    expect(screen.getByTestId("wallet-health")).toHaveTextContent(
+      "Status unavailable",
+    );
+    expect(screen.getByTestId("wallet-health")).toHaveAttribute(
+      "data-wallet-status",
+      "unavailable",
+    );
+  });
 });
 
 // =============================================================================
@@ -304,7 +315,7 @@ describe("tier purchase buttons", () => {
     await renderWalletCard({ onPurchase, organizationId: "" });
 
     await user.click(screen.getByTestId("purchase-pkg_5000"));
-    expect(onPurchase).toHaveBeenCalledWith("pkg_5000");
+    expect(onPurchase).toHaveBeenCalledWith("pkg_5000", false);
     expect(onPurchase).toHaveBeenCalledTimes(1);
   });
 
@@ -315,7 +326,7 @@ describe("tier purchase buttons", () => {
     await renderWalletCard({ onPurchase, organizationId: "" });
 
     await user.click(screen.getByTestId("purchase-pkg_25000"));
-    expect(onPurchase).toHaveBeenCalledWith("pkg_25000");
+    expect(onPurchase).toHaveBeenCalledWith("pkg_25000", false);
     expect(onPurchase).toHaveBeenCalledTimes(1);
   });
 
@@ -326,8 +337,22 @@ describe("tier purchase buttons", () => {
     await renderWalletCard({ onPurchase, organizationId: "" });
 
     await user.click(screen.getByTestId("purchase-pkg_60000"));
-    expect(onPurchase).toHaveBeenCalledWith("pkg_60000");
+    expect(onPurchase).toHaveBeenCalledWith("pkg_60000", false);
     expect(onPurchase).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes save-card consent only after the user opts in", async () => {
+    const user = userEvent.setup();
+    const onPurchase = jest.fn();
+
+    await renderWalletCard({ onPurchase, organizationId: "" });
+    const consent = screen.getByTestId("save-card-consent");
+    expect(consent).not.toBeChecked();
+
+    await user.click(consent);
+    await user.click(screen.getByTestId("purchase-pkg_5000"));
+
+    expect(onPurchase).toHaveBeenCalledWith("pkg_5000", true);
   });
 
   it("does not throw when onPurchase prop is omitted", async () => {

@@ -296,6 +296,64 @@ def test_atomic_credit_replay_after_repository_restart_does_not_double_credit() 
     assert state.calls == 2
 
 
+def test_supabase_refund_marker_uses_durable_rpc() -> None:
+    import app.core.unit_wallet as wallet_module
+
+    class _FakeRpc:
+        def __init__(self) -> None:
+            self.name = ""
+            self.parameters: dict[str, object] = {}
+
+        def execute(self):
+            return SimpleNamespace(data=None)
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self.rpc_call = _FakeRpc()
+
+        def rpc(self, name: str, parameters: dict[str, object]):
+            self.rpc_call.name = name
+            self.rpc_call.parameters = parameters
+            return self.rpc_call
+
+    client = _FakeClient()
+    repository = wallet_module.SupabaseUnitWalletRepository.__new__(
+        wallet_module.SupabaseUnitWalletRepository,
+    )
+    repository._client = client
+
+    repository.record_payment_refund_marker(
+        payment_intent="pi_refund_marker_001",
+        charge_id="ch_refund_marker_001",
+        amount_refunded=2_000,
+        reason="requested_by_customer",
+    )
+
+    assert client.rpc_call.name == "record_stripe_payment_refund"
+    assert client.rpc_call.parameters["p_payment_intent"] == "pi_refund_marker_001"
+    assert client.rpc_call.parameters["p_amount_refunded"] == 2_000
+
+
+def test_refund_marker_blocks_later_checkout_wallet_credit(registry: UnitWalletRegistry) -> None:
+    payment_intent = "pi_refund_before_credit_001"
+    registry.mark_payment_refunded(payment_intent, amount_refunded=2_000)
+
+    with pytest.raises(ValueError, match="payment has been refunded"):
+        registry.credit_units(
+            "buyer@ironclaw.test",
+            5_000,
+            metadata={
+                "checkout_session_id": "cs_refund_before_credit_001",
+                "event_id": "stripe:checkout_complete:cs_refund_before_credit_001",
+                "package_id": "pkg_5000",
+                "payment_intent": payment_intent,
+            },
+        )
+
+    wallet = registry.get_wallet("buyer@ironclaw.test")
+    assert wallet is None or wallet.balance_units == 0
+
+
 def test_successful_payment_credit_is_metadata_gated_and_recorded_in_ledger() -> None:
     registry = UnitWalletRegistry()
     wallet = registry.credit_units(

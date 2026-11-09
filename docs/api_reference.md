@@ -426,12 +426,20 @@ only for compatibility and should not be configured as additional Stripe
 destinations. The endpoint verifies the raw request body against Stripe's
 `Stripe-Signature` header. Signature rejection returns `400`; retryable
 dispatch or fulfillment failures return `502` so Stripe can retry delivery.
+Paid legacy checkout events without trusted IronClaw metadata are not credited;
+they return an explicit support outcome instead of falling back to a
+client-supplied purchase owner or package.
 
 #### Checkout status and recovery
 
 The webhook is the normal fulfillment path. If the browser returns before the
 webhook finishes, or fulfillment needs recovery, use these authenticated
 endpoints:
+
+Before granting units or install keys, fulfillment retrieves the Stripe
+PaymentIntent and its latest charge. A full or partial refund is not eligible
+for fulfillment. If Stripe cannot verify the PaymentIntent or refund status,
+the operation fails closed and can be retried after Stripe is available.
 
 1. `GET /billing/checkout/sessions/{session_id}/status` checks the Stripe
    session and reports `status`, `payment_status`, `unit_credits`, and
@@ -469,16 +477,22 @@ Example success response:
     {
       "session_id": "cs_example",
       "status": "fulfilled",
-      "units_credited": 5000
+      "fulfillment_status": "fulfilled",
+      "units_credited": 5000,
+      "action": "none",
+      "support_reference": "cs_example"
     }
   ],
   "truncated": false
 }
 ```
 
-`sessions` can also contain a `failed` status and an error for an individual
-session. `status` is `partial` when any session fails or the scan is truncated,
-and `no_paid_sessions_found` when no matching paid sessions were found.
+Each session outcome includes a `fulfillment_status`, `action`, and
+`support_reference`. Failed outcomes are retryable only when the response says
+`action: "retry_sync"`; refunded outcomes say `action: "contact_support"` and
+must never be re-credited or re-issued. `status` is `partial` when any session
+is incomplete or the scan is truncated, and `no_paid_sessions_found` when no
+matching paid sessions were found.
 
 Do not treat the browser redirect alone as proof of payment. Stripe's verified
 session status is authoritative.
@@ -494,20 +508,28 @@ Stripe and returns redacted card details such as brand, last four digits, and
 expiration. The dashboard displays them through
 `GET /api/ui/billing/payment-methods?organizationid={organization_id}` (also
 available at `/ui/billing/payment-methods`), whose `methods` array is sourced
-from Stripe when a customer is mapped. A retrieval error is returned as `502`,
-not an empty success response. Full card numbers are never stored by IronClaw.
+from Stripe when a customer is mapped. Checkout saves a card for future
+off-session use only when the authenticated user explicitly opts in with
+`saveCard: true`; omitted or false consent does not set Stripe's future-use
+option. A retrieval error is returned as `502`, not an empty success response.
+Full card numbers are never stored by IronClaw.
 
 #### Database deployment prerequisites
 
 Apply and verify these migrations in the production Supabase project before
 relying on durable wallet fulfillment and saved-card records:
 
+- [`015_stripe_customer_links.sql`](../supabase/migrations/015_stripe_customer_links.sql) — durable Stripe customer-to-organization mapping.
 - [`017_unit_wallets.sql`](../supabase/migrations/017_unit_wallets.sql) — persistent wallet balances and ledger.
 - [`018_billing_payment_methods.sql`](../supabase/migrations/018_billing_payment_methods.sql) — redacted saved-payment-method metadata.
 - [`019_atomic_unit_wallet_credits.sql`](../supabase/migrations/019_atomic_unit_wallet_credits.sql) — atomic, retry-safe wallet credits.
+- [`020_refund_revocation.sql`](../supabase/migrations/020_refund_revocation.sql) — wallet and install-key revocation on refunds.
+- [`021_stripe_checkout_fulfillment.sql`](../supabase/migrations/021_stripe_checkout_fulfillment.sql) — durable checkout ownership, idempotent fulfillment state, and refund-before-credit enforcement.
 
-Check the Supabase migration history for all three before enabling this
-workflow in production; repository presence alone does not confirm deployment.
+Check the Supabase migration history for all six before enabling this workflow
+in production; repository presence alone does not confirm deployment. Configure
+Stripe to send events to `POST /webhooks/stripe` only after the migration and
+`STRIPE_WEBHOOK_SECRET` are installed in production.
 
 ---
 

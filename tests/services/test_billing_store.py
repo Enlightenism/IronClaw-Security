@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 import os
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 os.environ.setdefault("IRONCLAW_PERSISTENCE_MODE", "memory")
 os.environ.setdefault("ENVIRONMENT", "test")
@@ -11,11 +13,11 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "")
 os.environ.setdefault("SUPABASE_KEY", "")
 os.environ.setdefault("SUPABASE_ANON_KEY", "")
 
-from fastapi import HTTPException
 import pytest
 
 import app.api.routes.billing as billing_routes
 from app.services.billing_store import (
+    StripeCheckoutFulfillmentStore,
     SubscriptionMeterStore,
     get_billing_store,
     get_subscription_meter_store,
@@ -71,6 +73,59 @@ def _make_pending_purchase(
 @pytest.fixture()
 def store() -> SubscriptionMeterStore:
     return SubscriptionMeterStore()
+
+
+def test_stripe_checkout_fulfillment_store_persists_trusted_session_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MagicMock()
+    client.rpc.return_value.execute.return_value = SimpleNamespace(
+        data=[
+            {
+                "session_id": "cs_store_001",
+                "owner_key": "buyer@ironclaw.test",
+                "org_id": "org_store_001",
+                "package_id": "pkg_5000",
+                "units": 5_000,
+                "payment_intent": "pi_store_001",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "app.services.billing_store.get_supabase_service_client",
+        lambda: client,
+    )
+
+    record = StripeCheckoutFulfillmentStore().record_checkout(
+        session_id="cs_store_001",
+        owner_key=" Buyer@Ironclaw.test ",
+        org_id=" Org_Store_001 ",
+        package_id="pkg_5000",
+        units=5_000,
+        payment_intent="pi_store_001",
+        customer_id="cus_store_001",
+        save_card=True,
+        metadata={"source": "stripe.checkout"},
+    )
+
+    assert record["session_id"] == "cs_store_001"
+    assert record["owner_key"] == "buyer@ironclaw.test"
+    assert record["org_id"] == "org_store_001"
+    assert record["units"] == 5_000
+    client.rpc.assert_called_once_with(
+        "register_stripe_checkout_fulfillment",
+        {
+            "p_session_id": "cs_store_001",
+            "p_owner_key": "buyer@ironclaw.test",
+            "p_org_id": "org_store_001",
+            "p_package_id": "pkg_5000",
+            "p_units": 5_000,
+            "p_payment_intent": "pi_store_001",
+            "p_customer_id": "cus_store_001",
+            "p_save_card": True,
+            "p_metadata": {"source": "stripe.checkout"},
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +503,9 @@ def test_durable_purchase_record_is_pending_and_lookupable_by_identity_fields(du
     assert by_purchase_id.metadata["fulfillment_status"] == "pending"
 
 
-def test_durable_purchase_transitions_from_pending_to_fulfilled_on_checkout_completion(durable_purchase_fixture) -> None:
+def test_durable_legacy_purchase_is_not_fulfilled_without_trusted_checkout_metadata(
+    durable_purchase_fixture,
+) -> None:
     owner_key = "fulfilled-lookup@ironclaw.test"
     purchase_id = "purch_fulfill_001"
     session_id = "cs_fulfill_001"
@@ -480,17 +537,18 @@ def test_durable_purchase_transitions_from_pending_to_fulfilled_on_checkout_comp
         }
     )
 
-    assert response["status"] == "fulfilled"
+    assert response["status"] == "unfulfilled"
+    assert response["reason"] == "legacy_checkout_requires_review"
     stored = billing_routes._find_matching_purchase(purchase_id=purchase_id)
     assert stored is not None
-    assert stored.metadata["payment_status"] == "paid"
-    assert stored.metadata["fulfillment_status"] == "fulfilled"
+    assert stored.metadata["payment_status"] == "pending"
+    assert stored.metadata["fulfillment_status"] == "pending"
     assert stored.metadata["checkout_session_id"] == session_id
-    assert stored.granted_units == 5_000
-    assert stored.metadata["units_credited"] is True
+    assert stored.granted_units == 0
+    assert stored.metadata["units_credited"] is False
 
 
-def test_durable_purchase_failure_remains_retryable_after_confirmed_payment(
+def test_durable_legacy_purchase_does_not_attempt_wallet_credit(
     durable_purchase_fixture,
     monkeypatch,
 ) -> None:
@@ -502,41 +560,40 @@ def test_durable_purchase_failure_remains_retryable_after_confirmed_payment(
 
     registry = billing_routes.get_unit_wallet_registry()
 
-    def _explode_credit_units(*args, **kwargs):
-        raise RuntimeError("wallet credit failed")
+    credit_units = MagicMock(wraps=registry.credit_units)
+    monkeypatch.setattr(registry, "credit_units", credit_units)
 
-    monkeypatch.setattr(registry, "credit_units", _explode_credit_units)
+    response = billing_routes.handle_checkout_session_completed_webhook(
+        {
+            "id": "evt_rollback_001",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": session_id,
+                    "customer": "cus_rollback_001",
+                    "payment_status": "paid",
+                    "amount_total": 2000,
+                    "currency": "usd",
+                    "mode": "payment",
+                    "customer_details": {"email": owner_key},
+                    "metadata": {
+                        "owner_key": owner_key,
+                        "purchase_id": purchase_id,
+                        "buyer_email": owner_key,
+                        "package_id": "pkg_5000",
+                        "checkout_session_id": session_id,
+                    },
+                }
+            },
+        }
+    )
 
-    with pytest.raises(HTTPException) as exc_info:
-        billing_routes.handle_checkout_session_completed_webhook(
-            {
-                "id": "evt_rollback_001",
-                "type": "checkout.session.completed",
-                "data": {
-                    "object": {
-                        "id": session_id,
-                        "customer": "cus_rollback_001",
-                        "payment_status": "paid",
-                        "amount_total": 2000,
-                        "currency": "usd",
-                        "mode": "payment",
-                        "customer_details": {"email": owner_key},
-                        "metadata": {
-                            "owner_key": owner_key,
-                            "purchase_id": purchase_id,
-                            "buyer_email": owner_key,
-                            "package_id": "pkg_5000",
-                            "checkout_session_id": session_id,
-                        },
-                    }
-                },
-            }
-        )
-
-    assert exc_info.value.status_code == 503
+    assert response["status"] == "unfulfilled"
+    assert response["reason"] == "legacy_checkout_requires_review"
+    credit_units.assert_not_called()
     stored = billing_routes._find_matching_purchase(purchase_id=purchase_id)
     assert stored is not None
-    assert stored.metadata["payment_status"] == "paid"
+    assert stored.metadata["payment_status"] == "pending"
     assert stored.metadata["fulfillment_status"] == "pending"
     assert stored.metadata.get("checkout_session_id") == session_id
     assert stored.metadata.get("units_credited") is False

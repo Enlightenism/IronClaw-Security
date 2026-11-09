@@ -666,6 +666,7 @@ class TestDashboardWalletKPIs:
             assert response.status_code == 200
             body = response.json()
             assert body["wallet_units"] == 750
+            assert body["wallet_status"] == "active"
         finally:
             _clear_registry_overrides()
 
@@ -673,7 +674,13 @@ class TestDashboardWalletKPIs:
         older_package = UNIT_PACKAGE_CATALOG[0]
         newer_package = UNIT_PACKAGE_CATALOG[-1]
 
-        def _ledger_entry(package_id: str | None, entry_type: str, units: int, created_at: datetime) -> _unit_wallet_module.RegistryUnitLedgerEntry:
+        def _ledger_entry(
+            package_id: str | None,
+            entry_type: str,
+            units: int,
+            created_at: datetime,
+            session_id: str | None = None,
+        ) -> _unit_wallet_module.RegistryUnitLedgerEntry:
             return _unit_wallet_module.RegistryUnitLedgerEntry(
                 entry_id=f"ledger_{entry_type}_{created_at.day}",
                 wallet_id="wallet_test",
@@ -683,12 +690,19 @@ class TestDashboardWalletKPIs:
                 balance_after=units,
                 created_at=created_at,
                 metadata={"package_id": package_id} if package_id else {},
+                checkout_session_id=session_id,
             )
 
         mock_wallet = _make_unit_wallet_registry(_OWNER_KEY)
         mock_wallet.list_ledger_entries.return_value = [
             _ledger_entry(older_package["package_id"], "credit", older_package["units"], datetime(2025, 6, 1, tzinfo=UTC)),
-            _ledger_entry(newer_package["package_id"], "credit", newer_package["units"], datetime(2025, 6, 2, tzinfo=UTC)),
+            _ledger_entry(
+                newer_package["package_id"],
+                "credit",
+                newer_package["units"],
+                datetime(2025, 6, 2, tzinfo=UTC),
+                "cs_dashboard_latest_001",
+            ),
             _ledger_entry(None, "debit", 5, datetime(2025, 6, 3, tzinfo=UTC)),
         ]
         _apply_registry_overrides(_make_install_key_registry(), mock_wallet, _make_billing_registry(_OWNER_KEY))
@@ -701,8 +715,10 @@ class TestDashboardWalletKPIs:
             assert body["last_payment"]["label"] == newer_package["name"]
             assert body["last_payment"]["amount"] == float(newer_package["price_usd"])
             assert body["last_payment"]["units"] == newer_package["units"]
+            assert body["last_payment"]["support_reference"] == "cs_dashboard_latest_001"
             assert body["wallet_history"][0]["entry_type"] == "debit"
             assert body["wallet_history"][1]["package_id"] == newer_package["package_id"]
+            assert body["wallet_history"][1]["support_reference"] == "cs_dashboard_latest_001"
             assert "metadata" not in body["wallet_history"][1]
             mock_wallet.list_ledger_entries.assert_called_once_with(owner_key=_OWNER_KEY, limit=500)
         finally:

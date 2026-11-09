@@ -350,10 +350,10 @@ describe("payments.createCheckout", () => {
     mockPost.mockResolvedValueOnce({ data: {} });
     const payload = { plan: "starter", quantity: 1 };
     payments.createCheckout(payload);
-    expect(mockPost).toHaveBeenCalledWith(
-      "/billing/checkout/sessions",
-      payload,
-    );
+    expect(mockPost).toHaveBeenCalledWith("/billing/checkout/sessions", {
+      ...payload,
+      saveCard: false,
+    });
   });
 
   it("removes raw card values and carries saved Stripe payment metadata without leaking PAN data", () => {
@@ -361,6 +361,8 @@ describe("payments.createCheckout", () => {
     const payload = {
       packageId: "pkg5000",
       organizationId: "org-001",
+      owner_key: "attacker@ironclaw.test",
+      unitCredits: 999999,
       paymentMethod: {
         id: "pm_saved_123",
         customer: "cus_123",
@@ -382,7 +384,23 @@ describe("payments.createCheckout", () => {
     expect(sentPayload.paymentMethod).toBeUndefined();
     expect(sentPayload.paymentMethodId).toBe("pm_saved_123");
     expect(sentPayload.customerId).toBe("cus_123");
+    expect(sentPayload.saveCard).toBe(false);
+    expect(sentPayload.organizationId).toBeUndefined();
+    expect(sentPayload.owner_key).toBeUndefined();
+    expect(sentPayload.unitCredits).toBeUndefined();
     expect(JSON.stringify(sentPayload)).not.toContain("4242424242424242");
+  });
+
+  it("preserves explicit save-card consent only when true", () => {
+    mockPost.mockResolvedValueOnce({ data: {} });
+
+    payments.createCheckout({
+      packageId: "pkg5000",
+      saveCard: true,
+    });
+
+    const [, sentPayload] = mockPost.mock.calls.at(-1);
+    expect(sentPayload.saveCard).toBe(true);
   });
 });
 

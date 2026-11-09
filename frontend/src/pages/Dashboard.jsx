@@ -552,6 +552,7 @@ const Dashboard = () => {
             const credited = Number(reconciled?.units_credited ?? 0);
             if (
               reconciled?.payment_confirmed !== true ||
+              reconciled?.fulfillment_status !== "fulfilled" ||
               !Number.isSafeInteger(credited) ||
               credited <= 0
             ) {
@@ -694,56 +695,51 @@ const Dashboard = () => {
     }
   }, [fetchDashboard, location.search, navigate, pollPayment]);
 
-  const handlePurchase = useCallback(
-    async (rawPackageId) => {
-      const packageId = normalizePackageId(rawPackageId);
+  const handlePurchase = useCallback(async (rawPackageId, saveCard = false) => {
+    const packageId = normalizePackageId(rawPackageId);
 
-      if (!packageId) {
-        toast.error("Invalid package selected.");
-        return;
+    if (!packageId) {
+      toast.error("Invalid package selected.");
+      return;
+    }
+
+    setPurchasingId(packageId);
+
+    try {
+      const successUrl = new URL(`${globalThis.location.origin}/dashboard`);
+      successUrl.searchParams.set("checkout", "success");
+      successUrl.searchParams.set("package_id", packageId);
+      const verifiedSuccessUrl = `${successUrl.toString()}&session_id={CHECKOUT_SESSION_ID}`;
+
+      const cancelUrl = new URL(`${globalThis.location.origin}/dashboard`);
+      cancelUrl.searchParams.set("checkout", "cancel");
+      cancelUrl.searchParams.set("package_id", packageId);
+
+      const { data: res } = await payments.createCheckout({
+        packageId,
+        mode: "payment",
+        quantity: 1,
+        successUrl: verifiedSuccessUrl,
+        cancelUrl: cancelUrl.toString(),
+        saveCard: saveCard === true,
+      });
+
+      const redirectUrl = res?.checkout_url || res?.url;
+
+      if (!redirectUrl) {
+        throw new Error("Missing checkout URL.");
       }
 
-      setPurchasingId(packageId);
-
-      try {
-        const organizationId =
-          data?.metadata?.owner_key ?? data?.organization_id ?? "";
-        const successUrl = new URL(`${globalThis.location.origin}/dashboard`);
-        successUrl.searchParams.set("checkout", "success");
-        successUrl.searchParams.set("package_id", packageId);
-        const verifiedSuccessUrl = `${successUrl.toString()}&session_id={CHECKOUT_SESSION_ID}`;
-
-        const cancelUrl = new URL(`${globalThis.location.origin}/dashboard`);
-        cancelUrl.searchParams.set("checkout", "cancel");
-        cancelUrl.searchParams.set("package_id", packageId);
-
-        const { data: res } = await api.post("/billing/checkout/sessions", {
-          packageId,
-          mode: "payment",
-          quantity: 1,
-          successUrl: verifiedSuccessUrl,
-          cancelUrl: cancelUrl.toString(),
-          organizationId,
-        });
-
-        const redirectUrl = res?.checkout_url || res?.url;
-
-        if (!redirectUrl) {
-          throw new Error("Missing checkout URL.");
-        }
-
-        if (typeof globalThis.location.assign === "function") {
-          globalThis.location.assign(redirectUrl);
-        } else {
-          globalThis.location.href = redirectUrl;
-        }
-      } catch (e) {
-        toast.error(getErrorMessage(e));
-        setPurchasingId(null);
+      if (typeof globalThis.location.assign === "function") {
+        globalThis.location.assign(redirectUrl);
+      } else {
+        globalThis.location.href = redirectUrl;
       }
-    },
-    [data],
-  );
+    } catch (e) {
+      toast.error(getErrorMessage(e));
+      setPurchasingId(null);
+    }
+  }, []);
 
   const handleAddPaymentMethod = useCallback(async () => {
     setSavingPaymentMethod(true);
@@ -865,15 +861,30 @@ const Dashboard = () => {
       const failures = sessions.filter(
         (session) => session?.status === "failed",
       );
+      const incomplete = sessions.filter(
+        (session) => session?.status !== "fulfilled",
+      );
       if (reconciliation?.truncated === true) {
         toast.error(
           "Payment sync is incomplete because the Stripe session scan reached its limit. Retry or contact support.",
         );
-      } else if (failures.length > 0 || reconciliation?.status === "partial") {
-        const detail = failures.find((session) => session?.error)?.error;
+      } else if (
+        failures.length > 0 ||
+        incomplete.length > 0 ||
+        reconciliation?.status === "partial"
+      ) {
+        const failedSession = incomplete.find((session) => session?.error);
+        const detail = failedSession?.error;
+        const reference = failedSession?.support_reference;
+        const nextStep =
+          failedSession?.action === "contact_support"
+            ? "Contact support"
+            : "Retry sync or contact support";
         toast.error(
           detail
-            ? `Payment sync is incomplete. ${detail}`
+            ? `Payment sync is incomplete. ${detail}${
+                reference ? ` Support reference: ${reference}.` : ""
+              } ${nextStep}.`
             : "Payment sync is incomplete. Retry or contact support.",
         );
       } else if (
@@ -928,6 +939,7 @@ const Dashboard = () => {
   const walletProps = useMemo(
     () => ({
       balance: data?.wallet_units ?? 0,
+      walletStatus: data?.wallet_status ?? "unavailable",
       lastPayment: data?.last_payment,
       walletHistory: Array.isArray(data?.wallet_history)
         ? data.wallet_history
@@ -945,6 +957,7 @@ const Dashboard = () => {
       data?.metadata?.owner_key,
       data?.organization_id,
       data?.wallet_units,
+      data?.wallet_status,
       data?.wallet_history,
       handleAddPaymentMethod,
       handlePurchase,
@@ -1010,18 +1023,25 @@ const Dashboard = () => {
       const metadata = tokens?.install_metadata?.[integrationId];
       const slotStatus = installKeyStatusByProgram[program];
       const revoked = slotStatus === "refunded" || slotStatus === "revoked";
+      const available =
+        !revoked &&
+        metadata?.available === true &&
+        metadata?.program === program &&
+        metadata?.slug === integrationId &&
+        Boolean(metadata?.key_id);
 
       return {
         title: label,
         program,
         integrationId,
         agentId,
-        available:
-          !revoked &&
-          metadata?.available === true &&
-          metadata?.program === program &&
-          metadata?.slug === integrationId &&
-          Boolean(metadata?.key_id),
+        available,
+        availabilityReason:
+          tokens?.status === "locked"
+            ? "A confirmed, non-refunded package purchase is required before this platform can generate an install command."
+            : tokens?.status !== "ok"
+              ? "Install-key status could not be verified. Refresh the dashboard; contact support if your payment is complete."
+              : "This platform's paid install key is not available yet. Refresh wallet sync; contact support if your payment is complete.",
         revoked,
         revokedReason: slotStatus === "refunded" ? "refunded" : "revoked",
         savedCommand:
@@ -1035,7 +1055,12 @@ const Dashboard = () => {
         testid: toCardTestId(program),
       };
     });
-  }, [createInstallClaim, installKeyStatusByProgram, tokens?.install_metadata]);
+  }, [
+    createInstallClaim,
+    installKeyStatusByProgram,
+    tokens?.install_metadata,
+    tokens?.status,
+  ]);
 
   const attackFeedItems = securityProps.attacks;
   const blockedActivityTotal = Number.isSafeInteger(
@@ -1191,6 +1216,7 @@ const Dashboard = () => {
                   agentId={card.agentId}
                   available={card.available}
                   revoked={card.revoked}
+                  availabilityReason={card.availabilityReason}
                   revokedReason={card.revokedReason}
                   onCreateClaim={card.onCreateClaim}
                   savedCommand={card.savedCommand}

@@ -235,6 +235,7 @@ const IntegrationCard = ({
   integrationId,
   agentId,
   available = false,
+  availabilityReason = "",
   revoked = false,
   revokedReason = "",
   onCreateClaim,
@@ -583,6 +584,14 @@ const IntegrationCard = ({
           {revokedReason === "refunded"
             ? "Revoked — purchase refunded. This install key no longer works and its command has been removed."
             : "Revoked. This install key no longer works and its command has been removed."}
+        </p>
+      ) : !isAvailable ? (
+        <p
+          className="mb-2 text-[11px] leading-snug text-[#BFC1C2]"
+          data-testid={`${testid}-unavailable-note`}
+        >
+          {availabilityReason ||
+            "A confirmed, non-refunded purchase is required before this platform can generate an install command."}
         </p>
       ) : (
         <p className="mb-2 text-[11px] leading-snug text-[#BFC1C2]">

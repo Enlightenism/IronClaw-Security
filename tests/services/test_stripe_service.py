@@ -26,6 +26,7 @@ from app.services.stripe_service import (
     PACKAGE_CATALOGUE,
     InvoiceResponse,
     PaymentMethodResponse,
+    StripeAPIError,
     StripeBillingInterval,
     StripeIdempotencyError,
     StripeInsufficientUnitsError,
@@ -112,6 +113,7 @@ def _build_checkout_completed_event(
     session_id: str = "cs_svctest_001",
     event_id: str = "evt_co_done",
     owner_key: str | None = None,
+    payment_intent: str | None = "pi_svctest_001",
 ) -> dict[str, Any]:
     metadata = {
         "org_id": org_id,
@@ -148,6 +150,7 @@ def _build_checkout_completed_event(
                 "id": session_id,
                 "mode": "payment",
                 "customer": customer_id,
+                "payment_intent": payment_intent,
                 "payment_status": "paid",
                 "metadata": metadata,
             }
@@ -217,10 +220,66 @@ def _build_payment_method_record(
 
 
 @pytest.fixture()
-def svc() -> StripeService:
+def svc(monkeypatch: pytest.MonkeyPatch) -> StripeService:
     s = StripeService()
     s.reset()
     s.set_webhook_secret(_WEBHOOK_SECRET)
+    fulfillments: dict[str, dict[str, Any]] = {}
+
+    def record_checkout(**record: Any) -> dict[str, Any]:
+        session_id = str(record["session_id"])
+        existing = fulfillments.get(session_id)
+        if existing is not None:
+            for field in ("owner_key", "org_id", "package_id", "units"):
+                if existing[field] != record[field]:
+                    raise ValueError("checkout fulfillment immutable fields changed")
+            if existing.get("payment_intent") and record.get("payment_intent"):
+                if existing["payment_intent"] != record["payment_intent"]:
+                    raise ValueError("checkout PaymentIntent changed")
+        else:
+            existing = dict(record)
+            existing.update(
+                fulfillment_status="pending",
+                payment_status="pending",
+                units_credited=False,
+                install_keys_provisioned=False,
+            )
+            fulfillments[session_id] = existing
+        if record.get("payment_intent") and s._wallet_registry.is_payment_refunded(  # noqa: SLF001
+            record["payment_intent"],
+        ):
+            existing.update(fulfillment_status="refunded", payment_status="refunded")
+        elif record.get("payment_intent"):
+            existing["payment_intent"] = record["payment_intent"]
+        return dict(existing)
+
+    def mark_checkout(session_id: str, **updates: Any) -> dict[str, Any]:
+        record = fulfillments[session_id]
+        payment_intent = record.get("payment_intent")
+        is_refunded = payment_intent and s._wallet_registry.is_payment_refunded(payment_intent)  # noqa: SLF001
+        if record.get("fulfillment_status") == "refunded" or is_refunded:
+            record.update(fulfillment_status="refunded", payment_status="refunded")
+        else:
+            record.update(updates)
+            record["fulfillment_status"] = updates.get("status", record["fulfillment_status"])
+            if updates.get("status") in {"payment_confirmed", "wallet_credited", "fulfilled"}:
+                record["payment_status"] = "paid"
+        return dict(record)
+
+    def get_fulfillment_by_payment_intent(payment_intent: str) -> dict[str, Any] | None:
+        return next(
+            (dict(record) for record in fulfillments.values() if record.get("payment_intent") == payment_intent),
+            None,
+        )
+
+    monkeypatch.setattr(s, "_is_payment_intent_refunded", lambda _: False)
+    monkeypatch.setattr(s, "_record_checkout_fulfillment", record_checkout)
+    monkeypatch.setattr(s, "_mark_checkout_fulfillment", mark_checkout)
+    monkeypatch.setattr(
+        s,
+        "_get_checkout_fulfillment_by_payment_intent",
+        get_fulfillment_by_payment_intent,
+    )
     return s
 
 
@@ -702,6 +761,82 @@ class TestHandleInvoicePaid:
 
 
 class TestHandleCheckoutCompleted:
+    def test_refund_marker_removes_checkout_from_active_credited_units(
+        self,
+        svc: StripeService,
+    ) -> None:
+        payment_intent = "pi_checkout_units_refunded_001"
+        session_id = "cs_checkout_units_refunded_001"
+        svc.credit_units(
+            _ORG,
+            5_000,
+            StripeUnitEventReason.CHECKOUT_COMPLETE,
+            reference_id=session_id,
+            owner_key=_ORG,
+            package_id="pkg_5000",
+            payment_intent=payment_intent,
+        )
+        svc._wallet_registry.mark_payment_refunded(  # noqa: SLF001
+            payment_intent,
+            amount_refunded=2_000,
+        )
+
+        assert svc.get_checkout_units_credited(session_id, _ORG, owner_key=_ORG) == 0
+
+    def test_refund_marker_prevents_later_checkout_credit(
+        self,
+        svc: StripeService,
+    ) -> None:
+        payment_intent = "pi_refunded_before_credit_001"
+        svc._wallet_registry.mark_payment_refunded(  # noqa: SLF001
+            payment_intent,
+            amount_refunded=2_000,
+        )
+
+        result = svc.handle_webhook_event(
+            _build_checkout_completed_event(
+                unit_credits=5_000,
+                session_id="cs_refunded_before_credit_001",
+                payment_intent=payment_intent,
+                owner_key="buyer@ironclaw.test",
+            ),
+        )
+
+        assert result["action"] == "processed"
+        assert result["detail"]["fulfillment_status"] == "refunded"
+        assert result["detail"]["units_credited"] == 0
+        assert svc._wallet_registry.get_wallet("buyer@ironclaw.test") is None  # noqa: SLF001
+
+    def test_refunded_payment_intent_is_not_fulfilled(
+        self,
+        svc: StripeService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(svc, "_is_payment_intent_refunded", lambda _: True)
+        provisioning_service = MagicMock()
+        monkeypatch.setattr(
+            "app.services.stripe_service.provision_install_key_service",
+            lambda *args, **kwargs: provisioning_service,
+        )
+
+        result = svc.handle_webhook_event(_build_checkout_completed_event(unit_credits=5_000))
+
+        assert result["action"] == "processed"
+        assert result["detail"]["payment_confirmed"] is True
+        assert result["detail"]["fulfillment_status"] == "refunded"
+        assert result["detail"]["units_credited"] == 0
+        assert svc.get_unit_balance(_ORG).balance == 0
+        provisioning_service.provision_for_program.assert_not_called()
+
+    def test_paid_checkout_without_payment_intent_fails_closed(self, svc: StripeService) -> None:
+        result = svc.handle_webhook_event(
+            _build_checkout_completed_event(unit_credits=5_000, payment_intent=None),
+        )
+
+        assert result["action"] == "error"
+        assert "PaymentIntent" in result["error"]
+        assert svc.get_unit_balance(_ORG).balance == 0
+
     def test_checkout_completed_credits_units(self, svc: StripeService) -> None:
         event = _build_checkout_completed_event(unit_credits=5_000)
         svc.handle_webhook_event(event)
@@ -824,6 +959,94 @@ class TestHandleCheckoutCompleted:
         assert "security_guardian" not in install_keys
         assert all(record["owner_key"] == "ic_org_org-install-keys-all" for record in install_keys.values())
         assert all(record["active"] is True for record in install_keys.values())
+
+    def test_unrefunded_payment_intent_returns_false(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        payment_intent_id = "pi_refund_check_001"
+        mock_client.get.return_value = {
+            "id": payment_intent_id,
+            "status": "succeeded",
+            "latest_charge": {
+                "id": "ch_refund_check_001",
+                "payment_intent": payment_intent_id,
+                "refunded": False,
+                "amount_refunded": 0,
+            },
+        }
+
+        assert StripeService._is_payment_intent_refunded(svc_wired, payment_intent_id) is False
+        mock_client.get.assert_called_once_with(
+            f"/payment_intents/{payment_intent_id}",
+            params={"expand[]": "latest_charge"},
+        )
+
+    def test_partial_refund_is_not_eligible_for_unit_fulfillment(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        payment_intent_id = "pi_refund_check_002"
+        mock_client.get.return_value = {
+            "id": payment_intent_id,
+            "status": "succeeded",
+            "latest_charge": {
+                "id": "ch_refund_check_002",
+                "payment_intent": payment_intent_id,
+                "refunded": False,
+                "amount_refunded": 1,
+            },
+        }
+
+        assert StripeService._is_payment_intent_refunded(svc_wired, payment_intent_id) is True
+
+    def test_charge_is_retrieved_when_not_expanded(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        payment_intent_id = "pi_refund_check_003"
+        mock_client.get.side_effect = [
+            {
+                "id": payment_intent_id,
+                "status": "succeeded",
+                "latest_charge": "ch_refund_check_003",
+            },
+            {
+                "id": "ch_refund_check_003",
+                "payment_intent": payment_intent_id,
+                "refunded": True,
+                "amount_refunded": 5_000,
+            },
+        ]
+
+        assert StripeService._is_payment_intent_refunded(svc_wired, payment_intent_id) is True
+        assert mock_client.get.call_args_list[1].args == ("/charges/ch_refund_check_003",)
+
+    def test_stripe_failure_fails_closed(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.get.side_effect = StripeAPIError(
+            "Stripe unavailable",
+            http_status=503,
+        )
+
+        with pytest.raises(StripeServiceError, match="fulfillment was not applied"):
+            StripeService._is_payment_intent_refunded(svc_wired, "pi_refund_check_004")
+
+    def test_invalid_payment_intent_id_is_rejected_without_stripe_request(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        with pytest.raises(StripeServiceError, match="invalid PaymentIntent ID"):
+            StripeService._is_payment_intent_refunded(svc_wired, "pi_bad/../../charges")
+
+        mock_client.get.assert_not_called()
 
     def test_issue_paid_install_keys_uses_canonical_provisioning_path_for_runtime_programs_only(self, svc: StripeService, monkeypatch: pytest.MonkeyPatch) -> None:
         provisioning_service = MagicMock()
@@ -1830,6 +2053,51 @@ class TestPaymentMethodSetupSession:
 # ===========================================================================
 
 
+class TestCheckoutSessionCreation:
+    @pytest.mark.parametrize("save_card", [False, True])
+    def test_checkout_saves_card_only_with_explicit_consent(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        save_card: bool,
+    ) -> None:
+        mock_client.post.return_value = {
+            "id": "cs_save_card_consent_001",
+            "url": "https://checkout.stripe.com/test",
+            "customer": _CUSTOMER_ID,
+            "payment_intent": "pi_save_card_consent_001",
+        }
+        persisted: dict[str, Any] = {}
+        monkeypatch.setattr(
+            svc_wired,
+            "_record_checkout_fulfillment",
+            lambda **record: persisted.update(record) or record,
+        )
+
+        svc_wired.create_checkout_session(
+            org_id=_ORG,
+            price_id="price_save_card_001",
+            unit_credits=5_000,
+            success_url="https://example.com/ok",
+            cancel_url="https://example.com/cancel",
+            customer_id=_CUSTOMER_ID,
+            owner_key="buyer@ironclaw.test",
+            metadata={"package_id": "pkg_5000"},
+            save_card=save_card,
+        )
+
+        stripe_params = mock_client.post.call_args.args[1]
+        assert stripe_params.get("payment_intent_data[setup_future_usage]") == ("off_session" if save_card else None)
+        assert stripe_params["metadata[save_card]"] == str(save_card).lower()
+        assert persisted["session_id"] == "cs_save_card_consent_001"
+        assert persisted["owner_key"] == "buyer@ironclaw.test"
+        assert persisted["package_id"] == "pkg_5000"
+        assert persisted["units"] == 5_000
+        assert persisted["payment_intent"] == "pi_save_card_consent_001"
+        assert persisted["save_card"] is save_card
+
+
 class TestCompleteCheckoutSession:
     def _seed_session(
         self,
@@ -1843,8 +2111,10 @@ class TestCompleteCheckoutSession:
             "id": session_id,
             "url": "https://checkout.stripe.com/test",
             "customer": _CUSTOMER_ID,
+            "payment_intent": "pi_complete_test_001",
             "expires_at": int(time.time()) + 1800,
         }
+        checkout_owner = owner_key or svc_wired._canonical_org_owner_key(_ORG)  # noqa: SLF001
         svc_wired.create_checkout_session(
             org_id=_ORG,
             price_id="price_complete_001",
@@ -1852,8 +2122,19 @@ class TestCompleteCheckoutSession:
             success_url="https://example.com/ok",
             cancel_url="https://example.com/cancel",
             customer_id=_CUSTOMER_ID,
-            owner_key=owner_key,
+            owner_key=checkout_owner,
+            metadata={"package_id": "pkg_5000"},
         )
+        record = svc_wired.get_checkout_session(session_id)
+        assert record is not None
+        mock_client.get.return_value = {
+            "id": session_id,
+            "mode": "payment",
+            "payment_status": "paid",
+            "payment_intent": "pi_complete_test_001",
+            "customer": _CUSTOMER_ID,
+            "metadata": record["metadata"],
+        }
         return session_id
 
     def test_complete_checkout_session_credits_units(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
@@ -1888,9 +2169,14 @@ class TestCompleteCheckoutSession:
         assert record is not None
         assert record["status"] == "complete"
 
-    def test_complete_checkout_session_missing_session_raises(self, svc: StripeService) -> None:
+    def test_complete_checkout_session_missing_session_raises(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.get.side_effect = StripeAPIError("not found", http_status=404)
         with pytest.raises(StripeSessionNotFoundError):
-            svc.complete_checkout_session(session_id="cs_ghost_999", org_id=_ORG)
+            svc_wired.complete_checkout_session(session_id="cs_ghost_999", org_id=_ORG)
 
     def test_complete_checkout_session_ledger_reason_checkout_complete(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
         session_id = self._seed_session(svc_wired, mock_client, unit_credits=250)
@@ -2015,6 +2301,37 @@ class TestReconcileCheckoutSession:
         owner_wallet = svc_wired._wallet_registry.get_wallet(owner)  # noqa: SLF001
         assert owner_wallet is not None
         assert owner_wallet.balance_units == 5000
+
+    def test_owner_reconciliation_does_not_fulfill_refunded_checkout(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        owner = "buyer@ironclaw.test"
+        session = _build_checkout_completed_event(
+            unit_credits=5_000,
+            session_id="cs_owner_refunded_001",
+            owner_key=owner,
+        )[
+            "data"
+        ]["object"]
+        mock_client.get.return_value = {
+            "object": "list",
+            "data": [session],
+            "has_more": False,
+        }
+        monkeypatch.setattr(svc_wired, "_is_payment_intent_refunded", lambda _: True)
+
+        reconciliation = svc_wired.reconcile_owner_checkout_sessions(owner)
+
+        assert reconciliation["status"] == "partial"
+        assert reconciliation["sessions_reconciled"] == 0
+        assert reconciliation["units_credited"] == 0
+        assert reconciliation["sessions"][0]["status"] == "refunded"
+        assert reconciliation["sessions"][0]["action"] == "contact_support"
+        assert "refunded" in reconciliation["sessions"][0]["error"]
+        assert svc_wired._wallet_registry.get_wallet(owner) is None  # noqa: SLF001
 
     def test_reconcile_owner_checkout_sessions_reports_page_limit(
         self,

@@ -16,6 +16,7 @@ from app.services.stripe_service import (
     MeteredSyncResponse,
     StripeCheckoutMode,
     StripeInsufficientUnitsError,
+    StripePersistenceError,
     StripeService,
     StripeServiceError,
     StripeSessionNotFoundError,
@@ -615,6 +616,7 @@ class TestCheckoutSessionRoutes:
                         "org_id": "attacker-org",
                         "unit_credits": "999999",
                     },
+                    "saveCard": True,
                 },
                 headers=_auth_headers(),
             )
@@ -637,6 +639,7 @@ class TestCheckoutSessionRoutes:
                 "org_id": ORG_ID,
                 "unit_credits": "5000",
             },
+            save_card=True,
         )
 
     def test_create_checkout_session_ignores_request_owner_and_customer_ids(
@@ -680,6 +683,7 @@ class TestCheckoutSessionRoutes:
         assert checkout_kwargs["customer_id"] is None
         assert checkout_kwargs["metadata"]["org_id"] == "buyer@ironclaw.test"
         assert checkout_kwargs["metadata"]["owner_key"] == "buyer@ironclaw.test"
+        assert checkout_kwargs["save_card"] is False
 
     @pytest.mark.parametrize(
         ("success_url", "cancel_url"),
@@ -826,6 +830,7 @@ class TestCheckoutSessionRoutes:
                 "unit_credits": "10000",
                 "owner_key": "buyer@ironclaw.test",
             },
+            save_card=False,
         )
 
     def test_create_checkout_session_requires_billing_owner(
@@ -877,6 +882,31 @@ class TestCheckoutSessionRoutes:
 
         assert resp.status_code == 502
         assert resp.json()["detail"]["error"] == "stripe_checkout_unavailable"
+
+    def test_create_checkout_session_fails_closed_when_fulfillment_storage_is_unavailable(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.create_checkout_session.side_effect = StripePersistenceError(
+            "durable fulfillment storage is unavailable",
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.routers.stripe_router.vault.get", MagicMock(side_effect=_TEST_PRICE_IDS.get))
+            response = client.post(
+                _billing_path("/checkout/sessions"),
+                json={
+                    "packageId": "pkg5000",
+                    "successUrl": _ALLOWED_SUCCESS_URL,
+                    "cancelUrl": _ALLOWED_CANCEL_URL,
+                },
+                headers=_auth_headers(),
+            )
+
+        assert response.status_code == 503
+        assert response.json()["detail"]["error"] == "checkout_fulfillment_storage_unavailable"
+        assert response.json()["detail"]["retryable"] is True
 
     def test_checkout_session_status_checks_owner_and_redacts_owner_metadata(
         self,
@@ -1083,7 +1113,10 @@ class TestCheckoutSessionRoutes:
                 {
                     "session_id": SESSION_ID,
                     "status": "fulfilled",
+                    "fulfillment_status": "fulfilled",
                     "units_credited": 5000,
+                    "support_reference": SESSION_ID,
+                    "action": None,
                 },
             ],
             "truncated": False,
@@ -1115,12 +1148,18 @@ class TestCheckoutSessionRoutes:
                 {
                     "session_id": SESSION_ID,
                     "status": "failed",
+                    "fulfillment_status": "failed",
                     "error": "Checkout session integrity verification failed.",
+                    "support_reference": SESSION_ID,
+                    "action": "retry_sync",
                 },
                 {
                     "session_id": "cs_test_002",
                     "status": "fulfilled",
+                    "fulfillment_status": "fulfilled",
                     "units_credited": 5000,
+                    "support_reference": "cs_test_002",
+                    "action": None,
                 },
             ],
             "truncated": False,
@@ -1134,6 +1173,41 @@ class TestCheckoutSessionRoutes:
 
         assert response.status_code == 200
         assert response.json() == result
+
+    def test_reconcile_recent_preserves_refund_support_action(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        result = {
+            "status": "partial",
+            "sessions_matched": 1,
+            "sessions_reconciled": 0,
+            "units_credited": 0,
+            "sessions": [
+                {
+                    "session_id": SESSION_ID,
+                    "status": "refunded",
+                    "fulfillment_status": "refunded",
+                    "units_credited": 0,
+                    "action": "contact_support",
+                    "support_reference": SESSION_ID,
+                }
+            ],
+            "truncated": False,
+        }
+        mock_svc.reconcile_owner_checkout_sessions.return_value = result
+
+        response = client.post(
+            _billing_path("/checkout/reconcile-recent"),
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 200
+        outcome = response.json()["sessions"][0]
+        assert outcome["status"] == "refunded"
+        assert outcome["action"] == "contact_support"
+        assert outcome["support_reference"] == SESSION_ID
 
     def test_reconcile_recent_checkout_sessions_requires_billing_owner(
         self,

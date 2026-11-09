@@ -190,6 +190,10 @@ const normalizePaymentMethodsResponse = (data) => {
         : method.isDefault,
     })),
     defaultId: resolvedDefaultId || null,
+    customerMappingStatus:
+      getFirstString(data?.customer_mapping_status) || "mapped",
+    methodsStatus: getFirstString(data?.methods_status) || "available",
+    message: getFirstString(data?.message),
   };
 };
 
@@ -283,15 +287,23 @@ const PaymentMethodPanel = ({
     () => !cachedEntry && !!organizationId,
   );
   const [methodsError, setMethodsError] = useState("");
+  const [methodsStatus, setMethodsStatus] = useState(
+    () => cachedEntry?.methodsStatus ?? "available",
+  );
+  const [methodsMessage, setMethodsMessage] = useState(
+    () => cachedEntry?.message ?? "",
+  );
   const [actionId, setActionId] = useState(null);
   const hasFetchedRef = useRef(!!cachedEntry);
 
   const syncCache = useCallback(
-    (nextMethods, nextDefaultId) => {
+    (nextMethods, nextDefaultId, nextMethodsStatus, nextMessage) => {
       if (!organizationId) return;
       paymentMethodCache.set(organizationId, {
         methods: nextMethods,
         defaultId: nextDefaultId,
+        methodsStatus: nextMethodsStatus,
+        message: nextMessage,
       });
     },
     [organizationId],
@@ -308,16 +320,27 @@ const PaymentMethodPanel = ({
         const normalized = normalizePaymentMethodsResponse(data);
         setMethods(normalized.methods);
         setDefaultId(normalized.defaultId);
+        setMethodsStatus(normalized.methodsStatus);
+        setMethodsMessage(normalized.message);
         setMethodsError("");
-        syncCache(normalized.methods, normalized.defaultId);
+        syncCache(
+          normalized.methods,
+          normalized.defaultId,
+          normalized.methodsStatus,
+          normalized.message,
+        );
         hasFetchedRef.current = true;
       } catch (error) {
         setMethods([]);
         setDefaultId(null);
+        setMethodsStatus("unavailable");
+        setMethodsMessage("");
         setMethodsError(
           typeof error?.response?.data?.detail === "string"
             ? error.response.data.detail
-            : "Saved payment methods could not be loaded. Try again.",
+            : typeof error?.response?.data?.detail?.detail === "string"
+              ? error.response.data.detail.detail
+              : "Saved payment methods could not be loaded. Try again.",
         );
         hasFetchedRef.current = false;
       } finally {
@@ -334,6 +357,8 @@ const PaymentMethodPanel = ({
     if (nextCachedEntry) {
       setMethods(nextCachedEntry.methods ?? []);
       setDefaultId(nextCachedEntry.defaultId ?? null);
+      setMethodsStatus(nextCachedEntry.methodsStatus ?? "available");
+      setMethodsMessage(nextCachedEntry.message ?? "");
       setLoadingMethods(false);
       hasFetchedRef.current = true;
       return;
@@ -342,6 +367,8 @@ const PaymentMethodPanel = ({
     hasFetchedRef.current = false;
     setMethods([]);
     setDefaultId(null);
+    setMethodsStatus("available");
+    setMethodsMessage("");
     setMethodsError("");
     setLoadingMethods(true);
     fetchMethods();
@@ -444,9 +471,25 @@ const PaymentMethodPanel = ({
   if (methods.length === 0) {
     return (
       <div className="flex flex-col items-start gap-2">
-        <div className="flex items-center gap-2 text-xs text-[#737373]">
+        <div
+          className={`flex items-start gap-2 text-xs ${
+            methodsStatus === "customer_mapping_unavailable"
+              ? "text-[#FDE68A]"
+              : "text-[#737373]"
+          }`}
+          role={
+            methodsStatus === "customer_mapping_unavailable"
+              ? "status"
+              : undefined
+          }
+        >
           <Zap size={14} className="text-[#FFD700]" />
-          No saved card yet. Add one securely without making a purchase.
+          <span>
+            {methodsStatus === "customer_mapping_unavailable"
+              ? methodsMessage ||
+                "Saved cards cannot be verified because the Stripe customer mapping is unavailable."
+              : "No saved card yet. Add one securely without making a purchase."}
+          </span>
         </div>
         {addPaymentMethodButton}
       </div>
@@ -549,6 +592,7 @@ const PaymentMethodPanel = ({
 
 const WalletCard = ({
   balance = 0,
+  walletStatus = "unavailable",
   lastPayment,
   walletHistory = [],
   hasPaid,
@@ -565,6 +609,7 @@ const WalletCard = ({
   const [tiers, setTiers] = useState([]);
   const [catalogueLoading, setCatalogueLoading] = useState(true);
   const [catalogueError, setCatalogueError] = useState(false);
+  const [saveCard, setSaveCard] = useState(false);
 
   const packageIds = useMemo(
     () => new Set(tiers.map((tier) => tier.id)),
@@ -611,10 +656,40 @@ const WalletCard = ({
         return;
       }
 
-      onPurchase(tierId);
+      onPurchase(tierId, saveCard);
     },
-    [onPurchase, packageIds],
+    [onPurchase, packageIds, saveCard],
   );
+
+  const normalizedWalletStatus = [
+    "active",
+    "empty",
+    "not_created",
+    "unavailable",
+  ].includes(walletStatus)
+    ? walletStatus
+    : "unavailable";
+  const walletHealth = {
+    active: {
+      label: "Active",
+      classes: "border-[#22C55E]/30 bg-[#22C55E]/10 text-[#22C55E]",
+    },
+    empty: {
+      label: "No funds",
+      classes: "border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[#F59E0B]",
+    },
+    not_created: {
+      label: "Not funded",
+      classes: "border-white/15 bg-white/5 text-[#BFC1C2]",
+    },
+    unavailable: {
+      label: "Status unavailable",
+      classes: "border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[#F59E0B]",
+    },
+  }[normalizedWalletStatus] || {
+    label: "Status unavailable",
+    classes: "border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[#F59E0B]",
+  };
 
   return (
     <div className="glass-platinum rounded-2xl p-7" data-testid="wallet-card">
@@ -625,8 +700,12 @@ const WalletCard = ({
             Unit Wallet
           </h2>
         </div>
-        <span className="rounded-full border border-[#22C55E]/30 bg-[#22C55E]/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#22C55E]">
-          Active
+        <span
+          className={`rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${walletHealth.classes}`}
+          data-testid="wallet-health"
+          data-wallet-status={normalizedWalletStatus}
+        >
+          {walletHealth.label}
         </span>
       </div>
 
@@ -661,8 +740,10 @@ const WalletCard = ({
             {recentWalletHistory.slice(0, 5).map((entry, index) => {
               const units = Number(entry?.units);
               const safeUnits = Number.isFinite(units) ? Math.abs(units) : 0;
-              const isDebit =
-                String(entry?.entry_type).toLowerCase() === "debit";
+              const entryType = String(entry?.entry_type).toLowerCase();
+              const isDebit = ["debit", "refund_revoke", "consume"].includes(
+                entryType,
+              );
               const balanceAfter = Number(entry?.balance_after);
               return (
                 <div
@@ -677,6 +758,8 @@ const WalletCard = ({
                       {entry?.created_at || ""}
                       {Number.isFinite(balanceAfter) &&
                         ` · balance ${balanceAfter.toLocaleString()}`}
+                      {entry?.support_reference &&
+                        ` · ref ${entry.support_reference}`}
                     </div>
                   </div>
                   <span
@@ -695,6 +778,20 @@ const WalletCard = ({
           </div>
         </section>
       )}
+
+      <label className="mb-4 flex cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-[#BFC1C2]">
+        <input
+          type="checkbox"
+          checked={saveCard}
+          onChange={(event) => setSaveCard(event.target.checked)}
+          data-testid="save-card-consent"
+          className="mt-0.5 accent-[#FFD700]"
+        />
+        <span>
+          Save my card with Stripe for future purchases. This is optional and
+          does not create a subscription or recurring charge.
+        </span>
+      </label>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {catalogueLoading && (

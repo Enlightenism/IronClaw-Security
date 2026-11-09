@@ -229,6 +229,9 @@ describe("IntegrationCard", () => {
     renderCard({ available: false, onCreateClaim });
 
     expect(screen.getByTestId("claude-code-card-generate")).toBeDisabled();
+    expect(
+      screen.getByTestId("claude-code-card-unavailable-note"),
+    ).toHaveTextContent("confirmed, non-refunded purchase");
     await user.click(screen.getByTestId("claude-code-card-generate"));
     expect(onCreateClaim).not.toHaveBeenCalled();
   });

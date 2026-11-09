@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import logging
 import math
 import os
+import re
 from threading import Lock
 from typing import Any
 import uuid
@@ -689,6 +690,36 @@ class SupabaseUnitWalletRepository:
         if result is None or not hasattr(result, "data") or not result.data:
             raise RuntimeError("unit_wallet: atomic Supabase wallet credit returned no wallet record")
 
+    def record_payment_refund_marker(
+        self,
+        *,
+        payment_intent: str,
+        charge_id: str | None,
+        amount_refunded: int,
+        reason: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        rpc = getattr(self._client, "rpc", None)
+        if not callable(rpc):
+            raise RuntimeError("unit_wallet: Supabase client does not support durable refund markers")
+        result = rpc(
+            "record_stripe_payment_refund",
+            {
+                "p_payment_intent": payment_intent,
+                "p_charge_id": charge_id,
+                "p_amount_refunded": amount_refunded,
+                "p_refund_reason": reason,
+                "p_refunded_at": datetime.now(UTC).isoformat(),
+                "p_metadata": metadata or {},
+            },
+        ).execute()
+        if result is None:
+            raise RuntimeError("unit_wallet: durable refund marker write returned no result")
+
+    def has_payment_refund_marker(self, payment_intent: str) -> bool:
+        result = self._client.table("stripe_payment_refund_markers").select("payment_intent").eq("payment_intent", payment_intent).limit(1).execute()
+        return bool(result.data)
+
     def fetch_ledger_entries(
         self,
         owner_key: str | None = None,
@@ -752,6 +783,7 @@ class MemoryUnitWalletRepository:
         self._wallets: dict[str, RegistryUnitWallet] = {}
         self._wallets_by_owner: dict[str, str] = {}
         self._ledger: list[RegistryUnitLedgerEntry] = []
+        self._refund_markers: set[str] = set()
         self._lock = Lock()
 
     def upsert_wallet(self, wallet: RegistryUnitWallet) -> None:
@@ -788,6 +820,23 @@ class MemoryUnitWalletRepository:
     def fetch_ledger_entry_by_event_id(self, event_id: str) -> RegistryUnitLedgerEntry | None:
         with self._lock:
             return next((entry for entry in self._ledger if entry.event_id == event_id), None)
+
+    def record_payment_refund_marker(
+        self,
+        *,
+        payment_intent: str,
+        charge_id: str | None,
+        amount_refunded: int,
+        reason: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        del charge_id, amount_refunded, reason, metadata
+        with self._lock:
+            self._refund_markers.add(payment_intent)
+
+    def has_payment_refund_marker(self, payment_intent: str) -> bool:
+        with self._lock:
+            return payment_intent in self._refund_markers
 
 
 def _make_repo() -> SupabaseUnitWalletRepository | MemoryUnitWalletRepository:
@@ -969,6 +1018,38 @@ class UnitWalletRegistry:
             payload.setdefault("event_id", event_id)
         return payload, purchase_id, checkout_session_id, event_id
 
+    def mark_payment_refunded(
+        self,
+        payment_intent: str,
+        *,
+        charge_id: str | None = None,
+        amount_refunded: int,
+        reason: str = "charge_refunded",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        normalized_payment_intent = str(payment_intent or "").strip()
+        if not re.fullmatch(r"pi_[A-Za-z0-9_]+", normalized_payment_intent):
+            raise ValueError("payment_intent must be a valid Stripe PaymentIntent ID")
+        safe_amount = int(amount_refunded)
+        if safe_amount <= 0:
+            raise ValueError("amount_refunded must be greater than zero")
+        self._assert_durable_storage()
+        with self._lock:
+            self._repo.record_payment_refund_marker(
+                payment_intent=normalized_payment_intent,
+                charge_id=str(charge_id or "").strip() or None,
+                amount_refunded=safe_amount,
+                reason=str(reason or "charge_refunded").strip(),
+                metadata=metadata,
+            )
+
+    def is_payment_refunded(self, payment_intent: str) -> bool:
+        normalized_payment_intent = str(payment_intent or "").strip()
+        if not re.fullmatch(r"pi_[A-Za-z0-9_]+", normalized_payment_intent):
+            raise ValueError("payment_intent must be a valid Stripe PaymentIntent ID")
+        self._assert_durable_storage()
+        return self._repo.has_payment_refund_marker(normalized_payment_intent)
+
     def _find_existing_event(
         self,
         *,
@@ -1029,6 +1110,9 @@ class UnitWalletRegistry:
             return updated_wallet
 
         with self._lock:
+            payment_intent = str(normalized_metadata.get("payment_intent") or "").strip()
+            if payment_intent and isinstance(self._repo, MemoryUnitWalletRepository) and self._repo.has_payment_refund_marker(payment_intent):
+                raise ValueError("payment has been refunded; wallet credit was rejected")
             existing_entry = self._find_existing_event(
                 event_id=event_id,
                 owner_key=wallet.owner_key,

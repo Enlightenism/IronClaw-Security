@@ -130,6 +130,8 @@ class TestGetPaymentMethodsUi:
         assert body["canaddnew"] is True
         assert body["maxmethods"] == _MAX_METHODS
         assert body["methods"] == []
+        assert body["customer_mapping_status"] == "unavailable"
+        assert body["methods_status"] == "customer_mapping_unavailable"
 
     def test_notes_include_missing_customer_message_when_no_mapping(
         self,
@@ -161,8 +163,63 @@ class TestGetPaymentMethodsUi:
             params={"organizationid": "org-ui-002"},
         )
         assert resp.status_code == 200
-        notes = resp.json()["notes"]
+        body = resp.json()
+        notes = body["notes"]
+        assert body["customer_mapping_status"] == "unavailable"
+        assert body["methods_status"] == "customer_mapping_unavailable"
         assert any("No Stripe customer is currently mapped" in note for note in notes)
+
+    def test_stripe_method_retrieval_failure_is_not_reported_as_empty_success(
+        self,
+        authed_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def fail_to_list_methods(*, customer_id: str) -> list[dict[str, object]]:
+            raise RuntimeError(f"Stripe retrieval failed for {customer_id}")
+
+        stripe_service = SimpleNamespace(
+            resolve_customer_id=lambda _organizationid: "cus_mapped_001",
+            list_payment_methods=fail_to_list_methods,
+        )
+        monkeypatch.setitem(
+            _app.dependency_overrides,
+            get_stripe_service,
+            lambda: stripe_service,
+        )
+
+        response = authed_client.get(
+            "/ui/billing/payment-methods",
+            params={"organizationid": "org-ui-retrieval-error"},
+        )
+
+        assert response.status_code == 502
+        assert response.json()["detail"]["error"] == "payment_methods_fetch_error"
+
+    def test_mapped_customer_with_no_saved_method_is_distinct_from_missing_mapping(
+        self,
+        authed_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        stripe_service = SimpleNamespace(
+            resolve_customer_id=lambda _organizationid: "cus_mapped_001",
+            list_payment_methods=lambda *, customer_id: [],
+        )
+        monkeypatch.setitem(
+            _app.dependency_overrides,
+            get_stripe_service,
+            lambda: stripe_service,
+        )
+
+        response = authed_client.get(
+            "/ui/billing/payment-methods",
+            params={"organizationid": "org-ui-mapped-empty"},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["customer_mapping_status"] == "mapped"
+        assert body["methods_status"] == "no_saved_methods"
+        assert body["methods"] == []
 
 
 class TestBuildMethod:

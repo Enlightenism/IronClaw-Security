@@ -26,6 +26,7 @@ from app.services.stripe_service import (
     StripeCheckoutMode,
     StripeInsufficientUnitsError,
     StripePaymentMethodNotFoundError,
+    StripePersistenceError,
     StripeService,
     StripeServiceError,
     StripeSessionNotFoundError,
@@ -310,6 +311,11 @@ class CheckoutSessionCreateRequest(BaseModel):
     cancel_url: str = Field(..., alias="cancelUrl", description="Redirect URL on cancelled payment")
     customer_id: str | None = Field(default=None, alias="customerId", description="Existing Stripe customer ID")
     metadata: dict[str, Any] = Field(default_factory=dict)
+    save_card: bool = Field(
+        default=False,
+        alias="saveCard",
+        description="Explicit consent to save this card for future off-session use",
+    )
     organization_id: str | None = Field(default=None, alias="organizationId")
     organizationid: str | None = Field(default=None)
     org_id: str | None = Field(default=None, alias="orgId")
@@ -1197,7 +1203,22 @@ async def create_checkout_session(
             customer_id=customer_id,
             owner_key=owner_key,
             metadata=metadata,
+            save_card=body.save_card,
         )
+    except StripePersistenceError as exc:
+        logger.exception(
+            "stripe_router.create_checkout_persistence_failed org_id=%s package_id=%s",
+            org_id,
+            canonical_package_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "checkout_fulfillment_storage_unavailable",
+                "detail": str(exc),
+                "retryable": True,
+            },
+        ) from exc
     except StripeServiceError as exc:
         logger.exception(
             "stripe_router.create_checkout_session_failed org_id=%s package_id=%s price_id=%s",
@@ -1233,7 +1254,11 @@ async def create_checkout_session(
             },
         ) from exc
 
-    return JSONResponse(status_code=status.HTTP_201_CREATED, content=result.to_dict())
+    response_payload = result.to_dict()
+    response_metadata = response_payload.get("metadata")
+    if isinstance(response_metadata, dict):
+        response_payload["metadata"] = {key: value for key, value in response_metadata.items() if key != "owner_key"}
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content=response_payload)
 
 
 @api_router.post("/checkout/sessions", status_code=status.HTTP_201_CREATED, tags=["billing", "checkout"])
@@ -1396,7 +1421,11 @@ async def reconcile_checkout_session(
             "session_id": session_id,
             "payment_status": result.get("payment_status") or record.get("payment_status"),
             "payment_confirmed": bool(result.get("payment_confirmed")),
+            "fulfillment_status": result.get("fulfillment_status") or ("payment_pending" if not result.get("payment_confirmed") else "incomplete"),
             "units_credited": _units_credited_for_checkout(svc, session_id, record, auth),
+            "error": result.get("error"),
+            "action": result.get("action"),
+            "support_reference": result.get("support_reference") or session_id,
         },
     )
 
@@ -1442,6 +1471,18 @@ async def reconcile_recent_checkout_sessions(
             detail={"error": "reconcile_error", "detail": str(exc)},
         ) from exc
 
+    sessions = result.get("sessions")
+    if isinstance(sessions, list):
+        result["sessions"] = [
+            {
+                **session,
+                "fulfillment_status": session.get("fulfillment_status") or session.get("status"),
+                "support_reference": session.get("support_reference") or session.get("session_id"),
+                "action": session.get("action") or ("retry_sync" if session.get("status") == "failed" else None),
+            }
+            for session in sessions
+            if isinstance(session, dict)
+        ]
     return JSONResponse(status_code=status.HTTP_200_OK, content=result)
 
 

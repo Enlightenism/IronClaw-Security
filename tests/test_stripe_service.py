@@ -369,8 +369,56 @@ def _reset_service() -> Generator[None, None, None]:
 
 
 @pytest.fixture()
-def svc() -> StripeService:
-    return StripeService(webhook_secret=_TEST_WEBHOOK_SECRET)
+def svc(monkeypatch: pytest.MonkeyPatch) -> StripeService:
+    service = StripeService(webhook_secret=_TEST_WEBHOOK_SECRET)
+    fulfillments: dict[str, dict[str, Any]] = {}
+
+    def record_checkout(**record: Any) -> dict[str, Any]:
+        session_id = str(record["session_id"])
+        existing = fulfillments.get(session_id)
+        if existing is None:
+            existing = {
+                **record,
+                "fulfillment_status": "pending",
+                "payment_status": "pending",
+                "units_credited": False,
+                "install_keys_provisioned": False,
+            }
+            fulfillments[session_id] = existing
+        if record.get("payment_intent"):
+            existing["payment_intent"] = record["payment_intent"]
+            if service._wallet_registry.is_payment_refunded(record["payment_intent"]):  # noqa: SLF001
+                existing.update(fulfillment_status="refunded", payment_status="refunded")
+        return dict(existing)
+
+    def mark_checkout(session_id: str, **updates: Any) -> dict[str, Any]:
+        record = fulfillments[session_id]
+        payment_intent = record.get("payment_intent")
+        refunded = payment_intent and service._wallet_registry.is_payment_refunded(payment_intent)  # noqa: SLF001
+        if record.get("fulfillment_status") == "refunded" or refunded:
+            record.update(fulfillment_status="refunded", payment_status="refunded")
+        else:
+            record.update(updates)
+            record["fulfillment_status"] = updates.get("status", record["fulfillment_status"])
+            if updates.get("status") in {"payment_confirmed", "wallet_credited", "fulfilled"}:
+                record["payment_status"] = "paid"
+        return dict(record)
+
+    def get_fulfillment_by_payment_intent(payment_intent: str) -> dict[str, Any] | None:
+        return next(
+            (dict(record) for record in fulfillments.values() if record.get("payment_intent") == payment_intent),
+            None,
+        )
+
+    monkeypatch.setattr(service, "_record_checkout_fulfillment", record_checkout)
+    monkeypatch.setattr(service, "_mark_checkout_fulfillment", mark_checkout)
+    monkeypatch.setattr(
+        service,
+        "_get_checkout_fulfillment_by_payment_intent",
+        get_fulfillment_by_payment_intent,
+    )
+    monkeypatch.setattr(service, "_is_payment_intent_refunded", lambda _: False)
+    return service
 
 
 @pytest.fixture()
@@ -563,6 +611,8 @@ class TestCheckoutSessionCreation:
             unit_credits=_PKG_STARTER_UNITS,
             success_url=_TEST_SUCCESS_URL,
             cancel_url=_TEST_CANCEL_URL,
+            owner_key=f"ic_org_{_TEST_ORG}",
+            metadata={"package_id": "pkg_5000"},
         )
         assert isinstance(resp, CheckoutSessionResponse)
         assert resp.session_id == _TEST_SESSION_ID
@@ -587,6 +637,7 @@ class TestCheckoutSessionCreation:
                 "org_id": "attacker-org",
                 "owner_key": "attacker@ironclaw.test",
                 "unit_credits": "999999",
+                "package_id": "pkg_5000",
                 "tokens_per_unit": "1",
                 "ironclaw_source": "attacker",
                 "ironclaw_checkout_version": "legacy",
@@ -1239,7 +1290,8 @@ class TestWebhookEventDispatch:
             "mode": "payment",
             "payment_status": "paid",
             "customer": _TEST_CUSTOMER_ID,
-            "metadata": _signed_checkout_metadata(),
+            "payment_intent": "pi_webhook_1",
+            "metadata": _signed_checkout_metadata(owner_key=f"ic_org_{_TEST_ORG}"),
         }
         result = svc.handle_webhook_event(self._event("checkout.session.completed", obj))
         assert result["action"] == "processed"
@@ -1249,6 +1301,7 @@ class TestWebhookEventDispatch:
         obj = {
             "id": "cs_webhook_2",
             "mode": "payment",
+            "payment_status": "unpaid",
             "customer": _TEST_CUSTOMER_ID,
             "metadata": _signed_checkout_metadata(unit_credits=0),
         }
@@ -1585,7 +1638,8 @@ class TestWebhookEventDispatch:
             "mode": "payment",
             "payment_status": "paid",
             "customer": _TEST_CUSTOMER_ID,
-            "metadata": _signed_checkout_metadata(),
+            "payment_intent": "pi_idem",
+            "metadata": _signed_checkout_metadata(owner_key=f"ic_org_{_TEST_ORG}"),
         }
         event = self._event("checkout.session.completed", obj, event_id="evt_idempotent_1")
         svc.handle_webhook_event(event)
@@ -1663,7 +1717,8 @@ class TestServiceReset:
             "mode": "payment",
             "payment_status": "paid",
             "customer": _TEST_CUSTOMER_ID,
-            "metadata": _signed_checkout_metadata(),
+            "payment_intent": "pi_re_process",
+            "metadata": _signed_checkout_metadata(owner_key=f"ic_org_{_TEST_ORG}"),
         }
         event = {"id": "evt_to_clear", "type": "checkout.session.completed", "data": {"object": obj}}
         svc.handle_webhook_event(event)

@@ -171,11 +171,15 @@ class BillingPaymentMethodStatusCount(BaseModel):
 
 
 class BillingPaymentMethodsResponse(BaseModel):
+    status: str = "ok"
     generatedat: str
     environment: str
     organizationid: str
     organizationname: str
     stripe_customer_id: str | None
+    customer_mapping_status: str = "mapped"
+    methods_status: str = "available"
+    message: str | None = None
     stripe: StripeStatus = Field(default_factory=_get_stripe_status)
     stripe_mode: str | None
     defaultmethodid: str | None
@@ -657,6 +661,10 @@ async def get_payment_methods(
 
     if stripe_customer_id:
         methods = stripe_methods
+        customer_mapping_status = "mapped"
+        methods_status = "available" if methods else "no_saved_methods"
+        response_status = "ok" if methods else "no_saved_methods"
+        response_message = None if methods else "No saved payment methods are attached to this Stripe customer."
     elif is_supabase_configured():
         try:
             methods = _fetch_payment_methods_from_supabase(organizationid=organizationid)
@@ -669,8 +677,16 @@ async def get_payment_methods(
                     "organizationid": organizationid,
                 },
             ) from exc
+        customer_mapping_status = "unavailable"
+        methods_status = "customer_mapping_unavailable"
+        response_status = "customer_mapping_unavailable"
+        response_message = "No Stripe customer is currently mapped to this organization, so saved methods could not be verified."
     else:
         methods = []
+        customer_mapping_status = "unavailable"
+        methods_status = "customer_mapping_unavailable"
+        response_status = "customer_mapping_unavailable"
+        response_message = "No Stripe customer is currently mapped to this organization, so saved methods could not be verified."
 
     org_name = _fetch_org_name(organizationid, stripe_customer_id)
     methodcount = len(methods)
@@ -698,7 +714,7 @@ async def get_payment_methods(
     ]
 
     if stripe_customer_id is None:
-        notes.append("No Stripe customer is currently mapped to this organization. Create a Stripe customer before attaching or charging payment methods.")
+        notes.append(response_message or "No Stripe customer is currently mapped to this organization.")
     if expired_count > 0:
         notes.append("One or more payment methods are expired. Prompt the user to update billing details.")
     if revoked_count > 0:
@@ -711,11 +727,15 @@ async def get_payment_methods(
         catalogue_out[key] = PackageCatalogueEntry(**value)
 
     return BillingPaymentMethodsResponse(
+        status=response_status,
         generatedat=generatedat,
         environment=env,
         organizationid=organizationid,
         organizationname=org_name,
         stripe_customer_id=stripe_customer_id,
+        customer_mapping_status=customer_mapping_status,
+        methods_status=methods_status,
+        message=response_message,
         stripe=stripe_status,
         stripe_mode=stripe_status.mode if stripe_status.configured else _stripe_mode(),
         defaultmethodid=defaultmethodid,

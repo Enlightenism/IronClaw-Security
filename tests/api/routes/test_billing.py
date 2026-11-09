@@ -383,14 +383,12 @@ def _signed_stripe_payload(payload: dict[str, object], *, secret: str) -> tuple[
     return raw, f"t={timestamp},v1={signed}"
 
 
-def test_checkout_session_completed_webhook_fulfills_pending_purchase_and_credits_wallet(
+def test_signed_legacy_checkout_without_trusted_metadata_is_not_fulfilled(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "app.api.routes.billing._provision_paid_install_keys",
-        lambda **_kwargs: _make_install_key_records(),
-    )
+    provision = MagicMock(return_value=_make_install_key_records())
+    monkeypatch.setattr("app.api.routes.billing._provision_paid_install_keys", provision)
     owner = "webhook-buyer@ironclaw.test"
     create_resp = client.post(
         _PURCHASE_PATH,
@@ -436,25 +434,14 @@ def test_checkout_session_completed_webhook_fulfills_pending_purchase_and_credit
     )
 
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "fulfilled"
-    assert body["purchase_id"] == purchase_id
-    assert body["wallet"]["owner_key"] == owner
-    assert body["wallet"]["balance_units"] == 5_000
-    assert body["metadata"]["payment_status"] == "paid"
-    assert body["metadata"]["fulfillment_status"] == "fulfilled"
-    assert body["metadata"]["install_keys_provisioned"] is True
-    assert body["purchase"]["install_key_id"] == "ik_openclaw_001"
-    assert body["purchase"]["masked_key"] == "ic_install_openclaw_...1234"
-    assert body["purchase"]["install_key_id"] != body["purchase"]["masked_key"]
+    assert resp.json()["status"] == "unfulfilled"
+    assert resp.json()["reason"] == "legacy_checkout_requires_review"
+    assert resp.json()["action"] == "contact_support"
 
     wallet_resp = client.get(f"/billing/wallet/{owner}")
     assert wallet_resp.status_code == 200
-    assert wallet_resp.json()["wallet"]["balance_units"] == 5_000
-
-    credit_entries = [entry for entry in _unit_wallet_module.get_unit_wallet_registry().list_ledger_entries(owner_key=owner, checkout_session_id=checkout_session_id) if entry.entry_type == "credit"]
-    assert len(credit_entries) == 1
-    assert credit_entries[0].event_id == f"stripe:checkout.complete:{checkout_session_id}"
+    assert wallet_resp.json()["wallet"]["balance_units"] == 0
+    provision.assert_not_called()
 
 
 def test_dashboard_checkout_webhook_uses_canonical_fulfillment_without_pending_purchase(
@@ -480,6 +467,11 @@ def test_dashboard_checkout_webhook_uses_canonical_fulfillment_without_pending_p
     }
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_secret_value_123")
     canonical_service = MagicMock()
+    canonical_service.verify_webhook_signature.return_value = SimpleNamespace(
+        valid=True,
+        payload=payload,
+        error=None,
+    )
     canonical_service.handle_webhook_event.return_value = {
         "status": "fulfilled",
         "units_credited": 5_000,
@@ -520,6 +512,11 @@ def test_dashboard_checkout_webhook_requests_retry_when_canonical_fulfillment_fa
     }
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_secret_value_123")
     canonical_service = MagicMock()
+    canonical_service.verify_webhook_signature.return_value = SimpleNamespace(
+        valid=True,
+        payload=payload,
+        error=None,
+    )
     canonical_service.handle_webhook_event.return_value = {"action": "error", "error": "wallet unavailable"}
     _app.dependency_overrides[get_stripe_service] = lambda: canonical_service
 
@@ -556,6 +553,11 @@ def test_payment_method_setup_webhook_is_ignored_without_wallet_fulfillment(
     secret = "whsec_setup_test_secret_123"
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", secret)
     canonical_service = MagicMock()
+    canonical_service.verify_webhook_signature.return_value = SimpleNamespace(
+        valid=True,
+        payload=payload,
+        error=None,
+    )
     _app.dependency_overrides[get_stripe_service] = lambda: canonical_service
 
     try:
@@ -573,26 +575,11 @@ def test_payment_method_setup_webhook_is_ignored_without_wallet_fulfillment(
     canonical_service.handle_webhook_event.assert_not_called()
 
 
-def test_checkout_session_completed_webhook_rejects_missing_signature_and_replays_are_duplicate(
+def test_checkout_session_completed_webhook_requires_signature_and_dispatches_replay_results(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "app.api.routes.billing._provision_paid_install_keys",
-        lambda **_kwargs: _make_install_key_records(),
-    )
     owner = "webhook-idempotent@ironclaw.test"
-    create_resp = client.post(
-        _PURCHASE_PATH,
-        json={
-            "package_id": "pkg_5000",
-            "buyer_name": "Replay Buyer",
-            "buyer_email": owner,
-            "metadata": {},
-        },
-    )
-    assert create_resp.status_code == 201
-    purchase_id = create_resp.json()["purchase"]["purchase_id"]
     checkout_session_id = "cs_webhook_replay_123"
     payload = {
         "id": "evt_webhook_002",
@@ -607,42 +594,56 @@ def test_checkout_session_completed_webhook_rejects_missing_signature_and_replay
                 "mode": "payment",
                 "customer_details": {"email": owner},
                 "metadata": {
+                    "ironclaw_checkout_version": "1",
                     "owner_key": owner,
-                    "purchase_id": purchase_id,
-                    "buyer_email": owner,
-                    "package_id": "pkg_5000",
-                    "checkout_session_id": checkout_session_id,
                 },
             }
         },
     }
-    os.environ["STRIPE_WEBHOOK_SECRET"] = "whsec_test_secret_value_123"
+    secret = "whsec_test_secret_value_123"
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", secret)
+    canonical_service = MagicMock()
+    canonical_service.verify_webhook_signature.return_value = SimpleNamespace(
+        valid=True,
+        payload=payload,
+        error=None,
+    )
+    canonical_service.handle_webhook_event.side_effect = [
+        {"status": "fulfilled", "fulfillment_status": "fulfilled", "units_credited": 5_000},
+        {"status": "duplicate", "reason": "purchase_already_credited", "units_credited": 5_000},
+    ]
+    _app.dependency_overrides[get_stripe_service] = lambda: canonical_service
+
     bad_raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    missing_sig = client.post(
-        "/billing/webhook",
-        content=bad_raw,
-        headers={"content-type": "application/json"},
-    )
-    assert missing_sig.status_code == 400
-    assert missing_sig.json()["detail"]["reason"] == "missing_stripe_signature"
+    try:
+        missing_sig = client.post(
+            "/billing/webhook",
+            content=bad_raw,
+            headers={"content-type": "application/json"},
+        )
+        assert missing_sig.status_code == 400
+        assert missing_sig.json()["detail"]["reason"] == "missing_stripe_signature"
 
-    signed_raw, signature = _signed_stripe_payload(payload, secret="whsec_test_secret_value_123")
-    first = client.post(
-        "/billing/webhook",
-        content=signed_raw,
-        headers={"stripe-signature": signature, "content-type": "application/json"},
-    )
-    assert first.status_code == 200
-    assert first.json()["status"] == "fulfilled"
+        signed_raw, signature = _signed_stripe_payload(payload, secret=secret)
+        first = client.post(
+            "/billing/webhook",
+            content=signed_raw,
+            headers={"stripe-signature": signature, "content-type": "application/json"},
+        )
+        assert first.status_code == 200
+        assert first.json()["status"] == "fulfilled"
 
-    second = client.post(
-        "/billing/webhook",
-        content=signed_raw,
-        headers={"stripe-signature": signature, "content-type": "application/json"},
-    )
-    assert second.status_code == 200
-    assert second.json()["status"] == "duplicate"
-    assert second.json()["reason"] == "purchase_already_credited"
+        second = client.post(
+            "/billing/webhook",
+            content=signed_raw,
+            headers={"stripe-signature": signature, "content-type": "application/json"},
+        )
+        assert second.status_code == 200
+        assert second.json()["status"] == "duplicate"
+        assert second.json()["reason"] == "purchase_already_credited"
+        assert canonical_service.handle_webhook_event.call_count == 2
+    finally:
+        _app.dependency_overrides.pop(get_stripe_service, None)
 
 
 def test_legacy_checkout_webhook_alias_rejects_unsigned_paid_event(
@@ -747,21 +748,11 @@ def test_checkout_session_completed_pending_payment_does_not_credit_or_provision
     provision.assert_not_called()
 
 
-def test_checkout_session_completed_retries_key_provisioning_without_double_credit(
+def test_checkout_session_completed_retries_canonical_fulfillment(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     owner = "retry-webhook-buyer@ironclaw.test"
-    create_resp = client.post(
-        _PURCHASE_PATH,
-        json={
-            "package_id": "pkg_5000",
-            "buyer_name": "Retry Buyer",
-            "buyer_email": owner,
-            "metadata": {},
-        },
-    )
-    purchase_id = create_resp.json()["purchase"]["purchase_id"]
     checkout_session_id = "cs_webhook_retry_789"
     payload = {
         "id": "evt_webhook_retry_001",
@@ -776,44 +767,39 @@ def test_checkout_session_completed_retries_key_provisioning_without_double_cred
                 "mode": "payment",
                 "customer_details": {"email": owner},
                 "metadata": {
+                    "ironclaw_checkout_version": "1",
                     "owner_key": owner,
-                    "purchase_id": purchase_id,
-                    "buyer_email": owner,
-                    "package_id": "pkg_5000",
-                    "checkout_session_id": checkout_session_id,
                 },
             }
         },
     }
-    calls = 0
-
-    def provision_once_fails(**_kwargs: object) -> dict[str, SimpleNamespace]:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise RuntimeError("temporary secure persistence failure")
-        return _make_install_key_records()
-
-    monkeypatch.setattr(
-        "app.api.routes.billing._provision_paid_install_keys",
-        provision_once_fails,
+    secret = "whsec_test_secret_value_123"
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", secret)
+    canonical_service = MagicMock()
+    canonical_service.verify_webhook_signature.return_value = SimpleNamespace(
+        valid=True,
+        payload=payload,
+        error=None,
     )
-    os.environ["STRIPE_WEBHOOK_SECRET"] = "whsec_test_secret_value_123"
-    raw, signature = _signed_stripe_payload(payload, secret="whsec_test_secret_value_123")
+    canonical_service.handle_webhook_event.side_effect = [
+        {"action": "error", "error": "temporary install-key persistence failure"},
+        {"status": "fulfilled", "fulfillment_status": "fulfilled", "units_credited": 5_000},
+    ]
+    _app.dependency_overrides[get_stripe_service] = lambda: canonical_service
+
+    raw, signature = _signed_stripe_payload(payload, secret=secret)
     headers = {"stripe-signature": signature, "content-type": "application/json"}
+    try:
+        first = client.post("/billing/webhook", content=raw, headers=headers)
+        assert first.status_code == 503
+        assert first.json()["detail"]["reason"] == "canonical_fulfillment_retryable"
 
-    first = client.post("/billing/webhook", content=raw, headers=headers)
-    assert first.status_code == 503
-    assert first.json()["detail"]["reason"] == "paid_purchase_fulfillment_retryable"
-
-    second = client.post("/billing/webhook", content=raw, headers=headers)
-
-    assert second.status_code == 200
-    assert second.json()["status"] == "fulfilled"
-    assert second.json()["purchase"]["install_key_id"] == "ik_openclaw_001"
-    assert second.json()["wallet"]["balance_units"] == 5_000
-    assert calls == 2
-    assert client.get(f"/billing/wallet/{owner}").json()["wallet"]["balance_units"] == 5_000
+        second = client.post("/billing/webhook", content=raw, headers=headers)
+        assert second.status_code == 200
+        assert second.json()["status"] == "fulfilled"
+        assert canonical_service.handle_webhook_event.call_count == 2
+    finally:
+        _app.dependency_overrides.pop(get_stripe_service, None)
 
 
 # ---------------------------------------------------------------------------
