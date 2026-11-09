@@ -1960,12 +1960,16 @@ class TestReconcileCheckoutSession:
             unit_credits=5000,
             session_id="cs_owner_page_001",
             owner_key=owner,
-        )["data"]["object"]
+        )[
+            "data"
+        ]["object"]
         second = _build_checkout_completed_event(
             unit_credits=2500,
             session_id="cs_owner_page_002",
             owner_key=owner,
-        )["data"]["object"]
+        )[
+            "data"
+        ]["object"]
         mock_client.get.side_effect = [
             {"object": "list", "data": [first], "has_more": True},
             {"object": "list", "data": [second], "has_more": False},
@@ -1998,7 +2002,9 @@ class TestReconcileCheckoutSession:
             unit_credits=5000,
             session_id="cs_owner_retry_001",
             owner_key=owner,
-        )["data"]["object"]
+        )[
+            "data"
+        ]["object"]
         mock_client.get.return_value = {"object": "list", "data": [session], "has_more": False}
 
         first = svc_wired.reconcile_owner_checkout_sessions(owner)
@@ -2043,12 +2049,16 @@ class TestReconcileCheckoutSession:
             unit_credits=5000,
             session_id="cs_owner_003",
             owner_key=owner,
-        )["data"]["object"]
+        )[
+            "data"
+        ]["object"]
         successful = _build_checkout_completed_event(
             unit_credits=2500,
             session_id="cs_owner_004",
             owner_key=owner,
-        )["data"]["object"]
+        )[
+            "data"
+        ]["object"]
         mock_client.get.return_value = {
             "object": "list",
             "data": [failing, successful],
