@@ -1,20 +1,17 @@
 from pathlib import Path
 import re
-import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = ROOT / "supabase" / "migrations"
 OUTPUT = ROOT / "scripts" / "migration_audit.sql"
 
 TABLE_RE = re.compile(
-    r"create\s+(?:unlogged\s+)?table\s+(?:if\s+not\s+exists\s+)?"
-    r"(?:public\.)?[\"']?([a-zA-Z_][a-zA-Z0-9_]*)[\"']?",
+    r"create\s+(?:unlogged\s+)?table\s+(?:if\s+not\s+exists\s+)?" r"(?:public\.)?[\"']?([a-zA-Z_][a-zA-Z0-9_]*)[\"']?",
     re.IGNORECASE,
 )
 
 FUNCTION_RE = re.compile(
-    r"create\s+(?:or\s+replace\s+)?function\s+"
-    r"(?:public\.)?[\"']?([a-zA-Z_][a-zA-Z0-9_]*)[\"']?\s*\(",
+    r"create\s+(?:or\s+replace\s+)?function\s+" r"(?:public\.)?[\"']?([a-zA-Z_][a-zA-Z0-9_]*)[\"']?\s*\(",
     re.IGNORECASE,
 )
 
