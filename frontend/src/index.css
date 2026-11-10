@@ -242,71 +242,175 @@ svg {
     animation: btn-sheen 0.9s ease;
 }
 
-/* wallet flip: 3D container must not use overflow hidden or backdrop-filter */
+/* wallet flip: the balance flap folds over its left spine to reveal the history page beneath; no overflow hidden or backdrop-filter */
 .wallet-flip {
-    perspective: 1400px;
+    perspective: 1600px;
 }
 .wallet-flip-inner {
     display: grid;
     transform-style: preserve-3d;
-    transition: transform 0.7s cubic-bezier(0.4, 0.2, 0.2, 1);
-}
-.wallet-flip-inner.is-flipped {
-    transform: rotateY(180deg);
 }
 .wallet-face {
+    position: relative;
     grid-area: 1 / 1;
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
 }
 .wallet-face-back {
-    transform: rotateY(180deg);
+    transform: translateZ(-1px);
+}
+.wallet-face-front {
+    transform-origin: left center;
+    transition: transform 900ms cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+.wallet-flip-inner.is-flipped .wallet-face-front {
+    transform: rotateY(-180deg);
+}
+.wallet-face::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    transition: opacity 900ms ease;
+}
+.wallet-face-front::after {
+    background: linear-gradient(90deg, rgba(40, 20, 6, 0) 0%, rgba(40, 20, 6, 0) 60%, rgba(40, 20, 6, 0.35) 100%);
+    opacity: 0;
+}
+.wallet-flip-inner.is-flipped .wallet-face-front::after {
+    opacity: 1;
+}
+.wallet-face-back::after {
+    background: linear-gradient(90deg, rgba(40, 20, 6, 0.45) 0%, rgba(40, 20, 6, 0) 40%);
+    opacity: 1;
+}
+.wallet-flip-inner.is-flipped .wallet-face-back::after {
+    opacity: 0;
 }
 
-/* wallet body: leather case with stitching; no overflow hidden so the deck tab can sit on the edge */
+/* genuine light-brown leather: pebbled grain, light crack tile, and a shaded spine; shared by the container, flap faces, and package pages */
+.wallet-body,
+.wallet-leather,
+.wallet-deck-page {
+    background-color: #b5804d;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='360' height='360' viewBox='0 0 360 360' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cg stroke='rgb(255,238,210)' stroke-opacity='0.42' stroke-width='1'%3E%3Cpath d='M38 52 L61 66 L70 94 L99 103 L118 131'/%3E%3Cpath d='M250 24 L232 58 L244 81 L226 118'/%3E%3Cpath d='M160 210 L184 228 L207 221 L231 252 L262 262 L286 300'/%3E%3Cpath d='M318 150 L301 170 L309 196'/%3E%3Cpath d='M92 262 L112 285 L104 318 L128 340'/%3E%3C/g%3E%3Cg stroke='rgb(78,44,16)' stroke-opacity='0.34' stroke-width='1'%3E%3Cpath d='M39 54 L62 68 L71 96 L100 105 L119 133'/%3E%3Cpath d='M251 26 L233 60 L245 83 L227 120'/%3E%3Cpath d='M161 212 L185 230 L208 223 L232 254 L263 264 L287 302'/%3E%3C/g%3E%3C/svg%3E"),
+        radial-gradient(rgba(255, 236, 205, 0.12) 1px, transparent 1.4px),
+        radial-gradient(rgba(70, 38, 14, 0.14) 1px, transparent 1.4px),
+        linear-gradient(160deg, #c99762 0%, #b5804d 45%, #9c6a3c 100%);
+    background-size: 360px 360px, 5px 5px, 7px 7px, 100% 100%;
+    background-position: 0 0, 0 0, 2px 3px, 0 0;
+}
+
+/* wallet body: 3D leather case; stacked edge shadows give thickness and the stitched inset marks the seam */
 .wallet-body {
     position: relative;
     border-radius: 1.25rem;
     padding: 1.25rem;
-    background: linear-gradient(160deg, rgba(255, 215, 0, 0.06), transparent 40%),
-        linear-gradient(180deg, #2a2420 0%, #17120e 100%);
-    border: 1px solid rgba(229, 228, 226, 0.14);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06),
-        0 18px 40px rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(92, 52, 22, 0.6);
+    box-shadow: inset 0 1px 0 rgba(255, 240, 220, 0.35),
+        inset 0 -2px 0 rgba(70, 38, 14, 0.3),
+        0 1px 0 #7a4a24,
+        0 2px 0 #6b3f1f,
+        0 3px 0 #5a3418,
+        0 4px 0 #4a2a12,
+        0 28px 44px rgba(20, 10, 0, 0.5);
 }
 .wallet-body::before {
     content: "";
     position: absolute;
     inset: 0.5rem;
-    border: 1px dashed rgba(255, 215, 0, 0.16);
+    border: 1px dashed rgba(92, 52, 22, 0.5);
     border-radius: 1rem;
     pointer-events: none;
 }
+.wallet-leather {
+    border: 1px solid rgba(92, 52, 22, 0.5);
+    box-shadow: inset 0 1px 0 rgba(255, 240, 220, 0.35),
+        inset 0 -1px 0 rgba(70, 38, 14, 0.35),
+        0 10px 22px rgba(20, 10, 0, 0.35);
+}
+.wallet-seam {
+    height: 0;
+    margin: 1rem 0.75rem;
+    border-top: 2px dashed rgba(92, 52, 22, 0.55);
+    box-shadow: 0 1px 0 rgba(255, 240, 220, 0.3);
+}
+/* ink colours for light leather; overrides the dark-theme text utilities inside the wallet */
+.wallet-leather [class*="text-[#BFC1C2]"],
+.wallet-deck-page [class*="text-[#BFC1C2]"] {
+    color: #3a2312;
+}
+.wallet-leather [class*="text-[#737373]"],
+.wallet-deck-page [class*="text-[#737373]"] {
+    color: #5c3b20;
+}
+.wallet-leather [class*="text-[#E5E4E2]"],
+.wallet-deck-page [class*="text-[#E5E4E2]"] {
+    color: #2b1607;
+}
+.wallet-leather [class*="text-[#FFD700]"],
+.wallet-deck-page [class*="text-[#FFD700]"] {
+    color: #5a3207;
+}
+.wallet-leather [class*="text-[#FDE68A]"],
+.wallet-deck-page [class*="text-[#FDE68A]"] {
+    color: #6b4305;
+}
+.wallet-leather [class*="text-[#FCA5A5]"],
+.wallet-deck-page [class*="text-[#FCA5A5]"],
+.wallet-leather [class*="text-[#EF4444]"],
+.wallet-deck-page [class*="text-[#EF4444]"] {
+    color: #7f1d1d;
+}
+.wallet-leather [class*="text-[#22C55E]"],
+.wallet-deck-page [class*="text-[#22C55E]"] {
+    color: #14532d;
+}
 
-/* package sleeve deck: pages share one grid cell; state is driven by data-deck-state */
+/* package deck: pages share one grid cell; state is driven by data-deck-state; passed pages turn over the left spine like a wallet flap */
+.wallet-deck {
+    perspective: 1600px;
+}
 .wallet-deck-page {
     grid-area: 1 / 1;
     position: relative;
     border-radius: 0.75rem;
-    background: linear-gradient(180deg, #1f1a15 0%, #15110d 100%);
+    border: 1px solid rgba(92, 52, 22, 0.5);
     transform-origin: left center;
-    transition: transform 520ms cubic-bezier(0.22, 0.8, 0.3, 1),
-        opacity 380ms ease,
-        box-shadow 380ms ease;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    transition: transform 850ms cubic-bezier(0.3, 0.7, 0.2, 1),
+        opacity 500ms ease,
+        box-shadow 500ms ease;
+}
+.wallet-deck-page::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(90deg, rgba(40, 20, 6, 0.4) 0%, rgba(40, 20, 6, 0) 55%);
+    opacity: 0;
+    transition: opacity 500ms ease;
 }
 .wallet-deck-page[data-deck-state="top"] {
     transform: translate3d(0, 0, 0);
     opacity: 1;
-    box-shadow: 0 14px 28px rgba(0, 0, 0, 0.4);
+    box-shadow: inset 0 1px 0 rgba(255, 240, 220, 0.35), 0 14px 28px rgba(20, 10, 0, 0.45);
 }
 .wallet-deck-page[data-deck-state="stacked"] {
     transform: translate3d(calc(var(--deck-depth) * 0.6rem), calc(var(--deck-depth) * 0.45rem), 0);
     opacity: 1;
-    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 6px 12px rgba(20, 10, 0, 0.35);
+}
+.wallet-deck-page[data-deck-state="stacked"]::after {
+    opacity: 1;
 }
 .wallet-deck-page[data-deck-state="passed"] {
-    transform: translate3d(-110%, 0, 0) rotate(-6deg);
-    opacity: 0;
+    transform: rotateY(-180deg);
+    opacity: 1;
+    box-shadow: none;
     pointer-events: none;
 }
 

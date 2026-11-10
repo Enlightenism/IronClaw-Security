@@ -159,18 +159,18 @@ class TestPackageCatalogue:
             assert entry.tokens_per_unit == TOKENS_PER_UNIT
 
     def test_stripe_price_id_empty_when_env_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("STRIPE_PRICE_ID_STARTER", raising=False)
-        monkeypatch.delenv("STRIPE_PRICE_ID_TEAM", raising=False)
-        monkeypatch.delenv("STRIPE_PRICE_ID_ENTERPRISE", raising=False)
+        monkeypatch.delenv("BILLING_TIER_5K_PRICE_ID", raising=False)
+        monkeypatch.delenv("BILLING_TIER_25K_PRICE_ID", raising=False)
+        monkeypatch.delenv("BILLING_TIER_60K_PRICE_ID", raising=False)
         catalogue = _build_package_catalogue()
         assert catalogue["starter"]["stripe_price_id"] == ""
         assert catalogue["team"]["stripe_price_id"] == ""
         assert catalogue["enterprise"]["stripe_price_id"] == ""
 
     def test_stripe_price_id_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("STRIPE_PRICE_ID_STARTER", "price_test_starter_123")
-        monkeypatch.setenv("STRIPE_PRICE_ID_TEAM", "price_test_team_123")
-        monkeypatch.setenv("STRIPE_PRICE_ID_ENTERPRISE", "price_test_enterprise_123")
+        monkeypatch.setenv("BILLING_TIER_5K_PRICE_ID", "price_test_starter_123")
+        monkeypatch.setenv("BILLING_TIER_25K_PRICE_ID", "price_test_team_123")
+        monkeypatch.setenv("BILLING_TIER_60K_PRICE_ID", "price_test_enterprise_123")
         catalogue = _build_package_catalogue()
         assert catalogue["starter"]["stripe_price_id"] == "price_test_starter_123"
         assert catalogue["team"]["stripe_price_id"] == "price_test_team_123"

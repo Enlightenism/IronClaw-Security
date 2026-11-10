@@ -391,7 +391,7 @@ class TestBuildStatusCounts:
 class TestPackageCatalogueReload:
     def test_stripe_price_id_read_from_env_on_reload(self) -> None:
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setenv("STRIPE_PRICE_ID_STARTER", "price_test_abc")
+            monkeypatch.setenv("BILLING_TIER_5K_PRICE_ID", "price_test_abc")
             import app.ui.billing.payment_methods as pm_mod
 
             importlib.reload(pm_mod)
@@ -405,7 +405,7 @@ class TestPackageCatalogueReload:
 
     def test_stripe_price_id_defaults_empty_when_env_unset_on_reload(self) -> None:
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.delenv("STRIPE_PRICE_ID_STARTER", raising=False)
+            monkeypatch.delenv("BILLING_TIER_5K_PRICE_ID", raising=False)
             import app.ui.billing.payment_methods as pm_mod
 
             importlib.reload(pm_mod)

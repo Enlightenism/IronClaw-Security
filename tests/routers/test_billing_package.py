@@ -104,9 +104,9 @@ def test_stripe_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 @pytest.fixture()
 def stripe_price_ids_seeded(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.setenv("STRIPE_PRICE_ID_STARTER", "price_test_starter_xxx")
-    monkeypatch.setenv("STRIPE_PRICE_ID_TEAM", "price_test_team_xxx")
-    monkeypatch.setenv("STRIPE_PRICE_ID_ENTERPRISE", "price_test_enterprise_xxx")
+    monkeypatch.setenv("BILLING_TIER_5K_PRICE_ID", "price_test_starter_xxx")
+    monkeypatch.setenv("BILLING_TIER_25K_PRICE_ID", "price_test_team_xxx")
+    monkeypatch.setenv("BILLING_TIER_60K_PRICE_ID", "price_test_enterprise_xxx")
     yield
 
 

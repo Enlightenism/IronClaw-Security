@@ -63,6 +63,15 @@ _BASE_PACKAGE_CATALOGUE: dict[str, dict[str, Any]] = {
 }
 
 
+# Mirrors stripe_router.PACKAGE_PRICE_ENV_MAP so the catalogue reports the same
+# price IDs that checkout actually uses.
+_PRICE_ENV_BY_PLAN_CODE: dict[str, str] = {
+    "starter-5k": "BILLING_TIER_5K_PRICE_ID",
+    "team-25k": "BILLING_TIER_25K_PRICE_ID",
+    "enterprise-60k": "BILLING_TIER_60K_PRICE_ID",
+}
+
+
 def _build_package_catalogue() -> dict[str, dict[str, Any]]:
     """
     Build the package catalogue fresh on every call.
@@ -73,7 +82,8 @@ def _build_package_catalogue() -> dict[str, dict[str, Any]]:
     catalogue: dict[str, dict[str, Any]] = {}
     for key, base in _BASE_PACKAGE_CATALOGUE.items():
         entry = dict(base)
-        entry["stripe_price_id"] = os.environ.get(f"STRIPE_PRICE_ID_{key.upper()}", "")
+        env_key = _PRICE_ENV_BY_PLAN_CODE.get(str(base["code"]), "")
+        entry["stripe_price_id"] = os.environ.get(env_key, "") if env_key else ""
         catalogue[key] = entry
     return catalogue
 

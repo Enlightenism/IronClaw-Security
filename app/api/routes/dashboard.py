@@ -80,6 +80,7 @@ class DashboardInstallKeyView(BaseModel):
     entitlements_status: str = "not_active"
     issued_after_payment: bool = False
     units_consumed: int
+    blocked_attacks: int = 0
     created_at: str | None
     activated_at: str | None
     revoked_at: str | None
@@ -429,6 +430,7 @@ def _build_install_key_views(
 
         wallet_usage_entry = (wallet_usage or {}).get(_coerce_string(getattr(r, "key_id", ""), default=""))
         wallet_consumed = int(getattr(wallet_usage_entry, "total_consumed_units", 0) or 0)
+        wallet_blocked = int(getattr(wallet_usage_entry, "total_blocked_attacks", 0) or 0)
 
         candidate = DashboardInstallKeyView(
             key_id=_coerce_string(getattr(r, "key_id", ""), default=""),
@@ -443,6 +445,7 @@ def _build_install_key_views(
             entitlements_status=entitlement_status,
             issued_after_payment=issued_after_payment,
             units_consumed=max(int(getattr(r, "units_consumed", 0) or 0), wallet_consumed),
+            blocked_attacks=wallet_blocked,
             created_at=_iso(getattr(r, "created_at", None)),
             activated_at=_iso(activated_at),
             revoked_at=_iso(revoked_at),

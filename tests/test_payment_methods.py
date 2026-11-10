@@ -503,9 +503,9 @@ def test_get_payment_methods_package_catalogue_stripe_price_id_from_env(
 ) -> None:
     mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
     mock_svc.list_payment_methods.return_value = []
-    monkeypatch.setenv("STRIPE_PRICE_ID_STARTER", "price_starter_test_123")
-    monkeypatch.setenv("STRIPE_PRICE_ID_TEAM", "price_team_test_456")
-    monkeypatch.setenv("STRIPE_PRICE_ID_ENTERPRISE", "price_enterprise_test_789")
+    monkeypatch.setenv("BILLING_TIER_5K_PRICE_ID", "price_starter_test_123")
+    monkeypatch.setenv("BILLING_TIER_25K_PRICE_ID", "price_team_test_456")
+    monkeypatch.setenv("BILLING_TIER_60K_PRICE_ID", "price_enterprise_test_789")
 
     body = client.get("/ui/billing/payment-methods?organizationid=org-001").json()
     catalogue = body["package_catalogue"]

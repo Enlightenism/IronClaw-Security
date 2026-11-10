@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 import os
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 os.environ.setdefault("IRONCLAW_PERSISTENCE_MODE", "memory")
@@ -80,18 +79,16 @@ def test_stripe_checkout_fulfillment_store_persists_trusted_session_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = MagicMock()
-    client.rpc.return_value.execute.return_value = SimpleNamespace(
-        data=[
-            {
-                "session_id": "cs_store_001",
-                "owner_key": "buyer@ironclaw.test",
-                "org_id": "org_store_001",
-                "package_id": "pkg_5000",
-                "units": 5_000,
-                "payment_intent": "pi_store_001",
-            }
-        ],
-    )
+    client.rpc.return_value = [
+        {
+            "session_id": "cs_store_001",
+            "owner_key": "buyer@ironclaw.test",
+            "org_id": "org_store_001",
+            "package_id": "pkg_5000",
+            "units": 5_000,
+            "payment_intent": "pi_store_001",
+        }
+    ]
     monkeypatch.setattr(
         "app.services.billing_store.get_supabase_service_client",
         lambda: client,
@@ -133,7 +130,7 @@ def test_stripe_checkout_fulfillment_store_verifies_rpc_functions_without_writin
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = MagicMock()
-    client.rpc.return_value.execute.side_effect = SupabaseAPIError(
+    client.rpc.side_effect = SupabaseAPIError(
         "rejected by validation",
         status_code=400,
         postgrest_code="P0001",
@@ -152,7 +149,7 @@ def test_stripe_checkout_fulfillment_store_reports_missing_rpc_functions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = MagicMock()
-    client.rpc.return_value.execute.side_effect = SupabaseAPIError(
+    client.rpc.side_effect = SupabaseAPIError(
         "function not found",
         status_code=404,
         postgrest_code="PGRST202",
@@ -161,6 +158,35 @@ def test_stripe_checkout_fulfillment_store_reports_missing_rpc_functions(
 
     with pytest.raises(SupabaseAPIError):
         StripeCheckoutFulfillmentStore().verify_rpc_functions()
+
+
+def test_stripe_checkout_fulfillment_store_mark_returns_rpc_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MagicMock()
+    client.rpc.return_value = [
+        {
+            "session_id": "cs_store_002",
+            "fulfillment_status": "credited",
+            "units_credited": True,
+        }
+    ]
+    monkeypatch.setattr("app.services.billing_store.get_supabase_service_client", lambda: client)
+
+    record = StripeCheckoutFulfillmentStore().mark("cs_store_002", status="credited", units_credited=True)
+
+    assert record["fulfillment_status"] == "credited"
+    client.rpc.assert_called_once_with(
+        "mark_stripe_checkout_fulfillment",
+        {
+            "p_session_id": "cs_store_002",
+            "p_fulfillment_status": "credited",
+            "p_units_credited": True,
+            "p_install_keys_provisioned": None,
+            "p_last_error": None,
+            "p_metadata": {},
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

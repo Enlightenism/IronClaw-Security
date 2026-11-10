@@ -83,15 +83,15 @@ describe("IntegrationCard", () => {
     expect(onCreateClaim).not.toHaveBeenCalled();
   });
 
-  it("does not show per-platform usage stats or the legacy card copy", () => {
-    renderCard();
+  it("shows per-platform units used and blocked attacks", () => {
+    renderCard({ unitsUsed: 12, blockedAttacks: 3 });
 
     expect(
-      screen.queryByTestId("claude-code-card-units-consumed"),
-    ).not.toBeInTheDocument();
+      screen.getByTestId("claude-code-card-units-consumed"),
+    ).toHaveTextContent("Units used: 12");
     expect(
-      screen.queryByTestId("claude-code-card-blocked-attacks"),
-    ).not.toBeInTheDocument();
+      screen.getByTestId("claude-code-card-blocked-attacks"),
+    ).toHaveTextContent("Attacks blocked: 3");
     expect(screen.getByTestId("claude-code-card")).toHaveTextContent(
       "generate a one-time install command for this platform",
     );

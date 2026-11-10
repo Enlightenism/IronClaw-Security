@@ -641,6 +641,8 @@ class TestDashboardInstallKeySlotLogic:
             for key_entry in body.get("install_keys", []):
                 for field in ("key_id", "program", "masked_key", "label", "status", "active", "locked", "revoked"):
                     assert field in key_entry, f"Missing field {field!r} in install_keys entry"
+                for field in ("units_consumed", "blocked_attacks"):
+                    assert isinstance(key_entry[field], int), f"Field {field!r} must be an int"
         finally:
             _clear_registry_overrides()
 

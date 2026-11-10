@@ -65,25 +65,21 @@ class StripeCheckoutFulfillmentStore:
         if int(units) <= 0:
             raise ValueError("billing_store: checkout units must be greater than zero")
 
-        result = (
-            get_supabase_service_client()
-            .rpc(
-                "register_stripe_checkout_fulfillment",
-                {
-                    "p_session_id": normalized_session_id,
-                    "p_owner_key": normalized_owner_key,
-                    "p_org_id": normalized_org_id,
-                    "p_package_id": normalized_package_id,
-                    "p_units": int(units),
-                    "p_payment_intent": str(payment_intent or "").strip() or None,
-                    "p_customer_id": str(customer_id or "").strip() or None,
-                    "p_save_card": bool(save_card),
-                    "p_metadata": metadata or {},
-                },
-            )
-            .execute()
+        result = get_supabase_service_client().rpc(
+            "register_stripe_checkout_fulfillment",
+            {
+                "p_session_id": normalized_session_id,
+                "p_owner_key": normalized_owner_key,
+                "p_org_id": normalized_org_id,
+                "p_package_id": normalized_package_id,
+                "p_units": int(units),
+                "p_payment_intent": str(payment_intent or "").strip() or None,
+                "p_customer_id": str(customer_id or "").strip() or None,
+                "p_save_card": bool(save_card),
+                "p_metadata": metadata or {},
+            },
         )
-        return self._row(getattr(result, "data", None), operation="record checkout")
+        return self._row(result, operation="record checkout")
 
     def get_by_session(self, session_id: str) -> dict[str, Any] | None:
         normalized_session_id = str(session_id or "").strip()
@@ -115,22 +111,18 @@ class StripeCheckoutFulfillmentStore:
         normalized_status = str(status or "").strip().lower()
         if not normalized_session_id:
             raise ValueError("billing_store: session_id is required")
-        result = (
-            get_supabase_service_client()
-            .rpc(
-                "mark_stripe_checkout_fulfillment",
-                {
-                    "p_session_id": normalized_session_id,
-                    "p_fulfillment_status": normalized_status,
-                    "p_units_credited": units_credited,
-                    "p_install_keys_provisioned": install_keys_provisioned,
-                    "p_last_error": last_error,
-                    "p_metadata": metadata or {},
-                },
-            )
-            .execute()
+        result = get_supabase_service_client().rpc(
+            "mark_stripe_checkout_fulfillment",
+            {
+                "p_session_id": normalized_session_id,
+                "p_fulfillment_status": normalized_status,
+                "p_units_credited": units_credited,
+                "p_install_keys_provisioned": install_keys_provisioned,
+                "p_last_error": last_error,
+                "p_metadata": metadata or {},
+            },
         )
-        return self._row(getattr(result, "data", None), operation="mark checkout")
+        return self._row(result, operation="mark checkout")
 
     def verify_rpc_functions(self) -> None:
         """Confirm the migration 021 RPCs are installed without writing anything.
@@ -168,7 +160,7 @@ class StripeCheckoutFulfillmentStore:
         )
         for function_name, payload in probes:
             try:
-                client.rpc(function_name, payload).execute()
+                client.rpc(function_name, payload)
             except SupabaseAPIError as exc:
                 if exc.postgrest_code == self._VALIDATION_SQLSTATE:
                     continue

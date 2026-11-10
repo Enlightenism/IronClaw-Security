@@ -461,36 +461,6 @@ const Dashboard = () => {
     if (isAuthenticated) fetchDashboard();
   }, [fetchDashboard, isAuthenticated]);
 
-  const simulateEvent = useCallback(async () => {
-    const organizationId = data?.organization_id;
-    if (!organizationId) {
-      return;
-    }
-
-    try {
-      const payload = {
-        event_type: "prompt_injection",
-        organization_id: organizationId,
-        payload: {
-          source: "dashboard_live_sim",
-          timestamp: new Date().toISOString(),
-        },
-      };
-      await api.post("/events/simulate", payload);
-    } catch (err) {
-      const detail = err?.response?.data?.detail;
-      if (Array.isArray(detail)) {
-        const msg =
-          detail[0]?.msg || detail[0]?.message || "Invalid event payload.";
-        toast.error(msg);
-      } else if (typeof detail === "string") {
-        toast.error(detail);
-      } else {
-        toast.error("Failed to simulate event.");
-      }
-    }
-  }, [data?.organization_id]);
-
   useEffect(() => {
     if (!isAuthenticated) return undefined;
 
@@ -501,8 +471,7 @@ const Dashboard = () => {
       5 * 60 * 1000,
     );
 
-    const live = setInterval(async () => {
-      await simulateEvent();
+    const live = setInterval(() => {
       fetchDashboard({ silent: true });
     }, 20000);
 
@@ -510,7 +479,7 @@ const Dashboard = () => {
       clearInterval(refresh);
       clearInterval(live);
     };
-  }, [fetchDashboard, isAuthenticated, simulateEvent]);
+  }, [fetchDashboard, isAuthenticated]);
 
   const pollPayment = useCallback(
     async (sessionId, attempts = 0) => {
@@ -1011,6 +980,21 @@ const Dashboard = () => {
     return statuses;
   }, [data?.install_keys]);
 
+  const installKeyUsageByProgram = useMemo(() => {
+    const usage = {};
+    if (Array.isArray(data?.install_keys)) {
+      for (const key of data.install_keys) {
+        if (typeof key?.program === "string" && key.program) {
+          usage[key.program] = {
+            unitsUsed: Number(key.units_consumed) || 0,
+            blockedAttacks: Number(key.blocked_attacks) || 0,
+          };
+        }
+      }
+    }
+    return usage;
+  }, [data?.install_keys]);
+
   const integrationCards = useMemo(() => {
     const toCardTestId = (program) => {
       switch (program) {
@@ -1065,6 +1049,8 @@ const Dashboard = () => {
             : "",
         savedCommandClaimed:
           !revoked && metadata?.saved_command_claimed === true,
+        unitsUsed: installKeyUsageByProgram[program]?.unitsUsed ?? 0,
+        blockedAttacks: installKeyUsageByProgram[program]?.blockedAttacks ?? 0,
         onCreateClaim: createInstallClaim,
         tint,
         testid: toCardTestId(program),
@@ -1073,6 +1059,7 @@ const Dashboard = () => {
   }, [
     createInstallClaim,
     installKeyStatusByProgram,
+    installKeyUsageByProgram,
     tokens?.install_metadata,
     tokens?.status,
   ]);
@@ -1210,17 +1197,17 @@ const Dashboard = () => {
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <MemoWalletCard {...walletProps} />
-
-          <div className="space-y-6 lg:row-span-2">
+          <div className="space-y-6 order-1 lg:order-2">
+            <MemoWalletCard {...walletProps} />
             <MemoSecurityAnalysis {...securityProps} />
             <AttackFeed
               attacks={attackFeedItems}
               blockedActivityTotal={blockedActivityTotal}
             />
+            <RuntimeBlocksCard />
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-3 order-2 lg:order-1">
             <div className="grid grid-cols-1 gap-3">
               {integrationCards.map((card) => (
                 <MemoIntegrationCard
@@ -1236,12 +1223,13 @@ const Dashboard = () => {
                   onCreateClaim={card.onCreateClaim}
                   savedCommand={card.savedCommand}
                   savedCommandClaimed={card.savedCommandClaimed}
+                  unitsUsed={card.unitsUsed}
+                  blockedAttacks={card.blockedAttacks}
                   tint={card.tint}
                   testid={card.testid}
                 />
               ))}
             </div>
-            <RuntimeBlocksCard />
           </div>
         </div>
       </main>

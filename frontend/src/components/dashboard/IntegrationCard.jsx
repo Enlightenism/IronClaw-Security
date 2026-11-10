@@ -241,6 +241,8 @@ const IntegrationCard = ({
   onCreateClaim,
   savedCommand = "",
   savedCommandClaimed = false,
+  unitsUsed = 0,
+  blockedAttacks = 0,
   tint = "gold",
   testid,
 }) => {
@@ -572,6 +574,20 @@ const IntegrationCard = ({
           <span>
             Return:{" "}
             {COVERAGE_LABELS[getRuntimeCoverage(program, RUNTIME_GATE_RETURN)]}
+          </span>
+        </div>
+      ) : null}
+
+      {program ? (
+        <div
+          className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-white/60"
+          data-testid={`${testid}-usage`}
+        >
+          <span data-testid={`${testid}-units-consumed`}>
+            Units used: {unitsUsed}
+          </span>
+          <span data-testid={`${testid}-blocked-attacks`}>
+            Attacks blocked: {blockedAttacks}
           </span>
         </div>
       ) : null}

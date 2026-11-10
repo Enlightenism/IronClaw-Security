@@ -2017,22 +2017,27 @@ describe("refresh behavior", () => {
     });
   });
 
-  it("starts the live polling interval and posts to /events/simulate", async () => {
+  it("starts the live refresh interval without posting to /events/simulate", async () => {
     await renderDashboard();
+
+    const dashboardCallsBefore = mockApiGet.mock.calls.filter(
+      ([url]) => url === "/dashboard/overview",
+    ).length;
 
     await act(async () => {
       jest.advanceTimersByTime(20000);
     });
 
     await waitFor(() => {
-      expect(mockApiPost).toHaveBeenCalledWith(
-        "/events/simulate",
-        expect.objectContaining({
-          event_type: "prompt_injection",
-          organization_id: "org-abc",
-        }),
-      );
+      const dashboardCallsAfter = mockApiGet.mock.calls.filter(
+        ([url]) => url === "/dashboard/overview",
+      ).length;
+      expect(dashboardCallsAfter).toBeGreaterThan(dashboardCallsBefore);
     });
+    expect(mockApiPost).not.toHaveBeenCalledWith(
+      "/events/simulate",
+      expect.anything(),
+    );
   });
 
   it("starts the refresh interval and re-fetches /dashboard after 5 minutes", async () => {

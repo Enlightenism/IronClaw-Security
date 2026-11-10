@@ -749,7 +749,7 @@ const WalletCard = ({
         <div className={`wallet-flip-inner${showBack ? " is-flipped" : ""}`}>
           <section
             id="wallet-front-face"
-            className="wallet-face glass-platinum rounded-2xl p-7"
+            className="wallet-face wallet-face-front wallet-leather rounded-2xl p-7"
             aria-label="Wallet balance"
             aria-hidden={showBack}
             inert={showBack ? "" : undefined}
@@ -792,7 +792,7 @@ const WalletCard = ({
 
           <section
             id="wallet-back-face"
-            className="wallet-face wallet-face-back glass-platinum rounded-2xl p-7"
+            className="wallet-face wallet-face-back wallet-leather rounded-2xl p-7"
             aria-label="Wallet history and payment method"
             aria-hidden={!showBack}
             inert={showBack ? undefined : ""}
@@ -899,6 +899,8 @@ const WalletCard = ({
         </div>
       </div>
 
+      <div className="wallet-seam" aria-hidden="true" />
+
       <div className="mt-6">
         {catalogueLoading && (
           <div className="text-xs text-[#BFC1C2]" role="status">
@@ -934,7 +936,12 @@ const WalletCard = ({
                   aria-hidden={!isTop}
                   inert={isTop ? undefined : ""}
                   style={{
-                    zIndex: tiers.length - depth,
+                    zIndex:
+                      deckState === "passed"
+                        ? 50 + index
+                        : deckState === "top"
+                          ? 40
+                          : 30 - depth,
                     "--deck-depth": depth,
                   }}
                   className="wallet-deck-page flex flex-col p-3"
