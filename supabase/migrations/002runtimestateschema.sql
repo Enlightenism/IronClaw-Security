@@ -269,47 +269,47 @@ create table if not exists public.runtime_incidents (
 
 -- ─── updated_at triggers ──────────────────────────────────────────────────────
 
-create trigger set_runtime_state_snapshots_updated_at
+create or replace trigger set_runtime_state_snapshots_updated_at
 before update on public.runtime_state_snapshots
 for each row execute function public.set_updated_at();
 
-create trigger set_runtime_sessions_updated_at
+create or replace trigger set_runtime_sessions_updated_at
 before update on public.runtime_sessions
 for each row execute function public.set_updated_at();
 
-create trigger set_runtime_session_events_updated_at
+create or replace trigger set_runtime_session_events_updated_at
 before update on public.runtime_session_events
 for each row execute function public.set_updated_at();
 
-create trigger set_review_state_snapshots_updated_at
+create or replace trigger set_review_state_snapshots_updated_at
 before update on public.review_state_snapshots
 for each row execute function public.set_updated_at();
 
-create trigger set_queue_runtime_leases_updated_at
+create or replace trigger set_queue_runtime_leases_updated_at
 before update on public.queue_runtime_leases
 for each row execute function public.set_updated_at();
 
-create trigger set_runtime_replay_runs_updated_at
+create or replace trigger set_runtime_replay_runs_updated_at
 before update on public.runtime_replay_runs
 for each row execute function public.set_updated_at();
 
-create trigger set_supervisor_state_snapshots_updated_at
+create or replace trigger set_supervisor_state_snapshots_updated_at
 before update on public.supervisor_state_snapshots
 for each row execute function public.set_updated_at();
 
-create trigger set_pipeline_runtime_states_updated_at
+create or replace trigger set_pipeline_runtime_states_updated_at
 before update on public.pipeline_runtime_states
 for each row execute function public.set_updated_at();
 
-create trigger set_orchestration_checkpoints_updated_at
+create or replace trigger set_orchestration_checkpoints_updated_at
 before update on public.orchestration_checkpoints
 for each row execute function public.set_updated_at();
 
-create trigger set_runtime_review_queue_updated_at
+create or replace trigger set_runtime_review_queue_updated_at
 before update on public.runtime_review_queue
 for each row execute function public.set_updated_at();
 
-create trigger set_runtime_incidents_updated_at
+create or replace trigger set_runtime_incidents_updated_at
 before update on public.runtime_incidents
 for each row execute function public.set_updated_at();
 

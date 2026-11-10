@@ -224,15 +224,15 @@ CREATE INDEX IF NOT EXISTS idx_stripe_webhook_events_checkout_session
 -- Uses public.set_updated_at() from 001 as canonical function.
 -- ---------------------------------------------------------------------------
 
-CREATE TRIGGER set_webhook_subscriptions_updated_at
+create or replace trigger set_webhook_subscriptions_updated_at
     BEFORE UPDATE ON public.webhook_subscriptions
     FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
-CREATE TRIGGER set_webhook_delivery_log_updated_at
+create or replace trigger set_webhook_delivery_log_updated_at
     BEFORE UPDATE ON public.webhook_delivery_log
     FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
-CREATE TRIGGER set_stripe_webhook_events_updated_at
+create or replace trigger set_stripe_webhook_events_updated_at
     BEFORE UPDATE ON public.stripe_webhook_events
     FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
@@ -249,11 +249,11 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER prevent_webhook_delivery_log_mutation
+create or replace trigger prevent_webhook_delivery_log_mutation
     BEFORE UPDATE OR DELETE ON public.webhook_delivery_log
     FOR EACH ROW EXECUTE FUNCTION public.prevent_webhook_append_only_mutation();
 
-CREATE TRIGGER prevent_stripe_webhook_events_mutation
+create or replace trigger prevent_stripe_webhook_events_mutation
     BEFORE UPDATE OR DELETE ON public.stripe_webhook_events
     FOR EACH ROW EXECUTE FUNCTION public.prevent_webhook_append_only_mutation();
 

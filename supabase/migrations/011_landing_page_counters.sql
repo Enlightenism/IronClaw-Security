@@ -262,7 +262,7 @@ end;
 $$;
 
 drop trigger if exists landing_counters_enforce_monotonic on public.landing_counters;
-create trigger landing_counters_enforce_monotonic
+create or replace trigger landing_counters_enforce_monotonic
     before update or delete on public.landing_counters
     for each row
     execute function public.landing_counters_enforce_monotonic();

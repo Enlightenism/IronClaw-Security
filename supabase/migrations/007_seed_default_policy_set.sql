@@ -13,7 +13,14 @@
 -- removed from this file. 005_ironclaw_rls_policies.sql owns them exclusively.
 -- =============================================================================
 
+
 BEGIN;
+
+
+-- Drop legacy tables with incompatible schemas (safe: fresh seed migration)
+DROP TABLE IF EXISTS public.policy_set_memberships CASCADE;
+DROP TABLE IF EXISTS public.policy_sets CASCADE;
+
 
 -- ---------------------------------------------------------------------------
 -- policy_sets
@@ -22,7 +29,8 @@ BEGIN;
 -- set_key and may override rule_ids and thresholds.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS public.policy_sets (
+
+CREATE TABLE public.policy_sets (
     id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     set_key               TEXT        NOT NULL UNIQUE,
     display_name          TEXT        NOT NULL DEFAULT '',
@@ -30,16 +38,9 @@ CREATE TABLE IF NOT EXISTS public.policy_sets (
     is_builtin            BOOLEAN     NOT NULL DEFAULT FALSE,
     is_default            BOOLEAN     NOT NULL DEFAULT FALSE,
     enforcement_mode      TEXT        NOT NULL DEFAULT 'block',
-    -- policy_rule_ids: ordered array of rule_id values from policy_rules table
-    -- that this set enforces. Used by the policy engine to load rules at runtime.
     policy_rule_ids       JSONB       NOT NULL DEFAULT '[]'::JSONB,
-    -- severity_thresholds: maps severity level → enforcement action override
-    -- e.g. {"critical": "block", "high": "block", "medium": "review", "low": "warn"}
     severity_thresholds   JSONB       NOT NULL DEFAULT '{}'::JSONB,
-    -- sandbox_lane_mappings: maps sandbox execution lane → max allowed verdict
-    -- e.g. {"restricted": "block", "elevated": "review", "trusted": "allow"}
     sandbox_lane_mappings JSONB       NOT NULL DEFAULT '{}'::JSONB,
-    -- extra_config: open-ended policy metadata (rate limits, quarantine TTL, etc.)
     extra_config          JSONB       NOT NULL DEFAULT '{}'::JSONB,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', NOW()),
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', NOW()),
@@ -49,13 +50,16 @@ CREATE TABLE IF NOT EXISTS public.policy_sets (
         EXCLUDE USING btree (is_default WITH =) WHERE (is_default = TRUE)
 );
 
-CREATE INDEX IF NOT EXISTS idx_policy_sets_set_key     ON public.policy_sets (set_key);
-CREATE INDEX IF NOT EXISTS idx_policy_sets_is_builtin  ON public.policy_sets (is_builtin);
-CREATE INDEX IF NOT EXISTS idx_policy_sets_is_default  ON public.policy_sets (is_default);
 
-CREATE TRIGGER set_policy_sets_updated_at
+CREATE INDEX idx_policy_sets_set_key     ON public.policy_sets (set_key);
+CREATE INDEX idx_policy_sets_is_builtin  ON public.policy_sets (is_builtin);
+CREATE INDEX idx_policy_sets_is_default  ON public.policy_sets (is_default);
+
+
+CREATE OR REPLACE TRIGGER set_policy_sets_updated_at
     BEFORE UPDATE ON public.policy_sets
     FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
 
 -- ---------------------------------------------------------------------------
 -- policy_set_memberships
@@ -65,24 +69,27 @@ CREATE TRIGGER set_policy_sets_updated_at
 -- fast-path cache; this table is the relational source of truth.
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS public.policy_set_memberships (
-    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    policy_set_id   UUID        NOT NULL REFERENCES public.policy_sets(id) ON DELETE CASCADE,
-    policy_rule_id  UUID        NOT NULL REFERENCES public.policy_rules(id) ON DELETE CASCADE,
-    rule_id         TEXT        NOT NULL,
-    sort_order      INTEGER     NOT NULL DEFAULT 0,
+
+CREATE TABLE public.policy_set_memberships (
+    id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    policy_set_id    UUID        NOT NULL REFERENCES public.policy_sets(id) ON DELETE CASCADE,
+    policy_rule_id   UUID        NOT NULL REFERENCES public.policy_rules(id) ON DELETE CASCADE,
+    rule_id          TEXT        NOT NULL,
+    sort_order       INTEGER     NOT NULL DEFAULT 0,
     override_verdict TEXT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', NOW()),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT timezone('utc', NOW()),
     CONSTRAINT policy_set_memberships_unique_rule
         UNIQUE (policy_set_id, policy_rule_id),
     CONSTRAINT policy_set_memberships_override_verdict_check
         CHECK (override_verdict IS NULL OR override_verdict IN ('allow', 'review', 'block', 'warn'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_psm_policy_set_id  ON public.policy_set_memberships (policy_set_id);
-CREATE INDEX IF NOT EXISTS idx_psm_policy_rule_id ON public.policy_set_memberships (policy_rule_id);
-CREATE INDEX IF NOT EXISTS idx_psm_rule_id        ON public.policy_set_memberships (rule_id);
-CREATE INDEX IF NOT EXISTS idx_psm_sort_order     ON public.policy_set_memberships (policy_set_id, sort_order);
+
+CREATE INDEX idx_psm_policy_set_id  ON public.policy_set_memberships (policy_set_id);
+CREATE INDEX idx_psm_policy_rule_id ON public.policy_set_memberships (policy_rule_id);
+CREATE INDEX idx_psm_rule_id        ON public.policy_set_memberships (rule_id);
+CREATE INDEX idx_psm_sort_order     ON public.policy_set_memberships (policy_set_id, sort_order);
+
 
 -- ---------------------------------------------------------------------------
 -- SEED: ironclaw_default policy set
@@ -90,6 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_psm_sort_order     ON public.policy_set_membershi
 -- All builtin rule_ids from 006_seed_ioc_patterns are listed in
 -- policy_rule_ids for fast-path loading. enforcement_mode = 'block'.
 -- ---------------------------------------------------------------------------
+
 
 INSERT INTO public.policy_sets (
     set_key,
@@ -112,10 +120,7 @@ VALUES (
     TRUE,
     TRUE,
     'block',
-    -- policy_rule_ids: all builtin rule_ids from 006 in priority order
-    -- Priority bands: trust_collapse (5) → target_block (10) → action_review (40) → target_review (50)
     jsonb_build_array(
-        -- trust_collapse rules (priority 5 — highest, terminate session)
         'trust_collapse_system_prompt_exfil',
         'trust_collapse_data_exfiltration',
         'trust_collapse_multistep_escalation',
@@ -125,7 +130,6 @@ VALUES (
         'trust_collapse_review_bypass',
         'trust_collapse_policy_override_demand',
         'trust_collapse_local_file_discovery',
-        -- target_block rules (priority 10 — hard block)
         'block_target_system32',
         'block_target_syswow64',
         'block_target_programdata',
@@ -150,13 +154,11 @@ VALUES (
         'block_target_azure_config',
         'block_target_gcloud_config',
         'block_target_kubeconfig',
-        -- action_review rules (priority 40 — elevated review gate)
         'review_action_shell_command',
         'review_action_network_request',
         'review_action_git_operation',
         'review_action_file_write',
         'review_action_tool_call',
-        -- target_review rules (priority 50 — high-review targets)
         'review_target_powershell',
         'review_target_pwsh',
         'review_target_cmd',
@@ -189,24 +191,17 @@ VALUES (
         'review_target_mshta',
         'review_target_rundll32'
     ),
-    -- severity_thresholds: maps scan_patterns severity → enforcement action
-    -- critical and high always block; medium requires review; low warns and audits
     jsonb_build_object(
         'critical', 'block',
         'high',     'block',
         'medium',   'review',
         'low',      'warn'
     ),
-    -- sandbox_lane_mappings: maps execution trust lane → maximum permitted verdict
-    -- restricted: full block enforcement (untrusted external content)
-    -- elevated:   review gate required (privileged but supervised operations)
-    -- trusted:    audit-only (internally validated, pre-approved pipelines)
     jsonb_build_object(
         'restricted', 'block',
         'elevated',   'review',
         'trusted',    'audit'
     ),
-    -- extra_config: operational tuning defaults
     jsonb_build_object(
         'max_risk_score_allow',          0.30,
         'max_risk_score_review',         0.65,
@@ -218,10 +213,11 @@ VALUES (
         'shell_scan_enabled',            TRUE,
         'exfiltration_scan_enabled',     TRUE,
         'audit_all_verdicts',            TRUE,
-        'schema_version',               '1.0'
+        'schema_version',                '1.0'
     )
 )
 ON CONFLICT (set_key) DO NOTHING;
+
 
 -- ---------------------------------------------------------------------------
 -- SEED: policy_set_memberships for ironclaw_default
@@ -229,6 +225,7 @@ ON CONFLICT (set_key) DO NOTHING;
 -- subquery against policy_rules. sort_order mirrors the priority bands from
 -- policy_rules.priority so the policy engine can ORDER BY sort_order.
 -- ---------------------------------------------------------------------------
+
 
 INSERT INTO public.policy_set_memberships (
     policy_set_id,
@@ -243,15 +240,17 @@ SELECT
     pr.rule_id,
     pr.priority                                               AS sort_order,
     NULL                                                      AS override_verdict
-FROM public.policy_sets        AS ps
-INNER JOIN public.policy_rules       AS pr ON pr.is_builtin = TRUE
+FROM public.policy_sets            AS ps
+INNER JOIN public.policy_rules     AS pr ON pr.is_builtin = TRUE
 WHERE ps.set_key = 'ironclaw_default'
   AND pr.enabled = TRUE
 ON CONFLICT (policy_set_id, policy_rule_id) DO NOTHING;
 
+
 -- ---------------------------------------------------------------------------
 -- Migration record
 -- ---------------------------------------------------------------------------
+
 
 INSERT INTO public.persistence_migrations (
     migration_key,
@@ -268,7 +267,7 @@ VALUES (
     '(restricted → block, elevated → review, trusted → audit), and operational extra_config defaults. '
     'RLS for policy_sets and policy_set_memberships is owned exclusively by 005_ironclaw_rls_policies.sql.',
     'system',
-    '',
+    'seed-v1.0-sha256-placeholder',
     jsonb_build_object(
         'section',       'detection_and_policy',
         'depends_on',    jsonb_build_array('005_ironclaw_rls_policies', '006_seed_ioc_patterns'),
@@ -277,5 +276,6 @@ VALUES (
     )
 )
 ON CONFLICT (migration_key) DO NOTHING;
+
 
 COMMIT;

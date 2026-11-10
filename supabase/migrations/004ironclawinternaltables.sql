@@ -4,6 +4,7 @@
 -- Columns derived from verified to_dict() shapes in app/supabaseclient.py
 -- =============================================================================
 
+
 -- ---------------------------------------------------------------------------
 -- Shared trigger function for updated_at maintenance
 -- ---------------------------------------------------------------------------
@@ -16,6 +17,7 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
 
 -- ---------------------------------------------------------------------------
 -- ironclaw_agent_observations
@@ -35,10 +37,12 @@ CREATE TABLE IF NOT EXISTS ironclaw_agent_observations (
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_agent_obs_agent_id   ON ironclaw_agent_observations (agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_obs_client_id  ON ironclaw_agent_observations (client_id);
 CREATE INDEX IF NOT EXISTS idx_agent_obs_session_id ON ironclaw_agent_observations (session_id);
 CREATE INDEX IF NOT EXISTS idx_agent_obs_timestamp  ON ironclaw_agent_observations (timestamp DESC);
+
 
 -- ---------------------------------------------------------------------------
 -- ironclaw_agent_baselines
@@ -67,12 +71,15 @@ CREATE TABLE IF NOT EXISTS ironclaw_agent_baselines (
     updated_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_agent_baselines_agent_id  ON ironclaw_agent_baselines (agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_baselines_client_id ON ironclaw_agent_baselines (client_id);
 
-CREATE TRIGGER trg_agent_baselines_updated_at
+
+create or replace trigger trg_agent_baselines_updated_at
     BEFORE UPDATE ON ironclaw_agent_baselines
     FOR EACH ROW EXECUTE FUNCTION ironclaw_set_updated_at();
+
 
 -- ---------------------------------------------------------------------------
 -- ironclaw_drift_reports
@@ -97,11 +104,13 @@ CREATE TABLE IF NOT EXISTS ironclaw_drift_reports (
     created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_drift_reports_agent_id   ON ironclaw_drift_reports (agent_id);
 CREATE INDEX IF NOT EXISTS idx_drift_reports_client_id  ON ironclaw_drift_reports (client_id);
 CREATE INDEX IF NOT EXISTS idx_drift_reports_session_id ON ironclaw_drift_reports (session_id);
 CREATE INDEX IF NOT EXISTS idx_drift_reports_timestamp  ON ironclaw_drift_reports (timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_drift_reports_severity   ON ironclaw_drift_reports (overall_severity);
+
 
 -- ---------------------------------------------------------------------------
 -- ironclaw_alerts
@@ -118,14 +127,17 @@ CREATE TABLE IF NOT EXISTS ironclaw_alerts (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_alerts_client_id  ON ironclaw_alerts (client_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_status     ON ironclaw_alerts (status);
 CREATE INDEX IF NOT EXISTS idx_alerts_severity   ON ironclaw_alerts (severity);
 CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON ironclaw_alerts (created_at DESC);
 
-CREATE TRIGGER trg_alerts_updated_at
+
+create or replace trigger trg_alerts_updated_at
     BEFORE UPDATE ON ironclaw_alerts
     FOR EACH ROW EXECUTE FUNCTION ironclaw_set_updated_at();
+
 
 -- ---------------------------------------------------------------------------
 -- ironclaw_audit_logs
@@ -151,6 +163,7 @@ CREATE TABLE IF NOT EXISTS ironclaw_audit_logs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_audit_logs_client_id   ON ironclaw_audit_logs (client_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_agent_id    ON ironclaw_audit_logs (agent_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_session_id  ON ironclaw_audit_logs (session_id);
@@ -158,11 +171,13 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type  ON ironclaw_audit_logs (ev
 CREATE INDEX IF NOT EXISTS idx_audit_logs_verdict     ON ironclaw_audit_logs (verdict);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at  ON ironclaw_audit_logs (created_at DESC);
 
+
 -- ---------------------------------------------------------------------------
 -- Billing + install-key lifecycle state
 -- Pattern mirrors the internal tables above: stable PKs, explicit FKs, and
 -- updated_at triggers for durable reconciliation after restarts.
 -- ---------------------------------------------------------------------------
+
 
 CREATE TABLE IF NOT EXISTS ironclaw_billing_purchases (
     purchase_id          TEXT        PRIMARY KEY,
@@ -172,7 +187,7 @@ CREATE TABLE IF NOT EXISTS ironclaw_billing_purchases (
     buyer_email          TEXT,
     package_id           TEXT        NOT NULL,
     package_name         TEXT        NOT NULL DEFAULT '',
-    checkout_session_id   TEXT,
+    checkout_session_id  TEXT,
     purchase_reference   TEXT,
     subscription_id      TEXT,
     payment_status       TEXT        NOT NULL DEFAULT 'pending',
@@ -210,23 +225,42 @@ CREATE TABLE IF NOT EXISTS ironclaw_billing_purchases (
         CHECK (tokens_per_unit > 0)
 );
 
+
+-- Idempotent column additions for pre-existing legacy versions of this table
+ALTER TABLE ironclaw_billing_purchases ADD COLUMN IF NOT EXISTS customer_id TEXT;
+ALTER TABLE ironclaw_billing_purchases ADD COLUMN IF NOT EXISTS checkout_session_id TEXT;
+ALTER TABLE ironclaw_billing_purchases ADD COLUMN IF NOT EXISTS purchase_reference TEXT;
+ALTER TABLE ironclaw_billing_purchases ADD COLUMN IF NOT EXISTS subscription_id TEXT;
+ALTER TABLE ironclaw_billing_purchases ADD COLUMN IF NOT EXISTS amount_total NUMERIC(12,2) NOT NULL DEFAULT 0;
+ALTER TABLE ironclaw_billing_purchases ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'usd';
+ALTER TABLE ironclaw_billing_purchases ADD COLUMN IF NOT EXISTS units_credited BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE ironclaw_billing_purchases ADD COLUMN IF NOT EXISTS install_keys_ready BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE ironclaw_billing_purchases ADD COLUMN IF NOT EXISTS fulfilled_at TIMESTAMPTZ;
+ALTER TABLE ironclaw_billing_purchases ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ironclaw_billing_purchases_checkout_session
     ON ironclaw_billing_purchases (checkout_session_id)
     WHERE checkout_session_id IS NOT NULL;
+
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ironclaw_billing_purchases_purchase_reference
     ON ironclaw_billing_purchases (purchase_reference)
     WHERE purchase_reference IS NOT NULL;
 
+
 CREATE INDEX IF NOT EXISTS idx_ironclaw_billing_purchases_owner_status
     ON ironclaw_billing_purchases (owner_key, payment_status, fulfillment_status, created_at DESC);
+
 
 CREATE INDEX IF NOT EXISTS idx_ironclaw_billing_purchases_package_status
     ON ironclaw_billing_purchases (package_id, payment_status, fulfillment_status, created_at DESC);
 
-CREATE TRIGGER trg_ironclaw_billing_purchases_updated_at
+
+create or replace trigger trg_ironclaw_billing_purchases_updated_at
     BEFORE UPDATE ON ironclaw_billing_purchases
     FOR EACH ROW EXECUTE FUNCTION ironclaw_set_updated_at();
+
 
 CREATE TABLE IF NOT EXISTS ironclaw_install_key_state (
     key_id                TEXT        PRIMARY KEY,
@@ -236,7 +270,7 @@ CREATE TABLE IF NOT EXISTS ironclaw_install_key_state (
     owner_key             TEXT        NOT NULL,
     customer_id           TEXT,
     program               TEXT        NOT NULL,
-    checkout_session_id    TEXT,
+    checkout_session_id   TEXT,
     raw_key_hash          TEXT        NOT NULL,
     masked_key            TEXT        NOT NULL,
     status                TEXT        NOT NULL DEFAULT 'issued',
@@ -260,19 +294,24 @@ CREATE TABLE IF NOT EXISTS ironclaw_install_key_state (
         CHECK (char_length(trim(subscription_id)) > 0 OR subscription_id = '')
 );
 
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ironclaw_install_key_state_active_owner_program
     ON ironclaw_install_key_state (owner_key, program)
     WHERE active = TRUE;
 
+
 CREATE INDEX IF NOT EXISTS idx_ironclaw_install_key_state_purchase_status
     ON ironclaw_install_key_state (purchase_id, status, active, created_at DESC);
+
 
 CREATE INDEX IF NOT EXISTS idx_ironclaw_install_key_state_owner_program
     ON ironclaw_install_key_state (owner_key, program, status, created_at DESC);
 
-CREATE TRIGGER trg_ironclaw_install_key_state_updated_at
+
+create or replace trigger trg_ironclaw_install_key_state_updated_at
     BEFORE UPDATE ON ironclaw_install_key_state
     FOR EACH ROW EXECUTE FUNCTION ironclaw_set_updated_at();
+
 
 CREATE TABLE IF NOT EXISTS ironclaw_install_key_history (
     history_id            TEXT        PRIMARY KEY,
@@ -291,15 +330,19 @@ CREATE TABLE IF NOT EXISTS ironclaw_install_key_history (
         CHECK (status IN ('issued', 'active', 'revoked', 'expired'))
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_ironclaw_install_key_history_key_event
     ON ironclaw_install_key_history (key_id, event_type, created_at DESC);
+
 
 CREATE INDEX IF NOT EXISTS idx_ironclaw_install_key_history_purchase
     ON ironclaw_install_key_history (purchase_id, created_at DESC);
 
-CREATE TRIGGER trg_ironclaw_install_key_history_updated_at
+
+create or replace trigger trg_ironclaw_install_key_history_updated_at
     BEFORE UPDATE ON ironclaw_install_key_history
     FOR EACH ROW EXECUTE FUNCTION ironclaw_set_updated_at();
+
 
 CREATE TABLE IF NOT EXISTS ironclaw_event_idempotency (
     event_id              TEXT        PRIMARY KEY,
@@ -307,7 +350,7 @@ CREATE TABLE IF NOT EXISTS ironclaw_event_idempotency (
     event_type            TEXT        NOT NULL,
     purchase_id           TEXT        REFERENCES ironclaw_billing_purchases(purchase_id) ON DELETE SET NULL,
     purchase_reference    TEXT,
-    checkout_session_id    TEXT,
+    checkout_session_id   TEXT,
     owner_key             TEXT,
     customer_id           TEXT,
     payload_hash          TEXT        NOT NULL,
@@ -327,18 +370,23 @@ CREATE TABLE IF NOT EXISTS ironclaw_event_idempotency (
         CHECK (status IN ('processed', 'duplicate', 'rejected', 'expired'))
 );
 
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ironclaw_event_idempotency_fingerprint
     ON ironclaw_event_idempotency (source, event_type, payload_hash);
+
 
 CREATE INDEX IF NOT EXISTS idx_ironclaw_event_idempotency_checkout_session
     ON ironclaw_event_idempotency (checkout_session_id, processed_at DESC);
 
+
 CREATE INDEX IF NOT EXISTS idx_ironclaw_event_idempotency_purchase
     ON ironclaw_event_idempotency (purchase_id, processed_at DESC);
 
-CREATE TRIGGER trg_ironclaw_event_idempotency_updated_at
+
+create or replace trigger trg_ironclaw_event_idempotency_updated_at
     BEFORE UPDATE ON ironclaw_event_idempotency
     FOR EACH ROW EXECUTE FUNCTION ironclaw_set_updated_at();
+
 
 -- ---------------------------------------------------------------------------
 -- Private recovery store for raw install secret material
@@ -347,10 +395,13 @@ CREATE TRIGGER trg_ironclaw_event_idempotency_updated_at
 -- dashboard/frontend APIs or public queries.
 -- ---------------------------------------------------------------------------
 
+
 CREATE SCHEMA IF NOT EXISTS private;
+
 
 REVOKE ALL ON SCHEMA private FROM PUBLIC;
 REVOKE ALL ON ALL TABLES IN SCHEMA private FROM PUBLIC;
+
 
 CREATE TABLE IF NOT EXISTS private.install_key_secrets (
     key_id            TEXT        PRIMARY KEY REFERENCES public.install_key_records(key_id) ON DELETE CASCADE,
@@ -369,18 +420,22 @@ CREATE TABLE IF NOT EXISTS private.install_key_secrets (
         CHECK (octet_length(encrypted_key) > 0)
 );
 
+
 REVOKE ALL ON TABLE private.install_key_secrets FROM PUBLIC;
 REVOKE ALL ON TABLE private.install_key_secrets FROM authenticated;
 REVOKE ALL ON TABLE private.install_key_secrets FROM anon;
 GRANT ALL ON TABLE private.install_key_secrets TO service_role;
 
+
 CREATE INDEX IF NOT EXISTS idx_private_install_key_secrets_owner_key
     ON private.install_key_secrets (owner_key, created_at DESC);
+
 
 CREATE INDEX IF NOT EXISTS idx_private_install_key_secrets_expiry
     ON private.install_key_secrets (expires_at)
     WHERE expires_at IS NOT NULL;
 
-CREATE TRIGGER trg_private_install_key_secrets_updated_at
+
+create or replace trigger trg_private_install_key_secrets_updated_at
     BEFORE UPDATE ON private.install_key_secrets
     FOR EACH ROW EXECUTE FUNCTION ironclaw_set_updated_at();

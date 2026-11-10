@@ -1,26 +1,9 @@
--- =============================================================================
--- 005_ironclaw_rls_policies.sql
--- IronClaw consolidated RLS policy definitions.
--- Covers all tables across migrations 001–010.
--- Safe to re-run: policies guarded by existence checks inside DO $$ blocks.
--- Tables not yet created are wrapped in DO $$ IF EXISTS $$ guards.
--- Policy pattern:
---   service_role : PERMISSIVE ALL USING(TRUE) WITH CHECK(TRUE)
---   authenticated: table-appropriate SELECT/INSERT/UPDATE scoped to actor
---   anon         : no policy — RLS default-deny enforces zero access
--- Write-protected tables (policy_rules, policy_sets, policy_set_memberships,
---   ioc_patterns, api_keys, credentials_vault): service_role only.
--- Append-only tables (ironclaw_audit_logs, audit_events, webhook_delivery_log,
---   history_events, telemetry_events): INSERT allowed, no UPDATE/DELETE.
--- Tables with explicit RLS in their own migration (010+):
---   ioc_records, feed_ingest_log — managed in 010_threat_feed_tables.sql.
--- =============================================================================
-
--- ===========================================================================
--- PRIVATE SECRET RECOVERY TABLE (004)
--- ===========================================================================
+-- ---------------------------------------------------------------------------
+-- private.install_key_secrets — service_role only
+-- ---------------------------------------------------------------------------
 
 ALTER TABLE private.install_key_secrets ENABLE ROW LEVEL SECURITY;
+
 
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'private' AND tablename = 'install_key_secrets' AND policyname = 'private_install_key_secrets_service_role_all') THEN
@@ -28,7 +11,44 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+
 -- ---------------------------------------------------------------------------
+-- Idempotent column additions for legacy table shapes
+-- Ensures all columns referenced by RLS policies exist before policies are created
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE public.audit_events ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE public.audit_events ADD COLUMN IF NOT EXISTS actor_id TEXT;
+
+ALTER TABLE public.telemetry_events ADD COLUMN IF NOT EXISTS org_id TEXT;
+
+ALTER TABLE public.quarantine_items ADD COLUMN IF NOT EXISTS org_id TEXT;
+
+ALTER TABLE public.review_queue_items ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE public.review_queue_items ADD COLUMN IF NOT EXISTS actor_id TEXT;
+
+ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE public.incidents ADD COLUMN IF NOT EXISTS owner_id TEXT;
+
+ALTER TABLE public.history_events ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE public.history_events ADD COLUMN IF NOT EXISTS actor_id TEXT;
+
+ALTER TABLE public.runtime_sessions ADD COLUMN IF NOT EXISTS org_id TEXT;
+ALTER TABLE public.runtime_sessions ADD COLUMN IF NOT EXISTS actor_id TEXT;
+
+ALTER TABLE public.api_keys ADD COLUMN IF NOT EXISTS created_by TEXT;
+
+ALTER TABLE public.webhook_subscriptions ADD COLUMN IF NOT EXISTS tenant_id TEXT;
+
+ALTER TABLE public.webhook_delivery_log ADD COLUMN IF NOT EXISTS subscription_id UUID;
+ALTER TABLE public.webhook_delivery_log ADD COLUMN IF NOT EXISTS tenant_id TEXT;
+
+ALTER TABLE public.policy_rules ADD COLUMN IF NOT EXISTS is_builtin BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE public.policy_sets ADD COLUMN IF NOT EXISTS is_builtin BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE public.policy_set_memberships ADD COLUMN IF NOT EXISTS policy_set_id UUID;
+
 
 -- ===========================================================================
 -- SECTION 1 — ironclaw behavioral tables (004)
@@ -868,20 +888,7 @@ DO $$ BEGIN
 END $$;
 
 -- ===========================================================================
--- SECTION 7 — Future tables (not yet created; guarded by IF EXISTS checks)
--- RLS enabled and service_role ALL granted only when the table exists.
--- Add the CREATE TABLE migration first; this section will activate on re-run.
--- Tables managed here (service_role ALL only via dynamic loop):
---   scan_history, users, agent_trust_profiles, trust_events,
---   sandbox_sessions, sandbox_executions, tool_call_logs, scan_patterns,
---   pattern_versions, rate_limit_state, memory_entries, hook_definitions,
---   hook_executions, orchestrator_sessions, orchestrator_steps,
---   rule_evaluations, verdict_overrides, review_decisions, escalations,
---   agent_sessions, agent_events, repositories, deploy_targets,
---   integration_configs, credentials_vault, threat_detections, security_events
--- Tables with full explicit RLS in their own migration (excluded from loop):
---   ioc_records       — 010_threat_feed_tables.sql
---   feed_ingest_log   — 010_threat_feed_tables.sql
+-- SECTION 7 — Future tables (guarded by IF EXISTS checks)
 -- ===========================================================================
 
 DO $$

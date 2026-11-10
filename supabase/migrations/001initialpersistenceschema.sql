@@ -1,6 +1,8 @@
 begin;
 
+
 create extension if not exists pgcrypto;
+
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -12,7 +14,9 @@ begin
 end;
 $$;
 
+
 -- ─── Migration tracking ────────────────────────────────────────────────────────
+
 
 create table if not exists public.persistence_migrations (
     id uuid primary key default gen_random_uuid(),
@@ -24,7 +28,9 @@ create table if not exists public.persistence_migrations (
     metadata jsonb not null default '{}'::jsonb
 );
 
+
 -- ─── Persistence infrastructure ───────────────────────────────────────────────
+
 
 create table if not exists public.persistence_backends (
     id uuid primary key default gen_random_uuid(),
@@ -47,6 +53,7 @@ create table if not exists public.persistence_backends (
         check (health_status in ('unknown', 'healthy', 'degraded', 'failing', 'offline'))
 );
 
+
 create table if not exists public.persistence_failover_events (
     id uuid primary key default gen_random_uuid(),
     event_key text not null unique,
@@ -66,7 +73,9 @@ create table if not exists public.persistence_failover_events (
         check (status in ('detected', 'in_progress', 'completed', 'failed', 'rolled_back'))
 );
 
+
 -- ─── Billing / install-key durable state ──────────────────────────────────────
+
 
 create table if not exists public.billing_purchases (
     id uuid primary key default gen_random_uuid(),
@@ -112,6 +121,7 @@ create table if not exists public.billing_purchases (
         check (char_length(trim(currency)) > 0)
 );
 
+
 create table if not exists public.install_key_records (
     id uuid primary key default gen_random_uuid(),
     key_id text not null unique,
@@ -149,6 +159,7 @@ create table if not exists public.install_key_records (
         check (char_length(trim(subscription_id)) > 0 or subscription_id = '')
 );
 
+
 create table if not exists public.install_key_issuance_history (
     id uuid primary key default gen_random_uuid(),
     history_id text not null unique default gen_random_uuid()::text,
@@ -174,6 +185,7 @@ create table if not exists public.install_key_issuance_history (
         check (char_length(trim(program)) > 0)
 );
 
+
 create table if not exists public.event_idempotency_ledger (
     id uuid primary key default gen_random_uuid(),
     event_id text not null unique,
@@ -195,66 +207,84 @@ create table if not exists public.event_idempotency_ledger (
         check (processed_at is not null)
 );
 
-create trigger set_billing_purchases_updated_at
+
+create or replace trigger set_billing_purchases_updated_at
     before update on public.billing_purchases
     for each row execute function public.set_updated_at();
 
-create trigger set_install_key_records_updated_at
+
+create or replace trigger set_install_key_records_updated_at
     before update on public.install_key_records
     for each row execute function public.set_updated_at();
 
-create trigger set_install_key_issuance_history_updated_at
+
+create or replace trigger set_install_key_issuance_history_updated_at
     before update on public.install_key_issuance_history
     for each row execute function public.set_updated_at();
 
-create trigger set_event_idempotency_ledger_updated_at
+
+create or replace trigger set_event_idempotency_ledger_updated_at
     before update on public.event_idempotency_ledger
     for each row execute function public.set_updated_at();
 
+
 create index if not exists idx_billing_purchases_owner_created_at
     on public.billing_purchases (owner_key, created_at desc);
+
 
 create index if not exists idx_billing_purchases_checkout_session_lookup
     on public.billing_purchases (checkout_session_id)
     where checkout_session_id is not null;
 
+
 create unique index if not exists idx_billing_purchases_paid_checkout_session_unique
     on public.billing_purchases (checkout_session_id)
     where checkout_session_id is not null and payment_status = 'paid';
 
+
 create index if not exists idx_billing_purchases_payment_status_created_at
     on public.billing_purchases (payment_status, created_at desc);
 
+
 create index if not exists idx_install_key_records_owner_program
     on public.install_key_records (owner_key, program, created_at desc);
+
 
 create index if not exists idx_install_key_records_checkout_session
     on public.install_key_records (checkout_session_id)
     where checkout_session_id is not null;
 
+
 create unique index if not exists idx_install_key_records_active_owner_program_unique
     on public.install_key_records (owner_key, program)
     where active = true;
+
 
 create unique index if not exists idx_install_key_records_raw_key_hash_unique
     on public.install_key_records (raw_key_hash)
     where raw_key_hash is not null and raw_key_hash <> '';
 
+
 create index if not exists idx_install_key_issuance_history_purchase_issued_at
     on public.install_key_issuance_history (purchase_id, issued_at desc);
 
+
 create index if not exists idx_install_key_issuance_history_key_id
     on public.install_key_issuance_history (key_id, issued_at desc);
+
 
 create index if not exists idx_event_idempotency_ledger_checkout_session
     on public.event_idempotency_ledger (checkout_session_id)
     where checkout_session_id is not null;
 
+
 create index if not exists idx_event_idempotency_ledger_purchase_id
     on public.event_idempotency_ledger (purchase_id)
     where purchase_id is not null;
 
+
 -- ─── Backup / restore ─────────────────────────────────────────────────────────
+
 
 create table if not exists public.backup_policies (
     id uuid primary key default gen_random_uuid(),
@@ -278,6 +308,7 @@ create table if not exists public.backup_policies (
     constraint backup_policies_target_scope_check
         check (target_scope in ('platform', 'audit', 'review', 'quarantine', 'incidents', 'billing', 'runtime', 'telemetry'))
 );
+
 
 create table if not exists public.backup_runs (
     id uuid primary key default gen_random_uuid(),
@@ -310,6 +341,7 @@ create table if not exists public.backup_runs (
         check (records_captured >= 0)
 );
 
+
 create table if not exists public.restore_runs (
     id uuid primary key default gen_random_uuid(),
     restore_key text not null unique,
@@ -336,7 +368,9 @@ create table if not exists public.restore_runs (
         check (records_restored >= 0)
 );
 
+
 -- ─── Retention ────────────────────────────────────────────────────────────────
+
 
 create table if not exists public.retention_policies (
     id uuid primary key default gen_random_uuid(),
@@ -355,6 +389,7 @@ create table if not exists public.retention_policies (
     constraint retention_policies_target_scope_check
         check (target_scope in ('platform', 'audit', 'review', 'quarantine', 'incidents', 'billing', 'runtime', 'telemetry'))
 );
+
 
 create table if not exists public.retention_runs (
     id uuid primary key default gen_random_uuid(),
@@ -383,6 +418,7 @@ create table if not exists public.retention_runs (
         check (held_records >= 0)
 );
 
+
 create table if not exists public.legal_holds (
     id uuid primary key default gen_random_uuid(),
     hold_key text not null unique,
@@ -400,7 +436,9 @@ create table if not exists public.legal_holds (
         check (target_scope in ('platform', 'audit', 'review', 'quarantine', 'incidents', 'billing', 'runtime', 'telemetry'))
 );
 
+
 -- ─── Security events / analysis ───────────────────────────────────────────────
+
 
 create table if not exists public.analysis_reports (
     id uuid primary key default gen_random_uuid(),
@@ -419,6 +457,7 @@ create table if not exists public.analysis_reports (
         check (risk_score >= 0 and risk_score <= 100)
 );
 
+
 create table if not exists public.quarantine_events (
     id uuid primary key default gen_random_uuid(),
     analysis_report_id uuid not null references public.analysis_reports(id) on delete cascade,
@@ -435,6 +474,7 @@ create table if not exists public.quarantine_events (
         check (status in ('quarantined', 'released', 'deleted'))
 );
 
+
 create table if not exists public.release_policy_decisions (
     id uuid primary key default gen_random_uuid(),
     quarantine_event_id uuid not null references public.quarantine_events(id) on delete cascade,
@@ -448,7 +488,9 @@ create table if not exists public.release_policy_decisions (
         check (action in ('keep_quarantined', 'release', 'delete', 'escalate'))
 );
 
+
 -- ─── Audit / review / quarantine / incidents ──────────────────────────────────
+
 
 create table if not exists public.audit_events (
     id uuid primary key default gen_random_uuid(),
@@ -478,6 +520,7 @@ create table if not exists public.audit_events (
         check (outcome in ('allowed', 'blocked', 'completed', 'failed', 'queued', 'restored'))
 );
 
+
 create table if not exists public.review_queue_items (
     id uuid primary key default gen_random_uuid(),
     item_key text not null unique,
@@ -506,6 +549,7 @@ create table if not exists public.review_queue_items (
         check (risk_score >= 0 and risk_score <= 1000)
 );
 
+
 create table if not exists public.quarantine_items (
     id uuid primary key default gen_random_uuid(),
     item_key text not null unique,
@@ -532,6 +576,7 @@ create table if not exists public.quarantine_items (
         check (severity in ('low', 'medium', 'high', 'critical'))
 );
 
+
 create table if not exists public.incidents (
     id uuid primary key default gen_random_uuid(),
     incident_key text not null unique,
@@ -556,7 +601,9 @@ create table if not exists public.incidents (
         check (severity in ('low', 'medium', 'high', 'critical'))
 );
 
+
 -- ─── History / telemetry / runtime ────────────────────────────────────────────
+
 
 create table if not exists public.history_events (
     id uuid primary key default gen_random_uuid(),
@@ -578,6 +625,7 @@ create table if not exists public.history_events (
         unique (stream_key, sequence_no)
 );
 
+
 create table if not exists public.telemetry_events (
     id uuid primary key default gen_random_uuid(),
     event_key text not null unique,
@@ -596,6 +644,7 @@ create table if not exists public.telemetry_events (
     constraint telemetry_events_metric_type_check
         check (metric_type in ('counter', 'gauge', 'histogram', 'event', 'status'))
 );
+
 
 create table if not exists public.runtime_checkpoints (
     id uuid primary key default gen_random_uuid(),
@@ -617,6 +666,7 @@ create table if not exists public.runtime_checkpoints (
         check (sequence_no >= 0)
 );
 
+
 create table if not exists public.persistence_validation_runs (
     id uuid primary key default gen_random_uuid(),
     validation_key text not null unique,
@@ -636,106 +686,136 @@ create table if not exists public.persistence_validation_runs (
         check (status in ('scheduled', 'running', 'passed', 'failed', 'cancelled'))
 );
 
+
 -- ─── updated_at triggers ──────────────────────────────────────────────────────
 
-create trigger set_persistence_backends_updated_at
+
+create or replace trigger set_persistence_backends_updated_at
 before update on public.persistence_backends
 for each row execute function public.set_updated_at();
 
-create trigger set_persistence_failover_events_updated_at
+
+create or replace trigger set_persistence_failover_events_updated_at
 before update on public.persistence_failover_events
 for each row execute function public.set_updated_at();
 
-create trigger set_backup_policies_updated_at
+
+create or replace trigger set_backup_policies_updated_at
 before update on public.backup_policies
 for each row execute function public.set_updated_at();
 
-create trigger set_backup_runs_updated_at
+
+create or replace trigger set_backup_runs_updated_at
 before update on public.backup_runs
 for each row execute function public.set_updated_at();
 
-create trigger set_restore_runs_updated_at
+
+create or replace trigger set_restore_runs_updated_at
 before update on public.restore_runs
 for each row execute function public.set_updated_at();
 
-create trigger set_retention_policies_updated_at
+
+create or replace trigger set_retention_policies_updated_at
 before update on public.retention_policies
 for each row execute function public.set_updated_at();
 
-create trigger set_retention_runs_updated_at
+
+create or replace trigger set_retention_runs_updated_at
 before update on public.retention_runs
 for each row execute function public.set_updated_at();
 
-create trigger set_legal_holds_updated_at
+
+create or replace trigger set_legal_holds_updated_at
 before update on public.legal_holds
 for each row execute function public.set_updated_at();
 
-create trigger set_analysis_reports_updated_at
+
+create or replace trigger set_analysis_reports_updated_at
 before update on public.analysis_reports
 for each row execute function public.set_updated_at();
 
-create trigger set_audit_events_updated_at
+
+create or replace trigger set_audit_events_updated_at
 before update on public.audit_events
 for each row execute function public.set_updated_at();
 
-create trigger set_review_queue_items_updated_at
+
+create or replace trigger set_review_queue_items_updated_at
 before update on public.review_queue_items
 for each row execute function public.set_updated_at();
 
-create trigger set_quarantine_items_updated_at
+
+create or replace trigger set_quarantine_items_updated_at
 before update on public.quarantine_items
 for each row execute function public.set_updated_at();
 
-create trigger set_incidents_updated_at
+
+create or replace trigger set_incidents_updated_at
 before update on public.incidents
 for each row execute function public.set_updated_at();
 
-create trigger set_history_events_updated_at
+
+create or replace trigger set_history_events_updated_at
 before update on public.history_events
 for each row execute function public.set_updated_at();
 
-create trigger set_telemetry_events_updated_at
+
+create or replace trigger set_telemetry_events_updated_at
 before update on public.telemetry_events
 for each row execute function public.set_updated_at();
 
-create trigger set_runtime_checkpoints_updated_at
+
+create or replace trigger set_runtime_checkpoints_updated_at
 before update on public.runtime_checkpoints
 for each row execute function public.set_updated_at();
 
-create trigger set_persistence_validation_runs_updated_at
+
+create or replace trigger set_persistence_validation_runs_updated_at
 before update on public.persistence_validation_runs
 for each row execute function public.set_updated_at();
 
+
 -- ─── Indexes absorbed from 001_initial_persistence_schema.sql ────────────────
+
 
 create index if not exists idx_analysis_reports_verdict
     on public.analysis_reports (verdict);
 
+
 create index if not exists idx_analysis_reports_created_at
     on public.analysis_reports (created_at desc);
+
 
 create index if not exists idx_quarantine_events_analysis_report_id
     on public.quarantine_events (analysis_report_id);
 
+
 create index if not exists idx_quarantine_events_sha256
     on public.quarantine_events (sha256);
+
 
 create index if not exists idx_quarantine_events_status
     on public.quarantine_events (status);
 
+
 create index if not exists idx_quarantine_events_created_at
     on public.quarantine_events (created_at desc);
+
 
 create index if not exists idx_release_policy_decisions_quarantine_event_id
     on public.release_policy_decisions (quarantine_event_id);
 
+
 create index if not exists idx_release_policy_decisions_action
     on public.release_policy_decisions (action);
+
 
 create index if not exists idx_release_policy_decisions_created_at
     on public.release_policy_decisions (created_at desc);
 
+
 -- ─── Migration record ─────────────────────────────────────────────────────────
+
 
 insert into public.persistence_migrations (
     migration_key,
@@ -752,5 +832,6 @@ values (
     jsonb_build_object('section', 'data_lifecycle_and_resilience')
 )
 on conflict (migration_key) do nothing;
+
 
 commit;
