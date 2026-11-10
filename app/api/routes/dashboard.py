@@ -22,10 +22,8 @@ from app.core.settings import Settings, get_settings
 from app.core.unit_wallet import RegistryUnitLedgerEntry, UnitWalletRegistry, get_unit_wallet_registry
 from app.dependencies.customer_auth import require_customer_read, require_customer_write
 from app.services.audit_store import get_audit_store
-from app.services.block_store import list_blocks
 from app.services.incident_store import get_incident_store
 from app.services.install_key_dashboard_sync import InstallKeyDashboardSyncService
-from app.services.quarantine_store import get_quarantine_store
 
 router = APIRouter(
     prefix="/dashboard",
@@ -33,8 +31,6 @@ router = APIRouter(
 )
 
 logger = logging.getLogger(__name__)
-
-DASHBOARD_RUNTIME_BLOCK_LIMIT = 50
 
 
 # ---------------------------------------------------------------------------
@@ -80,28 +76,11 @@ class DashboardInstallKeyView(BaseModel):
     entitlements_status: str = "not_active"
     issued_after_payment: bool = False
     units_consumed: int
-    blocked_attacks: int = 0
     created_at: str | None
     activated_at: str | None
     revoked_at: str | None
     last_used_at: str | None
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class DashboardRuntimeBlockView(BaseModel):
-    id: str
-    platform: str
-    gate: str
-    reason: str
-    verdict: str
-    created_at: str
-
-
-class DashboardRuntimeBlocksResponse(BaseModel):
-    owner_key: str
-    total: int
-    blocks: list[DashboardRuntimeBlockView] = Field(default_factory=list)
-    timestamp: str
 
 
 class DashboardWalletKPI(BaseModel):
@@ -152,7 +131,6 @@ class DashboardResponse(BaseModel):
     alerts: list[DashboardIncidentView] = Field(default_factory=list)
     activity: list[DashboardQueueView] = Field(default_factory=list)
     install_keys: list[DashboardInstallKeyView] = Field(default_factory=list)
-    runtime_blocks: list[DashboardRuntimeBlockView] = Field(default_factory=list)
     wallet: DashboardWalletKPI | None = None
     billing: DashboardBillingKPI | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -430,7 +408,6 @@ def _build_install_key_views(
 
         wallet_usage_entry = (wallet_usage or {}).get(_coerce_string(getattr(r, "key_id", ""), default=""))
         wallet_consumed = int(getattr(wallet_usage_entry, "total_consumed_units", 0) or 0)
-        wallet_blocked = int(getattr(wallet_usage_entry, "total_blocked_attacks", 0) or 0)
 
         candidate = DashboardInstallKeyView(
             key_id=_coerce_string(getattr(r, "key_id", ""), default=""),
@@ -445,7 +422,6 @@ def _build_install_key_views(
             entitlements_status=entitlement_status,
             issued_after_payment=issued_after_payment,
             units_consumed=max(int(getattr(r, "units_consumed", 0) or 0), wallet_consumed),
-            blocked_attacks=wallet_blocked,
             created_at=_iso(getattr(r, "created_at", None)),
             activated_at=_iso(activated_at),
             revoked_at=_iso(revoked_at),
@@ -617,7 +593,6 @@ def get_dashboard_overview(
     organization_id = _coerce_string(getattr(auth_ctx, "org_id", None), default="").strip() or None
 
     incident_store = get_incident_store()
-    quarantine_store = get_quarantine_store()
     audit_store = get_audit_store()
 
     incidents = [
@@ -625,16 +600,6 @@ def get_dashboard_overview(
         for incident in incident_store.list_incidents(include_seeded=False)
         if _record_matches_dashboard_identity(
             incident,
-            owner_key=resolved_owner,
-            principal_id=principal_id,
-            organization_id=organization_id,
-        )
-    ]
-    quarantine_items = [
-        item
-        for item in quarantine_store.list_items()
-        if _record_matches_dashboard_identity(
-            item,
             owner_key=resolved_owner,
             principal_id=principal_id,
             organization_id=organization_id,
@@ -652,7 +617,7 @@ def get_dashboard_overview(
     ]
 
     open_incidents = [i for i in incidents if i.status in {"open", "triaged"}]
-    blocked_events = [e for e in audit_events if (e.verdict or "").lower() in {"block", "quarantine"}]
+    blocked_events = [e for e in audit_events if (e.verdict or "").lower() == "block"]
 
     integration_rollups: dict[str, dict[str, int | str]] = {}
     for event in audit_events:
@@ -668,7 +633,7 @@ def get_dashboard_overview(
             },
         )
         bucket["protected_requests_24h"] = int(bucket["protected_requests_24h"]) + 1
-        if (event.verdict or "").lower() in {"block", "quarantine"}:
+        if (event.verdict or "").lower() == "block":
             bucket["blocked_events_24h"] = int(bucket["blocked_events_24h"]) + 1
 
     wallet = wallet_registry.get_wallet(resolved_owner)
@@ -689,8 +654,6 @@ def get_dashboard_overview(
         wallet_summary=wallet.as_summary() if wallet is not None else {},
         audit_events=audit_events,
     )
-
-    runtime_block_views = _build_runtime_block_views(resolved_owner)
 
     wallet_status = "not_created" if wallet is None else "active" if wallet.balance_units > 0 else "empty"
     wallet_meta: dict[str, Any] = {
@@ -718,8 +681,6 @@ def get_dashboard_overview(
         }
 
     recent_incidents = sorted(incidents, key=lambda i: i.created_at, reverse=True)[:5]
-    quarantine_pending = [i for i in quarantine_items if i.status in {"isolated", "under_review"}]
-    quarantine_completed = [i for i in quarantine_items if i.status in {"released", "destroyed"}]
 
     return DashboardResponse(
         status="ok",
@@ -747,18 +708,11 @@ def get_dashboard_overview(
                 metadata={"window": "active"},
             ),
             DashboardStatView(
-                key="blocked_runtime_attacks",
-                label="Blocked Runtime Attacks",
+                key="blocked_attacks",
+                label="Blocked Attacks",
                 value=int(install_key_dashboard["blocked_activity_total"]),
                 delta=0,
-                metadata={"source": "install_key_usage"},
-            ),
-            DashboardStatView(
-                key="quarantined_items",
-                label="Quarantined Items",
-                value=len(quarantine_items),
-                delta=0,
-                metadata={"window": "active"},
+                metadata={"source": "attack_feed"},
             ),
             DashboardStatView(
                 key="open_incidents",
@@ -787,15 +741,8 @@ def get_dashboard_overview(
                 in_progress=len([i for i in open_incidents if i.owner]),
                 completed_today=len([i for i in incidents if i.status == "resolved"]),
             ),
-            DashboardQueueView(
-                queue_name="quarantine_queue",
-                pending=len(quarantine_pending),
-                in_progress=len([i for i in quarantine_pending if i.owner]),
-                completed_today=len(quarantine_completed),
-            ),
         ],
         install_keys=install_keys,
-        runtime_blocks=runtime_block_views,
         wallet=wallet_kpi,
         billing=billing_kpi,
         metadata={
@@ -884,43 +831,5 @@ def record_key_usage(
         key_id=updated.key_id,
         units_consumed=updated.units_consumed,
         last_used_at=updated.last_used_at.isoformat().replace("+00:00", "Z") if updated.last_used_at else None,
-        timestamp=_utc_now_iso(),
-    )
-
-
-def _build_runtime_block_views(owner_key: str, limit: int = DASHBOARD_RUNTIME_BLOCK_LIMIT) -> list[DashboardRuntimeBlockView]:
-    try:
-        rows = list_blocks(owner_key, limit=limit)
-    except Exception:
-        logger.exception("dashboard runtime block read failed")
-        return []
-    return [
-        DashboardRuntimeBlockView(
-            id=_coerce_string(row.get("id"), default=""),
-            platform=_coerce_string(row.get("platform"), default=""),
-            gate=_coerce_string(row.get("gate"), default=""),
-            reason=_coerce_string(row.get("reason"), default=""),
-            verdict=_coerce_string(row.get("verdict"), default=""),
-            created_at=_coerce_string(row.get("created_at"), default=""),
-        )
-        for row in rows
-    ]
-
-
-@router.get(
-    "/runtime-blocks",
-    response_model=DashboardRuntimeBlocksResponse,
-)
-def get_dashboard_runtime_blocks(
-    owner_key: str | None = Query(default=None),
-    limit: int = Query(default=DASHBOARD_RUNTIME_BLOCK_LIMIT, ge=1, le=500),
-    auth_ctx: AuthContext = Depends(require_customer_read),
-) -> DashboardRuntimeBlocksResponse:
-    resolved_owner = _resolve_dashboard_owner(auth_ctx, owner_key)
-    blocks = _build_runtime_block_views(resolved_owner, limit)
-    return DashboardRuntimeBlocksResponse(
-        owner_key=resolved_owner,
-        total=len(blocks),
-        blocks=blocks,
         timestamp=_utc_now_iso(),
     )

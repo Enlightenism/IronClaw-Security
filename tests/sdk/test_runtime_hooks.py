@@ -132,6 +132,23 @@ def test_emit_return_cursor_is_audit_only(capsys: pytest.CaptureFixture[str]) ->
     assert capsys.readouterr().out == ""
 
 
+def test_emit_pre_cursor_allow_writes_permission_json(capsys: pytest.CaptureFixture[str]) -> None:
+    assert runtime_hooks._emit("cursor", None) == 0
+    assert json.loads(capsys.readouterr().out) == {"continue": True, "permission": "allow"}
+
+
+def test_emit_pre_cursor_deny_writes_permission_json_and_exits_two(capsys: pytest.CaptureFixture[str]) -> None:
+    assert runtime_hooks._emit("cursor", "blocked by policy") == 2
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {
+        "continue": True,
+        "permission": "deny",
+        "user_message": "blocked by policy",
+        "agent_message": "blocked by policy",
+    }
+    assert "blocked by policy" in captured.err
+
+
 def test_emit_return_without_replacement_writes_nothing(capsys: pytest.CaptureFixture[str]) -> None:
     assert runtime_hooks._emit_return("claude_code", None) == 0
     assert capsys.readouterr().out == ""

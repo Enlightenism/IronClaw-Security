@@ -31,7 +31,6 @@ def _make_incident_dict(
     source: str = "runtime",
     affected_surface: str = "agent",
     requires_human_review: bool = True,
-    quarantined_actions: int = 2,
     blocked_actions: int = 1,
     evidence_count: int = 3,
 ) -> dict:
@@ -50,7 +49,6 @@ def _make_incident_dict(
             "team": "soc",
         },
         "requires_human_review": requires_human_review,
-        "quarantined_actions": quarantined_actions,
         "blocked_actions": blocked_actions,
         "evidence_count": evidence_count,
     }
@@ -67,7 +65,6 @@ def _make_triage_dict(
     requires_human_review: bool = True,
     containment_recommended: bool = True,
     blocked_actions: int = 1,
-    quarantined_actions: int = 2,
 ) -> dict:
     return {
         "incident_id": incident_id,
@@ -104,7 +101,6 @@ def _make_triage_dict(
         "requires_human_review": requires_human_review,
         "containment_recommended": containment_recommended,
         "blocked_actions": blocked_actions,
-        "quarantined_actions": quarantined_actions,
     }
 
 
@@ -311,7 +307,6 @@ class TestIncidentRecordToDict:
             updated_at=now,
             owner=IncidentOwner(owner_id="owner-001", display_name="SOC Team", team="soc"),
             requires_human_review=True,
-            quarantined_actions=2,
             blocked_actions=1,
             evidence_count=3,
         )
@@ -329,7 +324,6 @@ class TestIncidentRecordToDict:
             "updated_at",
             "owner",
             "requires_human_review",
-            "quarantined_actions",
             "blocked_actions",
             "evidence_count",
         }
@@ -354,7 +348,6 @@ class TestIncidentRecordToDict:
 
     def test_to_dict_counters_match_record(self):
         d = self.record.to_dict()
-        assert d["quarantined_actions"] == 2
         assert d["blocked_actions"] == 1
         assert d["evidence_count"] == 3
 
@@ -438,27 +431,25 @@ class TestIncidentsOverviewSummary:
         overview = build_incidents_overview(
             {
                 "mean_time_to_contain_minutes": 60,
-                "incidents": [_make_incident_dict(quarantined_actions=2, blocked_actions=1, evidence_count=3)],
+                "incidents": [_make_incident_dict(blocked_actions=1, evidence_count=3)],
             }
         )
         summary = incidents_overview_summary(overview)
         assert "metrics" in summary
         metrics = summary["metrics"]
         assert metrics["mean_time_to_contain_minutes"] == 60
-        assert metrics["total_quarantined_actions"] == 2
         assert metrics["total_blocked_actions"] == 1
         assert metrics["total_evidence"] == 3
 
     def test_summary_aggregates_actions_across_incidents(self):
         data = {
             "incidents": [
-                _make_incident_dict(incident_id="inc-001", quarantined_actions=3, blocked_actions=2, evidence_count=5),
-                _make_incident_dict(incident_id="inc-002", quarantined_actions=1, blocked_actions=0, evidence_count=2),
+                _make_incident_dict(incident_id="inc-001", blocked_actions=2, evidence_count=5),
+                _make_incident_dict(incident_id="inc-002", blocked_actions=0, evidence_count=2),
             ]
         }
         overview = build_incidents_overview(data)
         summary = incidents_overview_summary(overview)
-        assert summary["metrics"]["total_quarantined_actions"] == 4
         assert summary["metrics"]["total_blocked_actions"] == 2
         assert summary["metrics"]["total_evidence"] == 7
 
@@ -476,7 +467,6 @@ class TestIncidentsOverviewSummary:
     def test_summary_empty_overview_has_zero_metrics(self):
         overview = default_incidents_overview()
         summary = incidents_overview_summary(overview)
-        assert summary["metrics"]["total_quarantined_actions"] == 0
         assert summary["metrics"]["total_blocked_actions"] == 0
         assert summary["metrics"]["total_evidence"] == 0
 
@@ -518,7 +508,6 @@ class TestDefaultIncidentTriage:
     def test_default_counters_are_zero(self):
         triage = default_incident_triage()
         assert triage.blocked_actions == 0
-        assert triage.quarantined_actions == 0
 
     def test_generated_at_is_utc_aware(self):
         triage = default_incident_triage()
@@ -588,10 +577,9 @@ class TestBuildIncidentTriage:
         assert triage.containment_recommended is True
 
     def test_counters_never_go_negative(self):
-        data = _make_triage_dict(blocked_actions=-5, quarantined_actions=-3)
+        data = _make_triage_dict(blocked_actions=-5)
         triage = build_incident_triage(data)
         assert triage.blocked_actions >= 0
-        assert triage.quarantined_actions >= 0
 
     def test_ignores_invalid_evidence_entries(self):
         data = _make_triage_dict()
@@ -675,7 +663,6 @@ class TestIncidentTriageToDict:
             "requires_human_review",
             "containment_recommended",
             "blocked_actions",
-            "quarantined_actions",
             "generated_at",
         }
         assert required_keys.issubset(d.keys())
@@ -724,7 +711,6 @@ class TestIncidentTriageToDict:
     def test_to_dict_counters_are_integers(self):
         d = self.triage.to_dict()
         assert isinstance(d["blocked_actions"], int)
-        assert isinstance(d["quarantined_actions"], int)
 
 
 # ---------------------------------------------------------------------------
@@ -770,7 +756,6 @@ class TestIncidentTriageSummary:
         assert "requires_human_review" in signals
         assert "containment_recommended" in signals
         assert "blocked_actions" in signals
-        assert "quarantined_actions" in signals
         assert "evidence_count" in signals
 
     def test_summary_evidence_count_matches_evidence_length(self):
@@ -881,11 +866,6 @@ class TestIncidentCoercionEdgeCases:
         data["requires_human_review"] = 0
         overview = build_incidents_overview({"incidents": [data]})
         assert overview.incidents[0].requires_human_review is False
-
-    def test_negative_quarantined_actions_clamped_to_zero(self):
-        data = _make_incident_dict(quarantined_actions=-5)
-        overview = build_incidents_overview({"incidents": [data]})
-        assert overview.incidents[0].quarantined_actions == 0
 
     def test_negative_blocked_actions_clamped_to_zero(self):
         data = _make_incident_dict(blocked_actions=-99)

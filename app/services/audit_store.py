@@ -10,6 +10,32 @@ from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
+#: Reason codes that describe infrastructure or system failures, not detected attacks.
+SYSTEM_ERROR_REASON_CODES = frozenset(
+    {
+        "broker_unconfigured",
+        "broker_unreachable",
+        "broker_error",
+        "broker_busy",
+        "invalid_response",
+        "invalid_output",
+        "timeout",
+        "docker_unavailable",
+        "scanner_error",
+        "scanner_image_not_ready",
+        "output_too_large",
+        "return_scan_error",
+        "usage_metering_unavailable",
+        "billing_owner_unresolved",
+        "protection_units_unavailable",
+        "install_gate_error",
+        "invalid_request",
+        "action_not_allowed",
+        "network_not_allowed",
+        "read_only_required",
+    }
+)
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -278,6 +304,14 @@ def reset_security_audit_store() -> None:
     _SECURITY_AUDIT_STORE.seed_defaults()
 
 
+def _gate_severity(verdict: str) -> str:
+    if verdict == "allow":
+        return "low"
+    if verdict == "error":
+        return "medium"
+    return "high"
+
+
 def record_gate_audit_event(
     *,
     gate: str,
@@ -290,25 +324,30 @@ def record_gate_audit_event(
     agent_id: str | None = None,
     details: Mapping[str, Any] | None = None,
 ) -> AuditEventRecord | None:
-    """Audit one return or install gate decision, allow or block.
+    """Audit one return or install gate decision: allow, block, or error.
 
+    A block whose reasons are all system failures is recorded as ``error`` so it is never reported as an attack.
     Best-effort and bounded: metadata holds only identifiers and reason codes, never raw agent content.
     """
+    codes = sorted({str(code) for code in reason_codes})
+    resolved_verdict = verdict
+    if verdict != "allow" and codes and all(code in SYSTEM_ERROR_REASON_CODES for code in codes):
+        resolved_verdict = "error"
     try:
         return _SECURITY_AUDIT_STORE.create_event(
             event_type=f"{gate}_gate_decision",
-            severity="low" if verdict == "allow" else "high",
-            summary=f"{gate} gate {verdict} for {platform}",
+            severity=_gate_severity(resolved_verdict),
+            summary=f"{gate} gate {resolved_verdict} for {platform}",
             session_id=session_id,
             integration_id=platform,
-            verdict=verdict,
+            verdict=resolved_verdict,
             metadata={
                 "gate": gate,
                 "platform": platform,
                 "owner_key": owner_key,
                 "decision_id": decision_id,
                 "agent_id": agent_id,
-                "reason_codes": sorted({str(code) for code in reason_codes}),
+                "reason_codes": codes,
                 **dict(details or {}),
             },
         )

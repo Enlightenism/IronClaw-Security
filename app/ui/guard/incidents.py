@@ -155,10 +155,8 @@ def _incident_title_for(
     target: str,
 ) -> str:
     base = f"{action_type} to {target or 'unknown target'}".strip()
-    if decision.verdict == "block":
+    if decision.verdict in ("block", "quarantine"):
         return f"Blocked high-risk {base}"
-    if decision.verdict == "quarantine":
-        return f"Quarantined suspicious {base}"
     if decision.verdict == "warn":
         return f"Warning for risky {base}"
     return f"Observed {base}"

@@ -138,11 +138,13 @@ def test_usage_units_debited_updates_wallet_and_install_key_usage(client: TestCl
     assert wallet.install_key_usage[record.key_id].metadata["action_type"] == "prompt"
 
 
-def test_blocked_event_increments_blocked_attack_totals(client: TestClient) -> None:
+def test_blocked_event_is_recorded_to_audit_without_wallet_change(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     owner_key = "owner_evt_002"
     wallet_registry = get_unit_wallet_registry()
     wallet_registry.credit_units(owner_key, 100, metadata={"seeded": True})
     record = _make_paid_key(owner_key=owner_key, program="claude_code")
+    recorded: list[dict[str, object]] = []
+    monkeypatch.setattr(install_key_events_module, "record_gate_audit_event", lambda **kwargs: recorded.append(kwargs))
 
     response = _post_event(
         client,
@@ -153,7 +155,6 @@ def test_blocked_event_increments_blocked_attack_totals(client: TestClient) -> N
             "key_id": record.key_id,
             "owner_key": owner_key,
             "program": "claude_code",
-            "blocked_attack_count": 2,
             "action_type": "tool_call",
             "metadata": {"source": "guard"},
         },
@@ -163,14 +164,18 @@ def test_blocked_event_increments_blocked_attack_totals(client: TestClient) -> N
     body = response.json()
     assert body["event_type"] == "action_blocked"
     assert body["processed"] is True
+    assert body["wallet_updated"] is False
+
+    assert len(recorded) == 1
+    assert recorded[0]["gate"] == "action"
+    assert recorded[0]["verdict"] == "block"
+    assert recorded[0]["platform"] == "claude_code"
+    assert recorded[0]["owner_key"] == owner_key
+    assert recorded[0]["decision_id"] == f"{record.key_id}:evt_block_001"
 
     wallet = wallet_registry.get_wallet(owner_key)
     assert wallet is not None
-    assert wallet.total_blocked_attacks == 2
-    assert wallet.install_key_usage[record.key_id].total_blocked_attacks == 2
-    assert wallet.install_key_usage[record.key_id].owner_key == owner_key
-    assert wallet.install_key_usage[record.key_id].metadata["owner_key"] == owner_key
-    assert wallet.install_key_usage[record.key_id].metadata["action_type"] == "tool_call"
+    assert wallet.balance_units == 100
 
 
 def test_event_requires_matching_owner_key_for_usage_event(client: TestClient) -> None:
@@ -304,7 +309,6 @@ def test_duplicate_event_id_is_idempotent(client: TestClient) -> None:
         "key_id": record.key_id,
         "owner_key": owner_key,
         "program": "openclaw",
-        "blocked_attack_count": 1,
         "action_type": "prompt",
         "metadata": {"source": "guard"},
     }
@@ -319,7 +323,6 @@ def test_duplicate_event_id_is_idempotent(client: TestClient) -> None:
 
     wallet = wallet_registry.get_wallet(owner_key)
     assert wallet is not None
-    assert wallet.total_blocked_attacks == 1
 
 
 def test_install_key_activation_event_syncs_dashboard_state(client: TestClient) -> None:
@@ -417,7 +420,7 @@ def test_self_status_reports_units_from_live_wallet(client: TestClient) -> None:
     assert slot["key_id"] == record.key_id
     assert slot["units_used"] == 7
     assert slot["units_remaining"] == 93
-    assert slot["blocked_attacks"] == 0
+    assert "blocked_attacks" not in slot
 
 
 def test_self_status_rejects_unknown_install_key(client: TestClient) -> None:

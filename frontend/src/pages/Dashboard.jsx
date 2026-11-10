@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import ContactBubble from "@/components/ContactBubble";
 import ContactModal from "@/components/ContactModal";
 import IntegrationCard from "@/components/dashboard/IntegrationCard";
-import RuntimeBlocksCard from "@/components/dashboard/RuntimeBlocksCard";
 import SecurityAnalysis from "@/components/dashboard/SecurityAnalysis";
 import WalletCard from "@/components/dashboard/WalletCard";
 import { useAuth } from "@/context/AuthContext";
@@ -921,6 +920,7 @@ const Dashboard = () => {
   const walletProps = useMemo(
     () => ({
       balance: data?.wallet_units ?? 0,
+      unitsConsumed: Number(data?.wallet?.units_consumed) || 0,
       walletStatus: data?.wallet_status ?? "unavailable",
       lastPayment: data?.last_payment,
       walletHistory: Array.isArray(data?.wallet_history)
@@ -941,6 +941,7 @@ const Dashboard = () => {
       data?.metadata?.owner_key,
       data?.organization_id,
       data?.wallet_units,
+      data?.wallet?.units_consumed,
       data?.wallet_status,
       data?.wallet_history,
       handleAddPaymentMethod,
@@ -978,21 +979,6 @@ const Dashboard = () => {
       }
     }
     return statuses;
-  }, [data?.install_keys]);
-
-  const installKeyUsageByProgram = useMemo(() => {
-    const usage = {};
-    if (Array.isArray(data?.install_keys)) {
-      for (const key of data.install_keys) {
-        if (typeof key?.program === "string" && key.program) {
-          usage[key.program] = {
-            unitsUsed: Number(key.units_consumed) || 0,
-            blockedAttacks: Number(key.blocked_attacks) || 0,
-          };
-        }
-      }
-    }
-    return usage;
   }, [data?.install_keys]);
 
   const integrationCards = useMemo(() => {
@@ -1035,12 +1021,6 @@ const Dashboard = () => {
         integrationId,
         agentId,
         available,
-        availabilityReason:
-          tokens?.status === "locked"
-            ? "A confirmed, non-refunded package purchase is required before this platform can generate an install command."
-            : tokens?.status !== "ok"
-              ? "Install-key status could not be verified. Refresh the dashboard; contact support if your payment is complete."
-              : "This platform's paid install key is not available yet. Refresh wallet sync; contact support if your payment is complete.",
         revoked,
         revokedReason: slotStatus === "refunded" ? "refunded" : "revoked",
         savedCommand:
@@ -1049,20 +1029,12 @@ const Dashboard = () => {
             : "",
         savedCommandClaimed:
           !revoked && metadata?.saved_command_claimed === true,
-        unitsUsed: installKeyUsageByProgram[program]?.unitsUsed ?? 0,
-        blockedAttacks: installKeyUsageByProgram[program]?.blockedAttacks ?? 0,
         onCreateClaim: createInstallClaim,
         tint,
         testid: toCardTestId(program),
       };
     });
-  }, [
-    createInstallClaim,
-    installKeyStatusByProgram,
-    installKeyUsageByProgram,
-    tokens?.install_metadata,
-    tokens?.status,
-  ]);
+  }, [createInstallClaim, installKeyStatusByProgram, tokens?.install_metadata]);
 
   const attackFeedItems = securityProps.attacks;
   const blockedActivityTotal = Number.isSafeInteger(
@@ -1204,7 +1176,6 @@ const Dashboard = () => {
               attacks={attackFeedItems}
               blockedActivityTotal={blockedActivityTotal}
             />
-            <RuntimeBlocksCard />
           </div>
 
           <div className="space-y-3 order-2 lg:order-1">
@@ -1218,13 +1189,10 @@ const Dashboard = () => {
                   agentId={card.agentId}
                   available={card.available}
                   revoked={card.revoked}
-                  availabilityReason={card.availabilityReason}
                   revokedReason={card.revokedReason}
                   onCreateClaim={card.onCreateClaim}
                   savedCommand={card.savedCommand}
                   savedCommandClaimed={card.savedCommandClaimed}
-                  unitsUsed={card.unitsUsed}
-                  blockedAttacks={card.blockedAttacks}
                   tint={card.tint}
                   testid={card.testid}
                 />

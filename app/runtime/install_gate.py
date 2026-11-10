@@ -12,8 +12,6 @@ from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.runtime.return_scanner import ALLOW_VERDICT, BLOCK_VERDICT
 from app.schemas.telemetry import TelemetryEventType
 from app.services.audit_store import record_gate_audit_event
-from app.services.block_store import GATE_INSTALL, record_block
-from app.services.incident_store import record_gate_block_incident
 from app.services.install_allowlist import find_pinned_install_block, fingerprint_install_block
 from app.services.telemetry import append_telemetry_event
 from app.services.third_party_install_scanner import download_pipe_body, scan_third_party_install
@@ -157,7 +155,7 @@ def _record_decision(
     except Exception:
         logger.exception("install gate telemetry write failed")
     record_gate_audit_event(
-        gate=GATE_INSTALL,
+        gate="install",
         verdict=decision.verdict,
         platform=platform,
         reason_codes=decision.reasons,
@@ -187,9 +185,6 @@ def evaluate_install_command(
         logger.exception("install gate evaluation failed; blocking")
         decision = _deny(FAMILY_UNKNOWN, None, "install_gate_error")
     _record_decision(decision, platform=platform, agent_id=agent_id, client_id=client_id, owner_key=owner_key)
-    if not decision.allowed:
-        record_block(gate=GATE_INSTALL, platform=platform, reason_codes=decision.reasons, owner_key=owner_key)
-        record_gate_block_incident(gate=GATE_INSTALL, platform=platform, reason_codes=decision.reasons, owner_key=owner_key)
     return decision
 
 

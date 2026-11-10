@@ -45,7 +45,7 @@ def _tone_for_status(status: str) -> str:
         return "good"
     if normalized in {"review", "pending"}:
         return "warning"
-    if normalized in {"quarantined", "denied", "blocked", "failed"}:
+    if normalized in {"denied", "blocked", "quarantined", "failed"}:
         return "critical"
     return "neutral"
 
@@ -121,7 +121,6 @@ class ActionHistoryView:
     total: int
     allowed_count: int
     review_count: int
-    quarantined_count: int
     denied_count: int
     items: list[ActionHistoryItem] = field(default_factory=list)
     kpis: list[ActionHistoryKpi] = field(default_factory=list)
@@ -163,7 +162,6 @@ def build_action_history_view(
 
     allowed_count = 0
     review_count = 0
-    quarantined_count = 0
     denied_count = 0
 
     for index, record in enumerate(normalized_actions, start=1):
@@ -177,8 +175,6 @@ def build_action_history_view(
             allowed_count += 1
         elif normalized_status == "review":
             review_count += 1
-        elif normalized_status == "quarantined":
-            quarantined_count += 1
         elif normalized_status == "denied":
             denied_count += 1
 
@@ -240,7 +236,6 @@ def build_action_history_view(
         ActionHistoryKpi(label="Total Actions", value=str(total), tone="neutral"),
         ActionHistoryKpi(label="Allowed", value=str(allowed_count), tone="good"),
         ActionHistoryKpi(label="Review", value=str(review_count), tone="warning"),
-        ActionHistoryKpi(label="Quarantined", value=str(quarantined_count), tone="critical"),
         ActionHistoryKpi(label="Denied", value=str(denied_count), tone="critical"),
     ]
 
@@ -249,7 +244,6 @@ def build_action_history_view(
         total=total,
         allowed_count=allowed_count,
         review_count=review_count,
-        quarantined_count=quarantined_count,
         denied_count=denied_count,
         items=items,
         kpis=kpis,

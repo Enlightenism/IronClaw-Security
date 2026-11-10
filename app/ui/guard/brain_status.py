@@ -54,7 +54,6 @@ class GuardBrainStatusItem:
     last_decided_at: str
     total_evaluations: int
     blocked_count: int
-    quarantined_count: int
     warned_count: int
     allowed_count: int
     recent_signals: list[str] = field(default_factory=list)
@@ -69,7 +68,6 @@ class GuardBrainStatusItem:
             "last_decided_at": self.last_decided_at,
             "total_evaluations": self.total_evaluations,
             "blocked_count": self.blocked_count,
-            "quarantined_count": self.quarantined_count,
             "warned_count": self.warned_count,
             "allowed_count": self.allowed_count,
             "recent_signals": list(self.recent_signals),
@@ -101,7 +99,6 @@ class GuardBrainStatusItemView(BaseModel):
     last_decided_at: str
     total_evaluations: int
     blocked_count: int
-    quarantined_count: int
     warned_count: int
     allowed_count: int
     recent_signals: list[str] = Field(default_factory=list)
@@ -147,7 +144,6 @@ def _aggregate_decisions(
 ) -> GuardBrainStatusItem:
     total = len(decisions)
     blocked = sum(1 for d in decisions if d.verdict == "block")
-    quarantined = 0
     warned = 0
     allowed = sum(1 for d in decisions if d.verdict == "allow")
 
@@ -186,7 +182,6 @@ def _aggregate_decisions(
         last_decided_at=last_decided_at,
         total_evaluations=total,
         blocked_count=blocked,
-        quarantined_count=quarantined,
         warned_count=warned,
         allowed_count=allowed,
         recent_signals=recent_signals,

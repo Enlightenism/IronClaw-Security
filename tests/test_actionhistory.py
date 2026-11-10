@@ -68,12 +68,11 @@ def test_build_action_history_view_counts_statuses_and_builds_kpis() -> None:
     assert view.total == 4
     assert view.allowed_count == 1
     assert view.review_count == 1
-    assert view.quarantined_count == 1
     assert view.denied_count == 1
     assert view.metadata["requested_by"] == "tester"
     assert view.filters["ownerkey"] == "owner-601"
     assert view.filters["status"] == "allowed"
-    assert len(view.kpis) == 5
+    assert len(view.kpis) == 4
     assert any(kpi.label == "Allowed" and kpi.value == "1" for kpi in view.kpis)
 
 

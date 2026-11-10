@@ -156,7 +156,6 @@ class InstallKeyDashboardSyncService:
             "owner_key": str(usage_entry.get("owner_key") or "").strip().lower(),
             "program": program,
             "total_consumed_units": int(usage_entry.get("total_consumed_units") or usage_entry.get("units_consumed") or 0),
-            "total_blocked_attacks": int(usage_entry.get("total_blocked_attacks") or usage_entry.get("blocked_attack_count") or 0),
             "units_used_today": units_used_today,
             "units_used_this_week": units_used_this_week,
             "usage_by_day": normalized_usage_by_day,
@@ -165,7 +164,7 @@ class InstallKeyDashboardSyncService:
 
     def _normalize_attack_event(self, event: Any) -> dict[str, Any] | None:
         verdict = str(self._row_value(event, "verdict") or "").strip().lower()
-        if verdict not in {"block", "quarantine"}:
+        if verdict != "block":
             return None
 
         event_id = str(self._row_value(event, "event_id") or self._row_value(event, "id") or "").strip()
@@ -273,16 +272,6 @@ class InstallKeyDashboardSyncService:
                 }
             )
 
-        total_blocked_attacks = 0
-        if isinstance(wallet_payload.get("install_key_usage"), dict):
-            for usage_entry in wallet_payload["install_key_usage"].values():
-                if not isinstance(usage_entry, dict):
-                    continue
-                if usage_entry.get("owner_key") and str(usage_entry.get("owner_key")).strip().lower() != normalized_owner:
-                    continue
-                total_blocked_attacks += int(usage_entry.get("total_blocked_attacks") or usage_entry.get("blocked_attack_count") or 0)
-        total_blocked_attacks = max(total_blocked_attacks, int(wallet_payload.get("total_blocked_attacks") or 0))
-
         wallet_total_units = int(wallet_payload.get("balance_units") or wallet_payload.get("wallet_total_units") or 0)
         if units_today:
             usage_by_day[today_key] = max(usage_by_day.get(today_key, 0), units_today)
@@ -302,7 +291,7 @@ class InstallKeyDashboardSyncService:
         return {
             "owner_key": normalized_owner,
             "wallet_total_units": wallet_total_units,
-            "blocked_activity_total": total_blocked_attacks,
+            "blocked_activity_total": len(attacks),
             "units_today": units_today,
             "units_week": units_week,
             "daily_usage": daily_usage,

@@ -17,7 +17,6 @@ from app.runtime.return_gate import (
 from app.runtime.return_scanner import ReturnScanResult
 from app.schemas.telemetry import TelemetryEventType
 from app.services.audit_store import get_security_audit_store
-from app.services.incident_store import get_incident_store
 from app.services.sandbox_broker_client import SandboxBrokerClient
 
 _ALLOW_BROKER = {"verdict": "allow", "status": "completed", "executor": "docker"}
@@ -129,13 +128,11 @@ def _run(broker: Any) -> return_gate.ReturnGateDecision:
     return run_return_gate(platform="claude_code", payload={"stdout": "ok"}, content="hello", broker_client=broker)
 
 
-def _gate_records(owner_key: str) -> tuple[list[Any], list[Any]]:
-    events = [event for event in get_security_audit_store().list_events(limit=10000, include_seeded=False) if event.metadata.get("owner_key") == owner_key]
-    incidents = [incident for incident in get_incident_store().list_incidents(limit=10000, include_seeded=False) if incident.metadata.get("owner_key") == owner_key]
-    return events, incidents
+def _gate_records(owner_key: str) -> list[Any]:
+    return [event for event in get_security_audit_store().list_events(limit=10000, include_seeded=False) if event.metadata.get("owner_key") == owner_key]
 
 
-def test_block_is_audited_and_recorded_as_incident(monkeypatch: pytest.MonkeyPatch, telemetry: list[tuple[Any, Any]]) -> None:
+def test_block_is_audited_without_incident(monkeypatch: pytest.MonkeyPatch, telemetry: list[tuple[Any, Any]]) -> None:
     _block_scan(monkeypatch)
     owner_key = "owner-return-gate-block"
 
@@ -147,7 +144,7 @@ def test_block_is_audited_and_recorded_as_incident(monkeypatch: pytest.MonkeyPat
         owner_key=owner_key,
     )
 
-    events, incidents = _gate_records(owner_key)
+    events = _gate_records(owner_key)
     assert len(events) == 1
     assert events[0].event_type == "return_gate_decision"
     assert events[0].verdict == "block"
@@ -155,9 +152,6 @@ def test_block_is_audited_and_recorded_as_incident(monkeypatch: pytest.MonkeyPat
     assert events[0].metadata["decision_id"] == decision.sandbox_id
     assert events[0].metadata["reason_codes"] == ["text_classifier"]
     assert "secret" not in str(events[0].metadata)
-    assert len(incidents) == 1
-    assert incidents[0].category == "runtime_block"
-    assert incidents[0].metadata["gate"] == "return"
 
 
 def test_allow_is_audited_without_incident(monkeypatch: pytest.MonkeyPatch, telemetry: list[tuple[Any, Any]]) -> None:
@@ -166,11 +160,10 @@ def test_allow_is_audited_without_incident(monkeypatch: pytest.MonkeyPatch, tele
 
     run_return_gate(platform="claude_code", payload={"stdout": "ok"}, content="hello", broker_client=_FakeBroker(_ALLOW_BROKER), owner_key=owner_key)
 
-    events, incidents = _gate_records(owner_key)
+    events = _gate_records(owner_key)
     assert len(events) == 1
     assert events[0].verdict == "allow"
     assert events[0].severity == "low"
-    assert incidents == []
 
 
 def test_allow_when_in_process_and_sandbox_both_allow(monkeypatch: pytest.MonkeyPatch, telemetry: list[tuple[Any, Any]]) -> None:

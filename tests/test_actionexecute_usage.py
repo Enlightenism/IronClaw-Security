@@ -9,6 +9,7 @@ from app.api import actionexecute as actionexecute_module
 from app.api.actionexecute import router
 from app.core.auth import AuthContext, InstallKeyAuthContext, get_runtime_auth_context
 from app.core.unit_wallet import get_unit_wallet_registry
+from app.services import audit_store as audit_store_module
 from app.services.actionexecuteservice import ActionExecuteService
 from app.services.usagemetering import UsageMeteringService
 
@@ -145,7 +146,7 @@ def test_executeaction_review_request_skips_usage_consumption() -> None:
 
 
 def test_executeaction_reports_blocked_install_key_event(monkeypatch) -> None:
-    event_ingest = Mock()
+    record_audit = Mock()
     install_auth = InstallKeyAuthContext(
         key_id="key_runtime_blocked_001",
         owner_key="owner-runtime-blocked-001",
@@ -156,7 +157,7 @@ def test_executeaction_reports_blocked_install_key_event(monkeypatch) -> None:
         get_runtime_auth_context,
         lambda: install_auth,
     )
-    monkeypatch.setattr(actionexecute_module, "ingest_install_key_event", event_ingest)
+    monkeypatch.setattr(actionexecute_module, "record_gate_audit_event", record_audit)
 
     response = client.post(
         "/action/execute",
@@ -175,15 +176,15 @@ def test_executeaction_reports_blocked_install_key_event(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["executionallowed"] is False
-    event_ingest.assert_called_once()
-    event = event_ingest.call_args.kwargs["payload"]
-    assert event.event_id == "event-blocked-001"
-    assert event.event_type == "prompt_injection_detected"
-    assert event.key_id == install_auth.key_id
-    assert event.owner_key == install_auth.owner_key
-    assert event.program == install_auth.program
-    assert event.blocked_attack_count == 1
-    assert event.metadata["session_id"] == "session-blocked-001"
+    record_audit.assert_called_once()
+    kwargs = record_audit.call_args.kwargs
+    assert kwargs["gate"] == "action"
+    assert kwargs["verdict"] == "block"
+    assert kwargs["platform"] == install_auth.program
+    assert kwargs["reason_codes"] == ["prompt_injection_detected"]
+    assert kwargs["owner_key"] == install_auth.owner_key
+    assert kwargs["decision_id"] == "event-blocked-001"
+    assert kwargs["session_id"] == "session-blocked-001"
 
 
 def test_executeaction_still_denies_when_blocked_telemetry_fails(monkeypatch) -> None:
@@ -197,8 +198,9 @@ def test_executeaction_still_denies_when_blocked_telemetry_fails(monkeypatch) ->
         get_runtime_auth_context,
         lambda: install_auth,
     )
-    event_ingest = Mock(side_effect=RuntimeError("telemetry store unavailable"))
-    monkeypatch.setattr(actionexecute_module, "ingest_install_key_event", event_ingest)
+    failing_store = Mock()
+    failing_store.create_event.side_effect = RuntimeError("telemetry store unavailable")
+    monkeypatch.setattr(audit_store_module, "_SECURITY_AUDIT_STORE", failing_store)
 
     response = client.post(
         "/action/execute",
@@ -218,7 +220,7 @@ def test_executeaction_still_denies_when_blocked_telemetry_fails(monkeypatch) ->
     body = response.json()
     assert body["executionallowed"] is False
     assert body["status"] != "allowed"
-    event_ingest.assert_called_once()
+    failing_store.create_event.assert_called_once()
 
 
 def test_executeaction_high_risk_review_skips_usage_consumption() -> None:

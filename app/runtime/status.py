@@ -88,7 +88,6 @@ class RuntimeStatus:
     review_queue_available: bool = True
     active_sessions: int = 0
     queued_reviews: int = 0
-    quarantined_items: int = 0
     open_incidents: int = 0
     uptime_seconds: int = 0
     started_at: datetime = field(default_factory=_utc_now)
@@ -110,7 +109,6 @@ class RuntimeStatus:
             "review_queue_available": self.review_queue_available,
             "active_sessions": self.active_sessions,
             "queued_reviews": self.queued_reviews,
-            "quarantined_items": self.quarantined_items,
             "open_incidents": self.open_incidents,
             "uptime_seconds": self.uptime_seconds,
             "started_at": _isoformat(self.started_at),
@@ -156,7 +154,6 @@ def build_runtime_status(
         review_queue_available=_coerce_bool(source.get("review_queue_available"), current.review_queue_available),
         active_sessions=max(0, _coerce_int(source.get("active_sessions"), current.active_sessions)),
         queued_reviews=max(0, _coerce_int(source.get("queued_reviews"), current.queued_reviews)),
-        quarantined_items=max(0, _coerce_int(source.get("quarantined_items"), current.quarantined_items)),
         open_incidents=max(0, open_incidents),
         uptime_seconds=max(0, _coerce_int(source.get("uptime_seconds"), current.uptime_seconds)),
         started_at=started_at,
@@ -194,7 +191,6 @@ def runtime_status_summary(status: RuntimeStatus) -> dict[str, Any]:
         "load": {
             "active_sessions": status.active_sessions,
             "queued_reviews": status.queued_reviews,
-            "quarantined_items": status.quarantined_items,
             "open_incidents": status.open_incidents,
         },
         "timing": {

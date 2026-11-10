@@ -92,7 +92,6 @@ def _dashboard_payload(**overrides: Any) -> dict[str, Any]:
         "total_keys": 2,
         "active_keys": 1,
         "total_units_consumed": 25,
-        "total_blocked_attacks": 4,
         "wallet_balance_units": 75,
         "last_used_at": _NOW,
         "keys": [
@@ -315,7 +314,6 @@ def test_install_key_dashboard_summary_valid():
     assert summary.total_keys == 2
     assert summary.active_keys == 1
     assert summary.total_units_consumed == 25
-    assert summary.total_blocked_attacks == 4
     assert summary.wallet_balance_units == 75
     assert summary.by_program == {"openclaw": 1, "claude_code": 1}
     assert len(summary.keys) == 2

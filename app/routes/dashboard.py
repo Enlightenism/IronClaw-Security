@@ -69,7 +69,6 @@ class InstallKeyDashboardSlot(BaseModel):
     active: bool = False
     remaining_units: int = 0
     units_consumed: int = 0
-    total_blocked_attacks: int = 0
     usage_by_action: dict[str, int] = Field(default_factory=dict)
     payment_status: str = "unpaid"
     entitlements_status: str = "not_active"
@@ -307,7 +306,6 @@ def _build_install_key_slots(
         units_consumed = int(getattr(rec, "units_consumed", 0) or payload.get("total_consumed_units", 0))
         if payload.get("total_consumed_units") is not None:
             units_consumed = int(payload["total_consumed_units"])
-        blocked_attacks = int(payload.get("total_blocked_attacks", 0) or 0)
 
         revoked_at = getattr(rec, "revoked_at", None)
         if revoked_at is not None and (isinstance(revoked_at, datetime) or (isinstance(revoked_at, str) and revoked_at.strip())):
@@ -345,7 +343,6 @@ def _build_install_key_slots(
             active=bool(getattr(rec, "active", False)) and _record_is_paid_entitled(rec),
             remaining_units=remaining_units,
             units_consumed=units_consumed,
-            total_blocked_attacks=blocked_attacks,
             usage_by_action=usage_by_action,
             payment_status=_norm_status(getattr(rec, "payment_status", "unpaid"), default="unpaid"),
             entitlements_status=_norm_status(getattr(rec, "entitlements_status", "not_active"), default="not_active"),
@@ -368,7 +365,6 @@ def _build_install_key_slots(
                 active=False,
                 remaining_units=0,
                 units_consumed=0,
-                total_blocked_attacks=0,
                 usage_by_action={},
                 payment_status="unpaid",
                 entitlements_status="not_active",

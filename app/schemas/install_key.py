@@ -284,7 +284,7 @@ class InstallKeyDashboardSummary(_InstallKeySchemaBase):
     """Canonical dashboard summary for a single owner / wallet scope.
 
     This schema is intentionally aggregate-friendly: it allows the UI and API
-    layer to show active keys, usage totals, attack totals, program counts, and the concrete
+    layer to show active keys, usage totals, program counts, and the concrete
     key records without duplicating logic across the billing, wallet, and
     install-key services.
     """
@@ -294,7 +294,6 @@ class InstallKeyDashboardSummary(_InstallKeySchemaBase):
     total_keys: int = Field(default=0, ge=0, description="Total install key records for this owner.")
     active_keys: int = Field(default=0, ge=0, description="Number of active install keys.")
     total_units_consumed: int = Field(default=0, ge=0, description="Total units consumed across all keys.")
-    total_blocked_attacks: int = Field(default=0, ge=0, description="Total blocked attacks seen across key usage for this owner.")
     wallet_balance_units: int = Field(default=0, ge=0, description="Current balance in the owner's wallet.")
     last_used_at: str | None = Field(default=None, description="Most recent install-key usage timestamp across all keys.")
     keys: list[InstallKeyRecord] = Field(default_factory=list, description="Install keys for this owner, including inactive/revoked rows.")

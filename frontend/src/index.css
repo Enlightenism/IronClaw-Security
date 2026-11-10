@@ -275,14 +275,14 @@ svg {
     transition: opacity 900ms ease;
 }
 .wallet-face-front::after {
-    background: linear-gradient(90deg, rgba(40, 20, 6, 0) 0%, rgba(40, 20, 6, 0) 60%, rgba(40, 20, 6, 0.35) 100%);
+    background: linear-gradient(90deg, rgba(2, 6, 18, 0) 0%, rgba(2, 6, 18, 0) 60%, rgba(2, 6, 18, 0.45) 100%);
     opacity: 0;
 }
 .wallet-flip-inner.is-flipped .wallet-face-front::after {
     opacity: 1;
 }
 .wallet-face-back::after {
-    background: linear-gradient(90deg, rgba(40, 20, 6, 0.45) 0%, rgba(40, 20, 6, 0) 40%);
+    background: linear-gradient(90deg, rgba(2, 6, 18, 0.55) 0%, rgba(2, 6, 18, 0) 40%);
     opacity: 1;
 }
 .wallet-flip-inner.is-flipped .wallet-face-back::after {
@@ -293,11 +293,11 @@ svg {
 .wallet-body,
 .wallet-leather,
 .wallet-deck-page {
-    background-color: #b5804d;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='360' height='360' viewBox='0 0 360 360' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cg stroke='rgb(255,238,210)' stroke-opacity='0.42' stroke-width='1'%3E%3Cpath d='M38 52 L61 66 L70 94 L99 103 L118 131'/%3E%3Cpath d='M250 24 L232 58 L244 81 L226 118'/%3E%3Cpath d='M160 210 L184 228 L207 221 L231 252 L262 262 L286 300'/%3E%3Cpath d='M318 150 L301 170 L309 196'/%3E%3Cpath d='M92 262 L112 285 L104 318 L128 340'/%3E%3C/g%3E%3Cg stroke='rgb(78,44,16)' stroke-opacity='0.34' stroke-width='1'%3E%3Cpath d='M39 54 L62 68 L71 96 L100 105 L119 133'/%3E%3Cpath d='M251 26 L233 60 L245 83 L227 120'/%3E%3Cpath d='M161 212 L185 230 L208 223 L232 254 L263 264 L287 302'/%3E%3C/g%3E%3C/svg%3E"),
-        radial-gradient(rgba(255, 236, 205, 0.12) 1px, transparent 1.4px),
-        radial-gradient(rgba(70, 38, 14, 0.14) 1px, transparent 1.4px),
-        linear-gradient(160deg, #c99762 0%, #b5804d 45%, #9c6a3c 100%);
+    background-color: #14213d;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='360' height='360' viewBox='0 0 360 360' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cg stroke='rgb(170,196,236)' stroke-opacity='0.4' stroke-width='1'%3E%3Cpath d='M38 52 L61 66 L70 94 L99 103 L118 131'/%3E%3Cpath d='M250 24 L232 58 L244 81 L226 118'/%3E%3Cpath d='M160 210 L184 228 L207 221 L231 252 L262 262 L286 300'/%3E%3Cpath d='M318 150 L301 170 L309 196'/%3E%3Cpath d='M92 262 L112 285 L104 318 L128 340'/%3E%3C/g%3E%3Cg stroke='rgb(3,7,18)' stroke-opacity='0.45' stroke-width='1'%3E%3Cpath d='M39 54 L62 68 L71 96 L100 105 L119 133'/%3E%3Cpath d='M251 26 L233 60 L245 83 L227 120'/%3E%3Cpath d='M161 212 L185 230 L208 223 L232 254 L263 264 L287 302'/%3E%3C/g%3E%3C/svg%3E"),
+        radial-gradient(rgba(170, 196, 236, 0.1) 1px, transparent 1.4px),
+        radial-gradient(rgba(3, 7, 20, 0.4) 1px, transparent 1.4px),
+        linear-gradient(160deg, #24386a 0%, #14213d 48%, #0a1329 100%);
     background-size: 360px 360px, 5px 5px, 7px 7px, 100% 100%;
     background-position: 0 0, 0 0, 2px 3px, 0 0;
 }
@@ -307,65 +307,79 @@ svg {
     position: relative;
     border-radius: 1.25rem;
     padding: 1.25rem;
-    border: 1px solid rgba(92, 52, 22, 0.6);
-    box-shadow: inset 0 1px 0 rgba(255, 240, 220, 0.35),
-        inset 0 -2px 0 rgba(70, 38, 14, 0.3),
-        0 1px 0 #7a4a24,
-        0 2px 0 #6b3f1f,
-        0 3px 0 #5a3418,
-        0 4px 0 #4a2a12,
-        0 28px 44px rgba(20, 10, 0, 0.5);
+    border: 1px solid rgba(2, 6, 18, 0.85);
+    box-shadow: inset 0 1px 0 rgba(170, 196, 236, 0.3),
+        inset 0 -2px 0 rgba(2, 6, 18, 0.45),
+        0 1px 0 #1d2f52,
+        0 2px 0 #182846,
+        0 3px 0 #122039,
+        0 4px 0 #0c1729,
+        0 5px 0 #080f1f,
+        0 6px 0 #05091a,
+        0 34px 48px rgba(2, 6, 18, 0.65);
+}
+.wallet-body::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    padding: 3px;
+    border-radius: inherit;
+    background: linear-gradient(160deg, rgba(200, 220, 255, 0.5) 0%, rgba(40, 60, 110, 0.15) 30%, rgba(2, 6, 18, 0) 60%, rgba(2, 6, 18, 0.8) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+    pointer-events: none;
 }
 .wallet-body::before {
     content: "";
     position: absolute;
     inset: 0.5rem;
-    border: 1px dashed rgba(92, 52, 22, 0.5);
+    border: 1px dashed rgba(170, 196, 236, 0.3);
     border-radius: 1rem;
     pointer-events: none;
 }
 .wallet-leather {
-    border: 1px solid rgba(92, 52, 22, 0.5);
-    box-shadow: inset 0 1px 0 rgba(255, 240, 220, 0.35),
-        inset 0 -1px 0 rgba(70, 38, 14, 0.35),
-        0 10px 22px rgba(20, 10, 0, 0.35);
+    border: 1px solid rgba(2, 6, 18, 0.8);
+    box-shadow: inset 0 1px 0 rgba(170, 196, 236, 0.3),
+        inset 0 -1px 0 rgba(2, 6, 18, 0.5),
+        0 10px 22px rgba(2, 6, 18, 0.5);
 }
 .wallet-seam {
     height: 0;
     margin: 1rem 0.75rem;
-    border-top: 2px dashed rgba(92, 52, 22, 0.55);
-    box-shadow: 0 1px 0 rgba(255, 240, 220, 0.3);
+    border-top: 2px dashed rgba(170, 196, 236, 0.35);
+    box-shadow: 0 1px 0 rgba(2, 6, 18, 0.5);
 }
-/* ink colours for light leather; overrides the dark-theme text utilities inside the wallet */
+/* navy leather: white body text and gold accents; semantic red/green lifted for contrast on navy */
 .wallet-leather [class*="text-[#BFC1C2]"],
 .wallet-deck-page [class*="text-[#BFC1C2]"] {
-    color: #3a2312;
+    color: #f1f5fb;
 }
 .wallet-leather [class*="text-[#737373]"],
 .wallet-deck-page [class*="text-[#737373]"] {
-    color: #5c3b20;
+    color: #d5deec;
 }
 .wallet-leather [class*="text-[#E5E4E2]"],
 .wallet-deck-page [class*="text-[#E5E4E2]"] {
-    color: #2b1607;
+    color: #ffffff;
 }
 .wallet-leather [class*="text-[#FFD700]"],
 .wallet-deck-page [class*="text-[#FFD700]"] {
-    color: #5a3207;
+    color: #f5c542;
 }
 .wallet-leather [class*="text-[#FDE68A]"],
 .wallet-deck-page [class*="text-[#FDE68A]"] {
-    color: #6b4305;
+    color: #fcd34d;
 }
 .wallet-leather [class*="text-[#FCA5A5]"],
 .wallet-deck-page [class*="text-[#FCA5A5]"],
 .wallet-leather [class*="text-[#EF4444]"],
 .wallet-deck-page [class*="text-[#EF4444]"] {
-    color: #7f1d1d;
+    color: #fca5a5;
 }
 .wallet-leather [class*="text-[#22C55E]"],
 .wallet-deck-page [class*="text-[#22C55E]"] {
-    color: #14532d;
+    color: #4ade80;
 }
 
 /* package deck: pages share one grid cell; state is driven by data-deck-state; passed pages turn over the left spine like a wallet flap */
@@ -376,7 +390,7 @@ svg {
     grid-area: 1 / 1;
     position: relative;
     border-radius: 0.75rem;
-    border: 1px solid rgba(92, 52, 22, 0.5);
+    border: 1px solid rgba(2, 6, 18, 0.8);
     transform-origin: left center;
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
@@ -390,19 +404,19 @@ svg {
     inset: 0;
     border-radius: inherit;
     pointer-events: none;
-    background: linear-gradient(90deg, rgba(40, 20, 6, 0.4) 0%, rgba(40, 20, 6, 0) 55%);
+    background: linear-gradient(90deg, rgba(2, 6, 18, 0.5) 0%, rgba(2, 6, 18, 0) 55%);
     opacity: 0;
     transition: opacity 500ms ease;
 }
 .wallet-deck-page[data-deck-state="top"] {
     transform: translate3d(0, 0, 0);
     opacity: 1;
-    box-shadow: inset 0 1px 0 rgba(255, 240, 220, 0.35), 0 14px 28px rgba(20, 10, 0, 0.45);
+    box-shadow: inset 0 1px 0 rgba(170, 196, 236, 0.3), 0 14px 28px rgba(2, 6, 18, 0.6);
 }
 .wallet-deck-page[data-deck-state="stacked"] {
     transform: translate3d(calc(var(--deck-depth) * 0.6rem), calc(var(--deck-depth) * 0.45rem), 0);
     opacity: 1;
-    box-shadow: 0 6px 12px rgba(20, 10, 0, 0.35);
+    box-shadow: 0 6px 12px rgba(2, 6, 18, 0.5);
 }
 .wallet-deck-page[data-deck-state="stacked"]::after {
     opacity: 1;

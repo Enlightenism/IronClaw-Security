@@ -99,7 +99,6 @@ def _fetch_usage_summary(rows: list[dict[str, Any]], period: str, limit: int) ->
     total_requests = len(rows)
     total_blocked = sum(1 for r in rows if (r.get("verdict") or "").lower() == "block")
     total_warned = sum(1 for r in rows if (r.get("verdict") or "").lower() == "warn")
-    total_quarantined = sum(1 for r in rows if (r.get("verdict") or "").lower() == "quarantine")
     total_allowed = sum(1 for r in rows if (r.get("verdict") or "").lower() == "allow")
     total_units = sum(int(r.get("units_used") or 0) for r in rows)
     unique_clients = len({r.get("user_id") for r in rows if r.get("user_id")})
@@ -116,7 +115,6 @@ def _fetch_usage_summary(rows: list[dict[str, Any]], period: str, limit: int) ->
         total_scans=total_requests,
         total_blocked=total_blocked,
         total_warned=total_warned,
-        total_quarantined=total_quarantined,
         total_allowed=total_allowed,
         unique_clients=unique_clients,
         unique_sessions=unique_sessions,
@@ -197,7 +195,6 @@ def _build_empty_summaries(period: str, limit: int) -> UsageSummaryListView:
             total_scans=0,
             total_blocked=0,
             total_warned=0,
-            total_quarantined=0,
             total_allowed=0,
             unique_clients=0,
             unique_sessions=0,
@@ -257,7 +254,6 @@ class UsageSummaryItemView(BaseModel):
     total_scans: int
     total_blocked: int
     total_warned: int
-    total_quarantined: int
     total_allowed: int
     unique_clients: int
     unique_sessions: int

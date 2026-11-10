@@ -124,7 +124,6 @@ class IncidentTriage:
     requires_human_review: bool = False
     containment_recommended: bool = False
     blocked_actions: int = 0
-    quarantined_actions: int = 0
     generated_at: datetime = field(default_factory=_utc_now)
 
     def to_dict(self) -> dict[str, Any]:
@@ -143,7 +142,6 @@ class IncidentTriage:
             "requires_human_review": self.requires_human_review,
             "containment_recommended": self.containment_recommended,
             "blocked_actions": self.blocked_actions,
-            "quarantined_actions": self.quarantined_actions,
             "generated_at": _isoformat(self.generated_at),
         }
 
@@ -238,7 +236,6 @@ def build_incident_triage(
         requires_human_review=_coerce_bool(source.get("requires_human_review"), current.requires_human_review),
         containment_recommended=_coerce_bool(source.get("containment_recommended"), current.containment_recommended),
         blocked_actions=max(0, _coerce_int(source.get("blocked_actions"), current.blocked_actions)),
-        quarantined_actions=max(0, _coerce_int(source.get("quarantined_actions"), current.quarantined_actions)),
         generated_at=_coerce_datetime(source.get("generated_at"), _utc_now()) or _utc_now(),
     )
 
@@ -262,7 +259,6 @@ def incident_triage_summary(triage: IncidentTriage) -> dict[str, Any]:
             "requires_human_review": triage.requires_human_review,
             "containment_recommended": triage.containment_recommended,
             "blocked_actions": triage.blocked_actions,
-            "quarantined_actions": triage.quarantined_actions,
             "evidence_count": len(triage.evidence),
         },
         "evidence": [item.to_dict() for item in triage.evidence],

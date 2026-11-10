@@ -8,24 +8,19 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.audit import createauditevent
-from app.api.routes.install_key_events import (
-    InstallKeyEventRequest,
-    ingest_install_key_event,
-)
 from app.config import (
     RISK_THRESHOLD_ALLOW_MAX,
     RISK_THRESHOLD_BLOCK_MIN,
     RISK_THRESHOLD_QUARANTINE_MIN,
 )
 from app.core.auth import AuthContext, InstallKeyAuthContext, get_runtime_auth_context
-from app.core.install_keys import get_install_key_registry
-from app.core.unit_wallet import get_unit_wallet_registry
 from app.runtime.install_gate import gate_shell_payload
 from app.services.action_guard import ActionGuardDecision, analyze_action, normalize_action_type
 from app.services.actionexecuteservice import (
     ActionExecutionRequest,
     get_action_execute_service,
 )
+from app.services.audit_store import record_gate_audit_event
 
 router = APIRouter(prefix="/action", tags=["action-execution"])
 logger = logging.getLogger(__name__)
@@ -336,41 +331,34 @@ def executeaction(
     status = _map_audit_event_to_status(audit["eventtype"])
 
     if status != "allowed":
-        if isinstance(auth_context, InstallKeyAuthContext):
+        install_gate_denied = install_decision is not None and not install_decision.allowed
+        if isinstance(auth_context, InstallKeyAuthContext) and not install_gate_denied:
             categories = promptinjection.get("categories")
             has_prompt_injection = isinstance(categories, list) and any(category in {"prompt_injection", "indirect_prompt_injection"} for category in categories)
-            event_type = "quarantine_detected" if status == "quarantined" else "prompt_injection_detected" if has_prompt_injection else "action_blocked"
-            try:
-                ingest_install_key_event(
-                    payload=InstallKeyEventRequest(
-                        event_id=request.eventid or uuid4().hex,
-                        event_type=event_type,
-                        key_id=auth_context.key_id,
-                        owner_key=auth_context.owner_key,
-                        program=auth_context.program,
-                        action_type=request.actiontype,
-                        blocked_attack_count=1,
-                        metadata={
-                            "risk_score": finalriskscore,
-                            "prompt_injection_flagged": bool(promptinjection.get("flagged")),
-                            "categories": categories if isinstance(categories, list) else [],
-                            "scan_id": promptinjection.get("scan_id"),
-                            "session_id": request.sessionid,
-                            "client_id": request.clientid,
-                        },
-                    ),
-                    auth_context=auth_context,
-                    install_key_registry=get_install_key_registry(),
-                    wallet_registry=get_unit_wallet_registry(),
-                )
-            except Exception:  # noqa: BLE001
-                # Telemetry failure must not change the denial; the action stays blocked.
-                logger.exception("actionexecute: blocked-action telemetry failed; denial still returned")
+            reason_code = "prompt_injection_detected" if has_prompt_injection else "action_blocked"
+            # Install-gate denials are already audited by the install gate; recording them here would double count.
+            record_gate_audit_event(
+                gate="action",
+                verdict="block",
+                platform=auth_context.program,
+                reason_codes=[reason_code],
+                owner_key=auth_context.owner_key,
+                decision_id=request.eventid,
+                session_id=request.sessionid,
+                details={
+                    "action_type": request.actiontype,
+                    "risk_score": finalriskscore,
+                    "prompt_injection_flagged": bool(promptinjection.get("flagged")),
+                    "categories": categories if isinstance(categories, list) else [],
+                    "scan_id": promptinjection.get("scan_id"),
+                    "client_id": request.clientid,
+                },
+            )
 
         if status == "review":
             message = "Action requires manual review before execution."
         elif status == "quarantined":
-            message = "Action has been quarantined due to elevated risk."
+            message = "Action has been blocked due to elevated risk."
         else:
             message = "Action has been denied."
 

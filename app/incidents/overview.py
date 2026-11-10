@@ -90,7 +90,6 @@ class IncidentRecord:
     updated_at: datetime
     owner: IncidentOwner
     requires_human_review: bool = False
-    quarantined_actions: int = 0
     blocked_actions: int = 0
     evidence_count: int = 0
 
@@ -106,7 +105,6 @@ class IncidentRecord:
             "updated_at": _isoformat(self.updated_at),
             "owner": self.owner.to_dict(),
             "requires_human_review": self.requires_human_review,
-            "quarantined_actions": self.quarantined_actions,
             "blocked_actions": self.blocked_actions,
             "evidence_count": self.evidence_count,
         }
@@ -169,7 +167,6 @@ def _normalize_incident(value: Any) -> IncidentRecord | None:
         updated_at=updated_at,
         owner=_normalize_owner(value.get("owner")),
         requires_human_review=_coerce_bool(value.get("requires_human_review"), False),
-        quarantined_actions=max(0, _coerce_int(value.get("quarantined_actions"), 0)),
         blocked_actions=max(0, _coerce_int(value.get("blocked_actions"), 0)),
         evidence_count=max(0, _coerce_int(value.get("evidence_count"), 0)),
     )
@@ -227,7 +224,6 @@ def build_incidents_overview(
 
 
 def incidents_overview_summary(overview: IncidentsOverview) -> dict[str, Any]:
-    total_quarantined_actions = sum(item.quarantined_actions for item in overview.incidents)
     total_blocked_actions = sum(item.blocked_actions for item in overview.incidents)
     total_evidence = sum(item.evidence_count for item in overview.incidents)
 
@@ -241,7 +237,6 @@ def incidents_overview_summary(overview: IncidentsOverview) -> dict[str, Any]:
         },
         "metrics": {
             "mean_time_to_contain_minutes": overview.mean_time_to_contain_minutes,
-            "total_quarantined_actions": total_quarantined_actions,
             "total_blocked_actions": total_blocked_actions,
             "total_evidence": total_evidence,
         },

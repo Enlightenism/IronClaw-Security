@@ -12,8 +12,6 @@ from app.runtime.return_scanner import ALLOW_VERDICT, BLOCK_VERDICT, scan_return
 from app.schemas.telemetry import TelemetryEventType
 from app.services.actionexecuteservice import ActionExecutionRequest, get_action_execute_service
 from app.services.audit_store import record_gate_audit_event
-from app.services.block_store import GATE_RETURN, record_block
-from app.services.incident_store import record_gate_block_incident
 from app.services.sandbox_broker_client import SandboxBrokerClient
 from app.services.telemetry import append_telemetry_event
 from app.supabaseclient import TOKENS_PER_UNIT
@@ -133,7 +131,7 @@ def _record_decision(
     except Exception:
         logger.exception("return gate telemetry write failed", extra={"sandbox_id": decision.sandbox_id})
     record_gate_audit_event(
-        gate=GATE_RETURN,
+        gate="return",
         verdict=decision.verdict,
         platform=platform,
         reason_codes=decision.reasons,
@@ -191,9 +189,6 @@ def run_return_gate(
         session_id=session_id,
         owner_key=owner_key,
     )
-    if decision.blocked:
-        record_block(gate=GATE_RETURN, platform=platform, reason_codes=decision.reasons, owner_key=owner_key)
-        record_gate_block_incident(gate=GATE_RETURN, platform=platform, reason_codes=decision.reasons, owner_key=owner_key)
     return decision
 
 

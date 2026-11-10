@@ -54,19 +54,12 @@ describe("IntegrationCard", () => {
     delete window.IntersectionObserver;
   });
 
-  it("shows per-platform runtime coverage", () => {
+  it("does not show runtime coverage labels on platform cards", () => {
     renderCard({ program: "goose", testid: "goose-card" });
 
-    const coverage = screen.getByTestId("goose-card-coverage");
-    expect(coverage).toHaveTextContent("Install: Enforce");
-    expect(coverage).toHaveTextContent("Return: No return-path enforcement");
-  });
-
-  it("marks audit-only return coverage for cursor", () => {
-    renderCard({ program: "cursor", testid: "cursor-card" });
-
-    expect(screen.getByTestId("cursor-card-coverage")).toHaveTextContent(
-      "Return: Audit only",
+    expect(screen.queryByTestId("goose-card-coverage")).not.toBeInTheDocument();
+    expect(screen.getByTestId("goose-card")).not.toHaveTextContent(
+      /Install:|Return:/,
     );
   });
 
@@ -83,15 +76,15 @@ describe("IntegrationCard", () => {
     expect(onCreateClaim).not.toHaveBeenCalled();
   });
 
-  it("shows per-platform units used and blocked attacks", () => {
-    renderCard({ unitsUsed: 12, blockedAttacks: 3 });
+  it("does not show per-platform usage stats and keeps the install guidance", () => {
+    renderCard();
 
     expect(
-      screen.getByTestId("claude-code-card-units-consumed"),
-    ).toHaveTextContent("Units used: 12");
+      screen.queryByTestId("claude-code-card-units-consumed"),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByTestId("claude-code-card-blocked-attacks"),
-    ).toHaveTextContent("Attacks blocked: 3");
+      screen.queryByTestId("claude-code-card-blocked-attacks"),
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId("claude-code-card")).toHaveTextContent(
       "generate a one-time install command for this platform",
     );
@@ -231,7 +224,9 @@ describe("IntegrationCard", () => {
     expect(screen.getByTestId("claude-code-card-generate")).toBeDisabled();
     expect(
       screen.getByTestId("claude-code-card-unavailable-note"),
-    ).toHaveTextContent("confirmed, non-refunded purchase");
+    ).toHaveTextContent(
+      "Your install commands will be generated with an embedded unique user key.",
+    );
     await user.click(screen.getByTestId("claude-code-card-generate"));
     expect(onCreateClaim).not.toHaveBeenCalled();
   });

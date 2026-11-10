@@ -29,7 +29,6 @@ from app.runtime.install_gate import (
 from app.schemas.telemetry import TelemetryEventType
 from app.services import install_allowlist
 from app.services.audit_store import get_security_audit_store
-from app.services.incident_store import get_incident_store
 from app.services.install_allowlist import PINNED_INSTALL_BLOCKS, PinnedInstallBlock, fingerprint_install_block
 from app.services.third_party_install_scanner import ScanOutcome
 
@@ -293,10 +292,8 @@ def test_install_command_from_content_joins_string_values() -> None:
     assert install_command_from_content('{"command": "pip", "args": ["install", "x"]}') == "pip install x"
 
 
-def _install_gate_records(owner_key: str) -> tuple[list[Any], list[Any]]:
-    events = [event for event in get_security_audit_store().list_events(limit=10000, include_seeded=False) if event.metadata.get("owner_key") == owner_key]
-    incidents = [incident for incident in get_incident_store().list_incidents(limit=10000, include_seeded=False) if incident.metadata.get("owner_key") == owner_key]
-    return events, incidents
+def _install_gate_records(owner_key: str) -> list[Any]:
+    return [event for event in get_security_audit_store().list_events(limit=10000, include_seeded=False) if event.metadata.get("owner_key") == owner_key]
 
 
 def test_pinned_install_is_audited_without_incident() -> None:
@@ -304,25 +301,22 @@ def test_pinned_install_is_audited_without_incident() -> None:
 
     evaluate_install_command(_canonical("openclaw"), platform="openclaw", owner_key=owner_key)
 
-    events, incidents = _install_gate_records(owner_key)
+    events = _install_gate_records(owner_key)
     assert len(events) == 1
     assert events[0].event_type == "install_gate_decision"
     assert events[0].verdict == "allow"
     assert events[0].severity == "low"
-    assert incidents == []
 
 
-def test_unpinned_install_is_audited_and_recorded_as_incident() -> None:
+def test_unpinned_install_is_audited_without_incident() -> None:
     owner_key = "owner-install-gate-block"
 
     evaluate_install_command("npm install evil-pkg", platform="claude_code", owner_key=owner_key)
 
-    events, incidents = _install_gate_records(owner_key)
+    events = _install_gate_records(owner_key)
     assert len(events) == 1
+    assert events[0].event_type == "install_gate_decision"
     assert events[0].verdict == "block"
     assert events[0].severity == "high"
     assert events[0].metadata["reason_codes"] == ["unresolvable_install_source"]
     assert "evil-pkg" not in str(events[0].metadata)
-    assert len(incidents) == 1
-    assert incidents[0].category == "runtime_block"
-    assert incidents[0].metadata["gate"] == "install"

@@ -20,7 +20,6 @@ const VERDICT_STYLES = {
 
 const LEGACY_VERDICT_STYLES = {
   WARN: "bg-[#EAB308]/10 text-[#EAB308] border-[#EAB308]/25",
-  QUARANTINE: "bg-[#F97316]/10 text-[#F97316] border-[#F97316]/25",
 };
 
 const VERDICT_COLORS = {
@@ -30,7 +29,6 @@ const VERDICT_COLORS = {
 
 const LEGACY_VERDICT_COLORS = {
   WARN: "#EAB308",
-  QUARANTINE: "#F97316",
 };
 
 const normalizeVerdict = (verdict) => String(verdict ?? "").toUpperCase();

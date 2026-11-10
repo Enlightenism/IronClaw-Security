@@ -160,8 +160,6 @@ class InstallKeyUsageSource:
     program: str
     balance_units: int = 0
     total_consumed_units: int = 0
-    total_blocked_attacks: int = 0
-    total_quarantined_actions: int = 0
     units_used_today: int = 0
     units_used_this_week: int = 0
     usage_event_count: int = 0
@@ -181,16 +179,12 @@ class InstallKeyUsageSource:
         self,
         *,
         units: int,
-        blocked_attack_count: int = 0,
-        quarantined_count: int = 0,
         occurred_at: datetime | None = None,
     ) -> None:
         if units < 0:
             raise ValueError("units must be non-negative")
         event_time = occurred_at or datetime.now(UTC)
         self.total_consumed_units += int(units)
-        self.total_blocked_attacks += int(blocked_attack_count)
-        self.total_quarantined_actions += int(quarantined_count)
         self.usage_event_count += 1
         self.last_action_at = event_time
 
@@ -209,9 +203,6 @@ class InstallKeyUsageSource:
             "program": self.program,
             "balance_units": self.balance_units,
             "total_consumed_units": self.total_consumed_units,
-            "total_blocked_attacks": self.total_blocked_attacks,
-            "total_quarantined_actions": self.total_quarantined_actions,
-            "blocked_or_quarantined_count": self.total_blocked_attacks + self.total_quarantined_actions,
             "units_used_today": self.units_used_today,
             "units_used_this_week": self.units_used_this_week,
             "usage_event_count": self.usage_event_count,
@@ -232,7 +223,6 @@ class InstallKeyUsageLedgerEntry:
     units: int
     balance_after: int
     payment_id: str | None = None
-    blocked_attack_count: int = 0
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -246,7 +236,6 @@ class InstallKeyUsageLedgerEntry:
             "units": self.units,
             "balance_after": self.balance_after,
             "payment_id": self.payment_id,
-            "blocked_attack_count": self.blocked_attack_count,
             "created_at": self.created_at.isoformat(),
             "metadata": dict(self.metadata),
         }
@@ -259,7 +248,6 @@ class UnitWallet:
     total_purchased_units: int = 0
     total_consumed_units: int = 0
     total_refunded_units: int = 0
-    total_blocked_attacks: int = 0
     transactions: list[UnitWalletTransaction] = field(default_factory=list)
     usage_by_key: dict[str, InstallKeyUsageSource] = field(default_factory=dict)
 
@@ -278,7 +266,6 @@ class UnitWallet:
             "total_purchased_units": self.total_purchased_units,
             "total_consumed_units": self.total_consumed_units,
             "total_refunded_units": self.total_refunded_units,
-            "total_blocked_attacks": self.total_blocked_attacks,
             "install_key_usage": {key: value.as_summary() for key, value in sorted(self.usage_by_key.items())},
         }
 
@@ -289,8 +276,6 @@ class UnitWallet:
                 "owner_key": self.owner_id,
                 "wallet_balance_units": self.balance_units,
                 "total_consumed_units": self.total_consumed_units,
-                "total_blocked_attacks": self.total_blocked_attacks,
-                "total_quarantined_actions": sum(item.total_quarantined_actions for item in self.usage_by_key.values()),
                 "install_key_usage": {key_id: usage.as_summary()} if usage is not None else {},
             }
 
@@ -298,8 +283,6 @@ class UnitWallet:
             "owner_key": self.owner_id,
             "wallet_balance_units": self.balance_units,
             "total_consumed_units": self.total_consumed_units,
-            "total_blocked_attacks": self.total_blocked_attacks,
-            "total_quarantined_actions": sum(item.total_quarantined_actions for item in self.usage_by_key.values()),
             "install_key_usage": {key: value.as_summary() for key, value in sorted(self.usage_by_key.items())},
         }
 
@@ -387,7 +370,6 @@ class UnitWallet:
         reference_id: str | None = None,
         payment_id: str | None = None,
         action_type: str = "prompt",
-        blocked_attack_count: int = 0,
         metadata: dict[str, Any] | None = None,
     ) -> tuple[UnitWalletTransaction, InstallKeyUsageSource]:
         if not key_id:
@@ -414,8 +396,6 @@ class UnitWallet:
             "program": program,
             "payment_id": payment_id,
             "action_type": action_type,
-            "blocked_attack_count": int(blocked_attack_count),
-            "quarantined_count": int(payload.get("quarantined_count", payload.get("quarantined_attack_count", 0))),
         }
 
         transaction = self.consume_units(
@@ -439,15 +419,11 @@ class UnitWallet:
         summary.balance_units = max(self.balance_units, 0)
         summary.metadata.update(canonical_metadata)
 
-        quarantined_count = int(canonical_metadata.get("quarantined_count", canonical_metadata.get("quarantined_attack_count", 0)))
         summary.register_usage_event(
             units=int(transaction.units),
-            blocked_attack_count=int(blocked_attack_count),
-            quarantined_count=quarantined_count,
             occurred_at=transaction.created_at,
         )
 
-        self.total_blocked_attacks += int(blocked_attack_count)
         return transaction, summary
 
     def refund_units(
@@ -482,7 +458,6 @@ class RegistryUnitWallet:
     total_purchased_units: int = 0
     total_consumed_units: int = 0
     total_refunded_units: int = 0
-    total_blocked_attacks: int = 0
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
     install_key_usage: dict[str, InstallKeyUsageSource] = field(default_factory=dict)
@@ -507,7 +482,6 @@ class RegistryUnitWallet:
             "total_purchased_units": self.total_purchased_units,
             "total_consumed_units": self.total_consumed_units,
             "total_refunded_units": self.total_refunded_units,
-            "total_blocked_attacks": self.total_blocked_attacks,
             "updated_at": self.updated_at.isoformat(),
             "metadata": dict(self.metadata),
             "install_key_usage": {key: value.as_summary() for key, value in sorted(self.install_key_usage.items())},
@@ -566,7 +540,6 @@ class SupabaseUnitWalletRepository:
             "total_purchased_units",
             "total_consumed_units",
             "total_refunded_units",
-            "total_blocked_attacks",
             "updated_at",
             "metadata",
         }
@@ -602,7 +575,6 @@ class SupabaseUnitWalletRepository:
                 "total_purchased_units": wallet.total_purchased_units,
                 "total_consumed_units": wallet.total_consumed_units,
                 "total_refunded_units": wallet.total_refunded_units,
-                "total_blocked_attacks": wallet.total_blocked_attacks,
                 "updated_at": wallet.updated_at.isoformat(),
                 "metadata": {
                     **(wallet.metadata or {}),
@@ -629,8 +601,6 @@ class SupabaseUnitWalletRepository:
                 program=str(value.get("program") or "unknown"),
                 balance_units=int(value.get("balance_units", 0)),
                 total_consumed_units=int(value.get("total_consumed_units", 0)),
-                total_blocked_attacks=int(value.get("total_blocked_attacks", 0)),
-                total_quarantined_actions=int(value.get("total_quarantined_actions", 0)),
                 units_used_today=int(value.get("units_used_today", 0)),
                 units_used_this_week=int(value.get("units_used_this_week", 0)),
                 usage_event_count=int(value.get("usage_event_count", 0)),
@@ -646,7 +616,6 @@ class SupabaseUnitWalletRepository:
             total_purchased_units=row["total_purchased_units"],
             total_consumed_units=row["total_consumed_units"],
             total_refunded_units=row.get("total_refunded_units", 0),
-            total_blocked_attacks=row.get("total_blocked_attacks", 0),
             updated_at=datetime.fromisoformat(row["updated_at"]),
             metadata=metadata,
             install_key_usage=usage_map,
@@ -1234,7 +1203,6 @@ class UnitWalletRegistry:
         *,
         payment_id: str | None = None,
         action_type: str = "prompt",
-        blocked_attack_count: int = 0,
         metadata: dict[str, Any] | None = None,
     ) -> tuple[RegistryUnitWallet, InstallKeyUsageSource, InstallKeyUsageLedgerEntry]:
         if not key_id:
@@ -1282,7 +1250,6 @@ class UnitWalletRegistry:
                         units=existing_entry.units,
                         balance_after=existing_entry.balance_after,
                         payment_id=existing_entry.purchase_id,
-                        blocked_attack_count=int(existing_entry.metadata.get("blocked_attack_count") or 0),
                         created_at=existing_entry.created_at,
                         metadata=dict(existing_entry.metadata),
                     ),
@@ -1298,7 +1265,6 @@ class UnitWalletRegistry:
 
             wallet.balance_units -= safe_units
             wallet.total_consumed_units += safe_units
-            wallet.total_blocked_attacks += int(blocked_attack_count)
             wallet.updated_at = datetime.now(UTC)
 
             usage = wallet.install_key_usage.setdefault(
@@ -1321,16 +1287,11 @@ class UnitWalletRegistry:
                     "program": program,
                     "payment_id": payment_id,
                     "action_type": action_type,
-                    "blocked_attack_count": int(blocked_attack_count),
-                    "quarantined_count": int(payload.get("quarantined_count", payload.get("quarantined_attack_count", 0))),
                 }
             )
 
-            quarantined_count = int(payload.get("quarantined_count", payload.get("quarantined_attack_count", 0)))
             usage.register_usage_event(
                 units=safe_units,
-                blocked_attack_count=int(blocked_attack_count),
-                quarantined_count=quarantined_count,
                 occurred_at=wallet.updated_at,
             )
 
@@ -1341,8 +1302,6 @@ class UnitWalletRegistry:
                 "program": program,
                 "payment_id": payment_id,
                 "action_type": action_type,
-                "blocked_attack_count": int(blocked_attack_count),
-                "quarantined_count": quarantined_count,
             }
 
             entry = InstallKeyUsageLedgerEntry(
@@ -1354,7 +1313,6 @@ class UnitWalletRegistry:
                 units=safe_units,
                 balance_after=wallet.balance_units,
                 payment_id=payment_id,
-                blocked_attack_count=int(blocked_attack_count),
                 created_at=wallet.updated_at,
                 metadata=canonical_metadata,
             )
@@ -1385,7 +1343,6 @@ class UnitWalletRegistry:
         program: str | None,
         event_type: str,
         units: int = 0,
-        blocked_attack_count: int = 0,
         action_type: str | None = None,
         occurred_at: datetime | str | None = None,
         metadata: dict[str, Any] | None = None,
@@ -1442,11 +1399,6 @@ class UnitWalletRegistry:
                         "action_type": action_type or usage.metadata.get("action_type") or "telemetry",
                     }
                 )
-                if blocked_attack_count > 0 and event_type not in {"usage_units_debited"}:
-                    usage.total_blocked_attacks += int(blocked_attack_count)
-                    wallet.total_blocked_attacks += int(blocked_attack_count)
-                    if event_type in {"prompt_injection_detected", "quarantine_detected", "quarantine_event"}:
-                        usage.total_quarantined_actions += int(blocked_attack_count)
                 if units > 0 and event_type not in {"usage_units_debited"}:
                     usage.total_consumed_units += int(units)
                 wallet.install_key_usage[key_id] = usage
@@ -1459,7 +1411,6 @@ class UnitWalletRegistry:
                 "owner_key": wallet.owner_key,
                 "program": effective_program,
                 "units": int(units),
-                "blocked_attack_count": int(blocked_attack_count),
                 "event_id": event_id,
                 "metadata": event_metadata,
             }
@@ -1471,7 +1422,6 @@ class UnitWalletRegistry:
                     "program": effective_program,
                     "owner_key": wallet.owner_key,
                     "action_type": action_type,
-                    "blocked_attack_count": int(blocked_attack_count),
                     **event_metadata,
                 }
                 purchase_id = str(event_metadata.get("purchase_id") or event_metadata.get("purchase_reference") or "").strip() or None
@@ -1661,8 +1611,6 @@ class UnitWalletRegistry:
                 "owner_key": owner,
                 "wallet_balance_units": 0,
                 "total_consumed_units": 0,
-                "total_blocked_attacks": 0,
-                "total_quarantined_actions": 0,
                 "install_key_usage": {},
             }
 
@@ -1672,8 +1620,6 @@ class UnitWalletRegistry:
                 "owner_key": wallet.owner_key,
                 "wallet_balance_units": wallet.balance_units,
                 "total_consumed_units": wallet.total_consumed_units,
-                "total_blocked_attacks": wallet.total_blocked_attacks,
-                "total_quarantined_actions": sum(item.total_quarantined_actions for item in wallet.install_key_usage.values()),
                 "install_key_usage": {key_id: usage.as_summary()} if usage is not None else {},
             }
 
@@ -1681,8 +1627,6 @@ class UnitWalletRegistry:
             "owner_key": wallet.owner_key,
             "wallet_balance_units": wallet.balance_units,
             "total_consumed_units": wallet.total_consumed_units,
-            "total_blocked_attacks": wallet.total_blocked_attacks,
-            "total_quarantined_actions": sum(item.total_quarantined_actions for item in wallet.install_key_usage.values()),
             "install_key_usage": {key: value.as_summary() for key, value in sorted(wallet.install_key_usage.items())},
         }
 

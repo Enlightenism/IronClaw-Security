@@ -198,14 +198,12 @@ class DashboardOverview:
     guarded_requests: int = 0
     blocked_actions: int = 0
     blocked_activity_total: int = 0
-    quarantined_actions: int = 0
     active_incidents: int = 0
     pending_reviews: int = 0
     policy_coverage_percent: float = 0.0
     tool_execution_allow_rate: float = 0.0
     telemetry_online: bool = True
     review_backlog_present: bool = False
-    quarantine_pressure: bool = False
     wallet_total_units: int = 0
     runtime_coverage: dict[str, bool] = field(default_factory=dict)
     kpis: tuple[DashboardKPI, ...] = ()
@@ -225,14 +223,12 @@ class DashboardOverview:
             "guarded_requests": self.guarded_requests,
             "blocked_actions": self.blocked_actions,
             "blocked_activity_total": self.blocked_activity_total,
-            "quarantined_actions": self.quarantined_actions,
             "active_incidents": self.active_incidents,
             "pending_reviews": self.pending_reviews,
             "policy_coverage_percent": self.policy_coverage_percent,
             "tool_execution_allow_rate": self.tool_execution_allow_rate,
             "telemetry_online": self.telemetry_online,
             "review_backlog_present": self.review_backlog_present,
-            "quarantine_pressure": self.quarantine_pressure,
             "wallet_total_units": self.wallet_total_units,
             "runtime_coverage": dict(self.runtime_coverage),
             "kpis": [item.to_dict() for item in self.kpis],
@@ -505,15 +501,10 @@ def build_dashboard_overview(
 
     active_incidents = max(0, _coerce_int(source.get("active_incidents"), current.active_incidents))
     pending_reviews = max(0, _coerce_int(source.get("pending_reviews"), current.pending_reviews))
-    quarantined_actions = max(0, _coerce_int(source.get("quarantined_actions"), current.quarantined_actions))
 
     review_backlog_present = _coerce_bool(
         source.get("review_backlog_present"),
         current.review_backlog_present or pending_reviews > 0,
-    )
-    quarantine_pressure = _coerce_bool(
-        source.get("quarantine_pressure"),
-        current.quarantine_pressure or quarantined_actions > 0,
     )
 
     return DashboardOverview(
@@ -526,7 +517,6 @@ def build_dashboard_overview(
         guarded_requests=max(0, _coerce_int(source.get("guarded_requests"), current.guarded_requests)),
         blocked_actions=max(0, _coerce_int(source.get("blocked_actions"), current.blocked_actions)),
         blocked_activity_total=blocked_activity_total,
-        quarantined_actions=quarantined_actions,
         active_incidents=active_incidents,
         pending_reviews=pending_reviews,
         policy_coverage_percent=max(
@@ -539,7 +529,6 @@ def build_dashboard_overview(
         ),
         telemetry_online=_coerce_bool(source.get("telemetry_online"), current.telemetry_online),
         review_backlog_present=review_backlog_present,
-        quarantine_pressure=quarantine_pressure,
         wallet_total_units=wallet_total_units,
         runtime_coverage=runtime_coverage,
         kpis=kpis,
@@ -553,7 +542,7 @@ def build_dashboard_overview(
 def dashboard_overview_summary(overview: DashboardOverview) -> dict[str, Any]:
     protection_rate = 0.0
     if overview.total_requests > 0:
-        protected_events = overview.blocked_actions + overview.quarantined_actions
+        protected_events = overview.blocked_actions
         protection_rate = round((protected_events / overview.total_requests) * 100.0, 2)
 
     return {
@@ -570,7 +559,6 @@ def dashboard_overview_summary(overview: DashboardOverview) -> dict[str, Any]:
             "total_requests": overview.total_requests,
             "guarded_requests": overview.guarded_requests,
             "blocked_actions": overview.blocked_actions,
-            "quarantined_actions": overview.quarantined_actions,
             "active_incidents": overview.active_incidents,
             "pending_reviews": overview.pending_reviews,
         },
@@ -581,7 +569,6 @@ def dashboard_overview_summary(overview: DashboardOverview) -> dict[str, Any]:
         },
         "pressure": {
             "review_backlog_present": overview.review_backlog_present,
-            "quarantine_pressure": overview.quarantine_pressure,
         },
         "platform_families": [item.to_dict() for item in overview.platform_families],
         "install_key_slots": [item.to_dict() for item in overview.install_key_slots],

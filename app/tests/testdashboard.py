@@ -108,13 +108,11 @@ def _make_wallet_registry(
     *,
     balance_units: int = 100,
     total_consumed_units: int = 15,
-    total_blocked_attacks: int = 3,
     usage_payload: dict[str, Any] | None = None,
 ) -> MagicMock:
     wallet = MagicMock()
     wallet.balance_units = balance_units
     wallet.total_consumed_units = total_consumed_units
-    wallet.total_blocked_attacks = total_blocked_attacks
     wallet.install_key_usage = {}
     if usage_payload is not None:
         wallet.install_key_usage = usage_payload
@@ -171,11 +169,10 @@ class TestDashboardOverview:
             "program": "openclaw",
             "balance_units": 72,
             "total_consumed_units": 12,
-            "total_blocked_attacks": 5,
             "last_action_at": "2026-06-22T12:00:00Z",
             "metadata": {"action_type": "prompt"},
         }
-        wallet = _make_wallet_registry(balance_units=72, total_consumed_units=12, total_blocked_attacks=5)
+        wallet = _make_wallet_registry(balance_units=72, total_consumed_units=12)
         wallet.install_key_usage = {_KEY_ID: usage_summary}
         wallet.list_ledger_entries.return_value = [
             MagicMock(
@@ -191,7 +188,6 @@ class TestDashboardOverview:
             "owner_key": _OWNER,
             "wallet_balance_units": 72,
             "total_consumed_units": 12,
-            "total_blocked_attacks": 5,
             "install_key_usage": {_KEY_ID: usage_summary.as_summary.return_value},
         }
         reg = _make_registry(records=[record])
@@ -207,13 +203,11 @@ class TestDashboardOverview:
         assert slot["status"] == "active"
         assert slot["remaining_units"] == 72
         assert slot["units_consumed"] == 12
-        assert slot["total_blocked_attacks"] == 5
         assert slot["usage_by_action"]["prompt"] == 4
         assert slot["usage_by_action"]["tool_call"] == 6
         assert slot["payment_status"] == "paid"
         assert slot["entitlements_status"] == "active"
         assert slot["metadata"]["subscription_id"] == "sub_abc"
-        assert slot["metadata"]["usage_summary"]["total_blocked_attacks"] == 5
 
     def test_dashboard_rejects_unpaid_or_non_entitled_key_state(self, app: FastAPI, client: TestClient) -> None:
         record = _make_record(
@@ -227,7 +221,7 @@ class TestDashboardOverview:
             last_used_at="2026-06-22T12:00:00Z",
         )
         record.revoked_at = "2026-06-22T12:05:00Z"
-        wallet = _make_wallet_registry(balance_units=0, total_consumed_units=0, total_blocked_attacks=0)
+        wallet = _make_wallet_registry(balance_units=0, total_consumed_units=0)
         reg = _make_registry(records=[record])
         app.dependency_overrides[get_install_key_registry] = lambda: reg
         app.dependency_overrides[get_unit_wallet_registry] = lambda: wallet
@@ -255,7 +249,7 @@ class TestDashboardOverview:
             issued_after_payment=False,
             units_consumed=7,
         )
-        wallet = _make_wallet_registry(balance_units=9, total_consumed_units=7, total_blocked_attacks=0)
+        wallet = _make_wallet_registry(balance_units=9, total_consumed_units=7)
         reg = _make_registry(records=[record])
         app.dependency_overrides[get_install_key_registry] = lambda: reg
         app.dependency_overrides[get_unit_wallet_registry] = lambda: wallet
@@ -278,7 +272,7 @@ class TestDashboardOverview:
             _make_record(key_id="ik_copilot_1", owner_key=_OWNER, program="copilot", masked_key="ic_install_copilot_...cccc"),
             _make_record(key_id="ik_hermes_1", owner_key=_OWNER, program="hermes", masked_key="ic_install_hermes_...eeee"),
         ]
-        wallet = _make_wallet_registry(balance_units=125, total_consumed_units=18, total_blocked_attacks=7)
+        wallet = _make_wallet_registry(balance_units=125, total_consumed_units=18)
         reg = _make_registry(records=records)
         app.dependency_overrides[get_install_key_registry] = lambda: reg
         app.dependency_overrides[get_unit_wallet_registry] = lambda: wallet

@@ -10,7 +10,8 @@ import httpx
 SANDBOX_BROKER_URL_ENV = "SANDBOX_BROKER_URL"
 SANDBOX_BROKER_TOKEN_ENV = "SANDBOX_BROKER_TOKEN"
 DEFAULT_SANDBOX_BROKER_URL = "http://host.docker.internal:8088"
-BROKER_TIMEOUT_MARGIN_SECONDS = 5.0
+#: Must cover the broker's worst case: slot wait (scan timeout) plus scan (scan timeout) plus container teardown (TEARDOWN_TIMEOUT_SECONDS = 15).
+BROKER_TIMEOUT_MARGIN_SECONDS = 20.0
 BROKER_CONNECT_TIMEOUT_SECONDS = 2.0
 BROKER_HEALTH_TIMEOUT_SECONDS = 2.0
 BROKER_TOKEN_HEADER = "X-Broker-Token"
@@ -47,7 +48,7 @@ class SandboxBrokerClient:
             "read_only_fs": read_only_fs,
             "network_enabled": network_enabled,
         }
-        timeout = httpx.Timeout(timeout_seconds + BROKER_TIMEOUT_MARGIN_SECONDS, connect=BROKER_CONNECT_TIMEOUT_SECONDS)
+        timeout = httpx.Timeout(timeout_seconds * 2 + BROKER_TIMEOUT_MARGIN_SECONDS, connect=BROKER_CONNECT_TIMEOUT_SECONDS)
         try:
             response = httpx.post(
                 f"{self._broker_url}/run",

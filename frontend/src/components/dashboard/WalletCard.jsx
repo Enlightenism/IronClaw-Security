@@ -605,6 +605,7 @@ const PaymentMethodPanel = ({
 
 const WalletCard = ({
   balance = 0,
+  unitsConsumed = 0,
   walletStatus = "unavailable",
   lastPayment,
   walletHistory = [],
@@ -757,8 +758,8 @@ const WalletCard = ({
           >
             <div className="mb-6 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Wallet size={18} className="text-[#E5E4E2]" />
-                <h2 className="font-tech text-sm font-semibold uppercase tracking-[0.25em] text-[#E5E4E2]">
+                <Wallet size={18} className="text-[#FFD700]" />
+                <h2 className="font-tech text-sm font-semibold uppercase tracking-[0.25em] text-gold-gradient">
                   Unit Wallet
                 </h2>
               </div>
@@ -788,6 +789,17 @@ const WalletCard = ({
             <p className="text-xs text-[#737373]">
               Pay only for what you use. No subscription, no recurring charge.
             </p>
+            <div className="mt-5 flex items-center justify-between border-t border-white/15 pt-4">
+              <span className="text-xs uppercase tracking-widest text-[#BFC1C2]">
+                Units used
+              </span>
+              <span
+                className="font-tech text-lg font-bold text-white"
+                data-testid="wallet-units-consumed"
+              >
+                {(Number(unitsConsumed) || 0).toLocaleString()}
+              </span>
+            </div>
           </section>
 
           <section
@@ -804,7 +816,7 @@ const WalletCard = ({
                 data-testid="wallet-history"
                 aria-label="Recent wallet activity"
               >
-                <h3 className="mb-3 text-xs uppercase tracking-widest text-[#BFC1C2]">
+                <h3 className="mb-3 text-xs font-semibold uppercase tracking-widest text-gold-gradient">
                   Recent activity
                 </h3>
                 <div className="flex flex-col gap-2">
@@ -965,15 +977,18 @@ const WalletCard = ({
                     }
                     className="btn-shimmer flex flex-col items-center justify-center rounded-xl border border-[#E5E4E2]/25 bg-white/5 px-3 py-4 text-center transition hover:border-[#FFD700]/60 hover:bg-white/[0.08] disabled:opacity-60"
                   >
-                    <span className="font-tech text-[11px] font-semibold uppercase tracking-widest text-[#BFC1C2]">
-                      {t.name}
+                    <span className="metal-gold-text font-tech text-sm uppercase">
+                      {t.name} Package
                     </span>
                     <span className="font-tech text-base font-bold text-white">
                       {t.units}
                     </span>
-                    <span className="text-[11px] text-[#BFC1C2]">units</span>
-                    <span className="mt-1 text-[10px] text-[#737373]">
-                      {t.tokensPerUnit.toLocaleString()} tokens / unit
+                    <span className="text-[11px] text-white">units</span>
+                    <span
+                      data-testid={`package-detail-${t.id}`}
+                      className="mt-1 max-w-[16rem] text-center text-[11px] leading-snug text-white"
+                    >
+                      {`${t.unitCount.toLocaleString("en-US")} units = ${t.tokensPerUnit.toLocaleString("en-US")} tokens per unit = ${t.tokenCoverage.toLocaleString("en-US")} tokens protected by IronClaw-Security.`}
                     </span>
                     <span className="mt-2 flex items-center gap-1 text-lg font-semibold text-[#FFD700]">
                       {purchasingId === t.id ? (

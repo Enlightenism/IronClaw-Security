@@ -696,31 +696,28 @@ class TestUnitWalletRegistry:
             units=7,
             payment_id="pay_123",
             action_type="prompt",
-            blocked_attack_count=2,
             metadata={"source": "runtime"},
         )
 
         wallet = registry.get_wallet("owner-install-metadata")
         assert wallet is not None
         assert wallet.total_consumed_units == 7
-        assert wallet.total_blocked_attacks == 2
         assert wallet.install_key_usage["key_install_001"].owner_key == "owner-install-metadata"
         assert wallet.install_key_usage["key_install_001"].program == "openclaw"
         assert wallet.install_key_usage["key_install_001"].metadata["owner_key"] == "owner-install-metadata"
         assert wallet.install_key_usage["key_install_001"].metadata["key_id"] == "key_install_001"
         assert wallet.install_key_usage["key_install_001"].metadata["program"] == "openclaw"
         assert wallet.install_key_usage["key_install_001"].metadata["payment_id"] == "pay_123"
-        assert wallet.install_key_usage["key_install_001"].metadata["blocked_attack_count"] == 2
+        assert wallet.install_key_usage["key_install_001"].metadata["payment_id"] == "pay_123"
         assert wallet.install_key_usage["key_install_001"].metadata["action_type"] == "prompt"
         assert usage.metadata["source"] == "runtime"
         assert ledger_entry.metadata["owner_key"] == "owner-install-metadata"
         assert ledger_entry.metadata["key_id"] == "key_install_001"
         assert ledger_entry.metadata["program"] == "openclaw"
         assert ledger_entry.metadata["payment_id"] == "pay_123"
-        assert ledger_entry.metadata["blocked_attack_count"] == 2
         assert ledger_entry.metadata["action_type"] == "prompt"
 
-    def test_install_key_usage_summary_exposes_balance_and_block_count(self) -> None:
+    def test_install_key_usage_summary_exposes_balance_and_consumed_units(self) -> None:
         wallet = UnitWallet(owner_id="owner-install-summary")
         wallet.purchase_units(units=40, source="stripe_checkout", reference_id="checkout-a")
         wallet.consume_units_for_install_key(
@@ -729,7 +726,6 @@ class TestUnitWalletRegistry:
             units=5,
             payment_id="pay_summary",
             action_type="tool_call",
-            blocked_attack_count=3,
             metadata={"source": "guard"},
         )
 
@@ -737,9 +733,7 @@ class TestUnitWalletRegistry:
         assert summary["owner_key"] == "owner-install-summary"
         assert summary["wallet_balance_units"] == 35
         assert summary["total_consumed_units"] == 5
-        assert summary["total_blocked_attacks"] == 3
         assert summary["install_key_usage"]["key_summary_001"]["program"] == "claude_code"
-        assert summary["install_key_usage"]["key_summary_001"]["total_blocked_attacks"] == 3
 
 
 # ===========================================================================

@@ -207,7 +207,6 @@ def _validate_paid_cli_install_claim(
     wallet_balance = wallet.balance_units if wallet is not None else 0
     key_usage = wallet.install_key_usage.get(record.key_id) if wallet is not None else None
     units_used = max(int(record.units_consumed), int(getattr(key_usage, "total_consumed_units", 0) or 0))
-    blocked_attacks = int(getattr(key_usage, "total_blocked_attacks", 0) or 0)
 
     return (
         True,
@@ -225,7 +224,6 @@ def _validate_paid_cli_install_claim(
                 "program": record.program,
                 "units_used": units_used,
                 "units_remaining": wallet_balance,
-                "blocked_attacks": blocked_attacks,
             },
         },
         None,

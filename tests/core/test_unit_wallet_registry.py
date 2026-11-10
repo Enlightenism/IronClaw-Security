@@ -112,7 +112,6 @@ def test_install_key_debit_rejects_generic_platform_owner_key() -> None:
             key_id="ik_install_real_001",
             program="openclaw",
             units=3,
-            blocked_attack_count=1,
         )
 
 
@@ -126,7 +125,6 @@ def test_install_key_debit_rejects_generic_platform_key_id() -> None:
             key_id="api_key_secret_value",
             program="openclaw",
             units=3,
-            blocked_attack_count=1,
         )
 
 
@@ -384,18 +382,14 @@ def test_install_key_usage_summary_tracks_today_and_week_window() -> None:
         key_id="ik_install_real_001",
         program="openclaw",
         units=7,
-        blocked_attack_count=2,
         metadata={"quarantined_count": 1, "source": "runtime"},
     )
 
-    assert usage.total_blocked_attacks == 2
-    assert usage.total_quarantined_actions == 1
     assert usage.units_used_today >= 7
     assert usage.units_used_this_week >= 7
     summary = registry.get_key_usage_summary("buyer@ironclaw.test", key_id="ik_install_real_001")
     assert summary["install_key_usage"]["ik_install_real_001"]["units_used_today"] >= 7
     assert summary["install_key_usage"]["ik_install_real_001"]["units_used_this_week"] >= 7
-    assert summary["total_quarantined_actions"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -505,7 +499,6 @@ def test_install_key_debit_reduces_balance_and_tracks_usage_consistently(registr
         key_id="ik_install_real_001",
         program="openclaw",
         units=7,
-        blocked_attack_count=2,
         metadata={
             "payment_status": "paid",
             "quarantined_count": 1,
@@ -514,8 +507,6 @@ def test_install_key_debit_reduces_balance_and_tracks_usage_consistently(registr
     )
 
     assert wallet.balance_units == 23
-    assert usage.total_blocked_attacks == 2
-    assert usage.total_quarantined_actions == 1
     assert entry.units == 7
     assert entry.balance_after == 23
     summary = registry.get_key_usage_summary("alice@ironclaw.test", key_id="ik_install_real_001")

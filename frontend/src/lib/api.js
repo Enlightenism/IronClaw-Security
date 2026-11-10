@@ -225,7 +225,6 @@ export const auth = {
 
 export const dashboard = {
   get: () => api.get("/dashboard/overview"),
-  getRuntimeBlocks: () => api.get("/dashboard/runtime-blocks"),
 };
 
 export const wallet = {

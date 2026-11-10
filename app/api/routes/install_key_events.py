@@ -18,6 +18,7 @@ from app.core.unit_wallet import (
     get_unit_wallet_registry,
 )
 from app.persistencebootstrap import get_persistence_store
+from app.services.audit_store import record_gate_audit_event
 
 router = APIRouter(
     prefix="/install-key-events",
@@ -27,8 +28,6 @@ router = APIRouter(
 InstallKeyEventType = Literal[
     "action_blocked",
     "prompt_injection_detected",
-    "quarantine_detected",
-    "quarantine_event",
     "usage_units_debited",
     "install_key_usage_recorded",
     "install_key_activated",
@@ -129,6 +128,7 @@ class InstallKeyEventRequest(BaseModel):
     program: str | None = Field(default=None, min_length=1, max_length=32)
     action_type: str | None = Field(default=None, min_length=1, max_length=128)
     units: int | None = Field(default=None, ge=0)
+    # Accepted for client compatibility. Blocks are counted from audit events, not from this field.
     blocked_attack_count: int = Field(default=0, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
     occurred_at: str | None = None
@@ -349,7 +349,6 @@ def _sync_wallet_event(
     program: str | None,
     event_type: str,
     units: int,
-    blocked_attack_count: int,
     action_type: str | None,
     occurred_at: str,
     metadata: dict[str, Any],
@@ -360,7 +359,6 @@ def _sync_wallet_event(
         program=program,
         event_type=event_type,
         units=units,
-        blocked_attack_count=blocked_attack_count,
         action_type=action_type,
         occurred_at=occurred_at,
         metadata=metadata,
@@ -409,7 +407,6 @@ def _apply_event(
             program=program,
             units=payload.units,
             action_type=payload.action_type or "telemetry",
-            blocked_attack_count=payload.blocked_attack_count,
             metadata=metadata,
         )
         return True, {"event_type": event_name, "balance_update": "debit"}
@@ -422,28 +419,24 @@ def _apply_event(
             program=program,
             event_type=event_name,
             units=0,
-            blocked_attack_count=int(payload.blocked_attack_count or 0),
             action_type=payload.action_type or "reporting",
             occurred_at=occurred_at,
             metadata={**metadata, "event_type": event_name},
         )
         return True, {"event_type": event_name, "status": "reported"}
 
-    if event_name in {"action_blocked", "prompt_injection_detected", "quarantine_detected", "quarantine_event"}:
-        blocked_count = max(1, int(payload.blocked_attack_count or 1))
-        _sync_wallet_event(
-            wallet_registry=wallet_registry,
+    if event_name in {"action_blocked", "prompt_injection_detected"}:
+        record_gate_audit_event(
+            gate="action",
+            verdict="block",
+            platform=program,
+            reason_codes=[event_name],
             owner_key=owner_key,
-            key_id=key_id,
-            program=program,
-            event_type=event_name,
-            units=0,
-            blocked_attack_count=blocked_count,
-            action_type=payload.action_type or ("quarantine" if event_name in {"quarantine_detected", "quarantine_event"} else event_name),
-            occurred_at=occurred_at,
-            metadata={**metadata, "event_type": event_name},
+            decision_id=event_id,
+            session_id=str(metadata.get("session_id") or "").strip() or None,
+            details={"key_id": key_id, "event_type": event_name, "action_type": payload.action_type or event_name, "source": "install-key-events"},
         )
-        return True, {"event_type": event_name, "blocked_attack_count": blocked_count}
+        return False, {"event_type": event_name, "status": "recorded"}
 
     if event_name == "install_key_activated":
         _sync_wallet_event(
@@ -453,7 +446,6 @@ def _apply_event(
             program=program,
             event_type=event_name,
             units=0,
-            blocked_attack_count=0,
             action_type=payload.action_type or "activation",
             occurred_at=occurred_at,
             metadata={**metadata, "event_type": event_name},
@@ -475,7 +467,6 @@ def _apply_event(
             program=program,
             event_type=event_name,
             units=0,
-            blocked_attack_count=0,
             action_type=payload.action_type or "revocation",
             occurred_at=occurred_at,
             metadata={**metadata, "event_type": event_name},
@@ -531,7 +522,6 @@ def read_own_install_key(
                 "issued_after_payment": bool(getattr(record, "issued_after_payment", False)),
                 "units_used": max(registry_units, wallet_units),
                 "units_remaining": int(getattr(usage, "balance_units", 0) or 0),
-                "blocked_attacks": int(getattr(usage, "total_blocked_attacks", 0) or 0),
             }
         ],
     }

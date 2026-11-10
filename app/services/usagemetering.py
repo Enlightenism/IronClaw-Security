@@ -221,7 +221,6 @@ class UsageMeteringService:
                         program=program,
                         units=units,
                         action_type=str(metadata.get("action_name") or "action"),
-                        blocked_attack_count=0,
                         metadata={**metadata, "event_id": event_id},
                     )
                 except InsufficientUnitsError:

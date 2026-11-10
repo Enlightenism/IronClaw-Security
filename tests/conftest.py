@@ -18,7 +18,6 @@ import app.core.unit_wallet as _unit_wallet_module
 from app.core.unit_wallet import UnitWalletRegistry
 from app.main import app as _app
 from app.services.audit_log_service import reset_audit_log
-from app.services.block_store import reset_block_store
 from app.supabaseclient import reset_supabase_client
 from ironclaw_sdk.client import IronclawClient
 from ironclaw_sdk.exceptions import IronclawAPIError, IronclawAuthError
@@ -66,7 +65,6 @@ def _reset_runtime_singletons() -> None:
     reset_supabase_client()
     stripe_webhooks.reset_processed_events()
     _install_keys_module._reset_install_key_registry_for_testing()
-    reset_block_store()
 
     wallet = UnitWalletRegistry()
     _unit_wallet_module._unit_wallet_registry = wallet

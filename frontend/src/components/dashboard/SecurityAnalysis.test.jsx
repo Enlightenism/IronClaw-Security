@@ -271,7 +271,7 @@ describe("SecurityAnalysis", () => {
     );
 
     expect(screen.getByText("WARN")).toHaveClass("text-[#EAB308]");
-    expect(screen.getByText("QUARANTINE")).toHaveClass("text-[#F97316]");
+    expect(screen.getByText("QUARANTINE")).toHaveClass("text-[#737373]");
   });
 
   it("falls back to empty attack state when attacks are empty with live incoming stats", () => {

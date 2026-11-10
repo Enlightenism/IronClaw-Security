@@ -291,6 +291,17 @@ describe("balance display", () => {
     expect(screen.getByTestId("wallet-balance")).toHaveTextContent("0");
   });
 
+  it("renders the units consumed on the front face", async () => {
+    await renderWalletCard({
+      balance: 12500,
+      unitsConsumed: 480,
+      organizationId: "",
+    });
+    expect(screen.getByTestId("wallet-units-consumed")).toHaveTextContent(
+      (480).toLocaleString(),
+    );
+  });
+
   it("does not claim the wallet is active when health is unavailable", async () => {
     await renderWalletCard({ balance: 12500, organizationId: "" });
     expect(screen.getByTestId("wallet-health")).toHaveTextContent(
@@ -430,6 +441,23 @@ describe("wallet package deck", () => {
     expect(screen.getAllByTestId("wallet-deck-tab")).toHaveLength(1);
     expect(screen.getByTestId("wallet-deck-tab")).toHaveTextContent(
       "Next Package",
+    );
+  });
+
+  it("shows the package detail sentence and gold package title on each purchase page", async () => {
+    await renderWalletCard({ organizationId: "" });
+
+    expect(screen.getByTestId("deck-page-pkg_5000")).toHaveTextContent(
+      "Starter Package",
+    );
+    expect(screen.getByTestId("package-detail-pkg_5000")).toHaveTextContent(
+      "5,000 units = 25,000 tokens per unit = 125,000,000 tokens protected by IronClaw-Security.",
+    );
+    expect(screen.getByTestId("package-detail-pkg_25000")).toHaveTextContent(
+      "25,000 units = 25,000 tokens per unit = 625,000,000 tokens protected by IronClaw-Security.",
+    );
+    expect(screen.getByTestId("package-detail-pkg_60000")).toHaveTextContent(
+      "60,000 units = 25,000 tokens per unit = 1,500,000,000 tokens protected by IronClaw-Security.",
     );
   });
 

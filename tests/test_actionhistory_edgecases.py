@@ -11,7 +11,6 @@ def test_action_history_view_handles_none_actions() -> None:
     assert view.items == []
     assert view.allowed_count == 0
     assert view.review_count == 0
-    assert view.quarantined_count == 0
     assert view.denied_count == 0
 
 

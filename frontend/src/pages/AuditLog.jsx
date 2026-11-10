@@ -33,8 +33,6 @@ const verdictVariant = (verdict) => {
       return "secondary";
     case "warn":
       return "outline";
-    case "quarantine":
-      return "outline";
     case "block":
       return "destructive";
     default:
@@ -48,8 +46,6 @@ const verdictClass = (verdict) => {
       return "text-green-600 border-green-400";
     case "warn":
       return "text-yellow-600 border-yellow-400";
-    case "quarantine":
-      return "text-orange-600 border-orange-400";
     case "block":
       return "text-red-600 border-red-400";
     default:

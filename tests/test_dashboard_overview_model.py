@@ -166,7 +166,6 @@ def test_dashboard_overview_summary_shares_platform_matrix() -> None:
     overview = DashboardOverview(
         total_requests=100,
         blocked_actions=4,
-        quarantined_actions=2,
         kpis=(),
         alerts=(),
         platform_families=(family,),
@@ -178,7 +177,7 @@ def test_dashboard_overview_summary_shares_platform_matrix() -> None:
     assert summary["platform_families"][0]["family"] == "copilot"
     assert summary["install_key_slots"][0]["program"] == "copilot"
     assert summary["available_install_key_slots"][0]["program"] == "copilot"
-    assert summary["coverage"]["protection_rate"] == 6.0
+    assert summary["coverage"]["protection_rate"] == 4.0
 
 
 def test_dashboard_overview_maps_owner_and_runtime_coverage() -> None:

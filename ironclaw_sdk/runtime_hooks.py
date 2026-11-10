@@ -434,6 +434,13 @@ def _emit(program: str, reason: str | None) -> int:
             output["permissionDecisionReason"] = reason
         sys.stdout.write(json.dumps(output) + "\n")
         return 0
+    if program == "cursor":
+        # Cursor treats empty or non-JSON preToolUse stdout as a block, so the allow path must emit a decision.
+        cursor_output: dict[str, Any] = {"continue": True, "permission": "allow" if reason is None else "deny"}
+        if reason is not None:
+            cursor_output["user_message"] = reason
+            cursor_output["agent_message"] = reason
+        sys.stdout.write(json.dumps(cursor_output) + "\n")
     if reason is None:
         return 0
     sys.stderr.write(reason + "\n")

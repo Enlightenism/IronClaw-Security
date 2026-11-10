@@ -60,7 +60,7 @@ def test_dashboard_sync_maps_paid_runtime_keys_to_summary() -> None:
 
     assert summary["owner_key"] == owner_key
     assert summary["wallet_total_units"] == 120
-    assert summary["blocked_activity_total"] == 7
+    assert summary["blocked_activity_total"] == 0
     assert summary["runtime_coverage"]["openclaw"] is True
     assert summary["runtime_coverage"]["hermes"] is True
     assert "security_guardian" not in summary["runtime_coverage"]
@@ -126,6 +126,7 @@ def test_dashboard_sync_maps_runtime_usage_and_sanitized_attack_events() -> None
     assert summary["daily_usage"][-1]["units"] == 3
     assert len(summary["attacks"]) == 1
     assert summary["attacks"][0]["id"] == "audit-blocked-1"
+    assert summary["blocked_activity_total"] == 1
     assert summary["attacks"][0]["title"] == "Prompt Injection"
     assert "sensitive prompt contents" not in str(summary["attacks"][0])
 

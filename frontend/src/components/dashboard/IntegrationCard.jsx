@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Check, Terminal } from "lucide-react";
 import { toast } from "sonner";
-import {
-  COVERAGE_LABELS,
-  RUNTIME_GATE_INSTALL,
-  RUNTIME_GATE_RETURN,
-  getRuntimeCoverage,
-} from "@/lib/runtimeCoverage";
 
 const TINT_STYLES = {
   gold: { surface: "glass-gold", accent: "#FFD700" },
@@ -235,14 +229,11 @@ const IntegrationCard = ({
   integrationId,
   agentId,
   available = false,
-  availabilityReason = "",
   revoked = false,
   revokedReason = "",
   onCreateClaim,
   savedCommand = "",
   savedCommandClaimed = false,
-  unitsUsed = 0,
-  blockedAttacks = 0,
   tint = "gold",
   testid,
 }) => {
@@ -562,36 +553,6 @@ const IntegrationCard = ({
         </h3>
       </div>
 
-      {program ? (
-        <div
-          className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-white/60"
-          data-testid={`${testid}-coverage`}
-        >
-          <span>
-            Install:{" "}
-            {COVERAGE_LABELS[getRuntimeCoverage(program, RUNTIME_GATE_INSTALL)]}
-          </span>
-          <span>
-            Return:{" "}
-            {COVERAGE_LABELS[getRuntimeCoverage(program, RUNTIME_GATE_RETURN)]}
-          </span>
-        </div>
-      ) : null}
-
-      {program ? (
-        <div
-          className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-white/60"
-          data-testid={`${testid}-usage`}
-        >
-          <span data-testid={`${testid}-units-consumed`}>
-            Units used: {unitsUsed}
-          </span>
-          <span data-testid={`${testid}-blocked-attacks`}>
-            Attacks blocked: {blockedAttacks}
-          </span>
-        </div>
-      ) : null}
-
       {isRevoked ? (
         <p
           className="mb-2 text-[11px] leading-snug text-[#BFC1C2]"
@@ -606,8 +567,8 @@ const IntegrationCard = ({
           className="mb-2 text-[11px] leading-snug text-[#BFC1C2]"
           data-testid={`${testid}-unavailable-note`}
         >
-          {availabilityReason ||
-            "A confirmed, non-refunded purchase is required before this platform can generate an install command."}
+          Your install commands will be generated with an embedded unique user
+          key.
         </p>
       ) : (
         <p className="mb-2 text-[11px] leading-snug text-[#BFC1C2]">
