@@ -962,6 +962,32 @@ class TestCheckoutSessionRoutes:
         assert response.json()["detail"]["error"] == "checkout_customer_persist_unavailable"
         assert response.json()["detail"]["retryable"] is True
 
+    def test_create_checkout_session_returns_distinct_code_for_fulfillment_storage_failure(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.create_checkout_session.side_effect = StripePersistenceError(
+            "Checkout fulfillment storage is unavailable.",
+            error_code="checkout_fulfillment_storage_unavailable",
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("app.routers.stripe_router.vault.get", MagicMock(side_effect=_TEST_PRICE_IDS.get))
+            response = client.post(
+                _billing_path("/checkout/sessions"),
+                json={
+                    "packageId": "pkg5000",
+                    "successUrl": _ALLOWED_SUCCESS_URL,
+                    "cancelUrl": _ALLOWED_CANCEL_URL,
+                },
+                headers=_auth_headers(),
+            )
+
+        assert response.status_code == 503
+        assert response.json()["detail"]["error"] == "checkout_fulfillment_storage_unavailable"
+        assert response.json()["detail"]["retryable"] is True
+
     def test_checkout_session_status_checks_owner_and_redacts_owner_metadata(
         self,
         client: TestClient,

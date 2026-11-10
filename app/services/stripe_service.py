@@ -1953,6 +1953,13 @@ class StripeService:
             session_meta.pop("save_card", None)
         session_meta[_CHECKOUT_INTEGRITY_SIGNATURE_KEY] = self._sign_checkout_integrity_metadata(session_meta)
 
+        # Storage checks and the customer mapping run before the session POST so a storage failure
+        # cannot leave an orphaned Stripe session behind. Failures raise StripePersistenceError here.
+        if mode == StripeCheckoutMode.PAYMENT and unit_credits > 0:
+            self._verify_checkout_fulfillment_storage()
+        if not customer_id and org_id:
+            customer_id = self.get_or_create_stripe_customer(org_id)
+
         params: dict[str, Any] = {
             "mode": mode.value,
             "success_url": success_url,
@@ -1978,9 +1985,6 @@ class StripeService:
         for k, v in session_meta.items():
             params[f"metadata[{k}]"] = str(v)
 
-        if mode == StripeCheckoutMode.PAYMENT and unit_credits > 0:
-            self._verify_checkout_fulfillment_storage()
-
         try:
             resp = self._get_client().post("/checkout/sessions", params)
         except StripeAPIError as exc:
@@ -1999,8 +2003,6 @@ class StripeService:
         session_id: str = resp["id"]
         checkout_url: str = resp.get("url", "")
         checkout_customer_id = customer_id or resp.get("customer")
-        if not customer_id and checkout_customer_id:
-            _persist_customer_link(org_id, str(checkout_customer_id))
         expires_at: str | None = None
         if resp.get("expires_at"):
             try:

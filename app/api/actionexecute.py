@@ -340,28 +340,32 @@ def executeaction(
             categories = promptinjection.get("categories")
             has_prompt_injection = isinstance(categories, list) and any(category in {"prompt_injection", "indirect_prompt_injection"} for category in categories)
             event_type = "quarantine_detected" if status == "quarantined" else "prompt_injection_detected" if has_prompt_injection else "action_blocked"
-            ingest_install_key_event(
-                payload=InstallKeyEventRequest(
-                    event_id=request.eventid or uuid4().hex,
-                    event_type=event_type,
-                    key_id=auth_context.key_id,
-                    owner_key=auth_context.owner_key,
-                    program=auth_context.program,
-                    action_type=request.actiontype,
-                    blocked_attack_count=1,
-                    metadata={
-                        "risk_score": finalriskscore,
-                        "prompt_injection_flagged": bool(promptinjection.get("flagged")),
-                        "categories": categories if isinstance(categories, list) else [],
-                        "scan_id": promptinjection.get("scan_id"),
-                        "session_id": request.sessionid,
-                        "client_id": request.clientid,
-                    },
-                ),
-                auth_context=auth_context,
-                install_key_registry=get_install_key_registry(),
-                wallet_registry=get_unit_wallet_registry(),
-            )
+            try:
+                ingest_install_key_event(
+                    payload=InstallKeyEventRequest(
+                        event_id=request.eventid or uuid4().hex,
+                        event_type=event_type,
+                        key_id=auth_context.key_id,
+                        owner_key=auth_context.owner_key,
+                        program=auth_context.program,
+                        action_type=request.actiontype,
+                        blocked_attack_count=1,
+                        metadata={
+                            "risk_score": finalriskscore,
+                            "prompt_injection_flagged": bool(promptinjection.get("flagged")),
+                            "categories": categories if isinstance(categories, list) else [],
+                            "scan_id": promptinjection.get("scan_id"),
+                            "session_id": request.sessionid,
+                            "client_id": request.clientid,
+                        },
+                    ),
+                    auth_context=auth_context,
+                    install_key_registry=get_install_key_registry(),
+                    wallet_registry=get_unit_wallet_registry(),
+                )
+            except Exception:  # noqa: BLE001
+                # Telemetry failure must not change the denial; the action stays blocked.
+                logger.exception("actionexecute: blocked-action telemetry failed; denial still returned")
 
         if status == "review":
             message = "Action requires manual review before execution."

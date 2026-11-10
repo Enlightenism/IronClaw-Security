@@ -417,6 +417,16 @@ the server selects the Stripe price and unit amount.
 }
 ```
 
+**Checkout error responses**
+
+- `503` with `detail.retryable: true`: durable storage was unavailable and no
+  Stripe Checkout Session was created. `detail.error` is one of:
+  - `checkout_customer_lookup_unavailable`: the durable customer mapping could not be read.
+  - `checkout_customer_persist_unavailable`: a new customer mapping could not be written.
+  - `checkout_fulfillment_storage_unavailable`: fulfillment storage is not ready, such as a missing migration 021 or RPC.
+  - `checkout_storage_unavailable`: a generic durable storage failure.
+- `400` with `detail.error: stripe_checkout_error`: Stripe rejected checkout creation.
+
 #### Stripe webhook configuration
 
 Configure Stripe to send events to **`POST /webhooks/stripe`**. This is the
@@ -520,13 +530,14 @@ Apply and verify these migrations in the production Supabase project before
 relying on durable wallet fulfillment and saved-card records:
 
 - [`015_stripe_customer_links.sql`](../supabase/migrations/015_stripe_customer_links.sql) — durable Stripe customer-to-organization mapping.
+- [`016_runtime_blocks.sql`](../supabase/migrations/016_runtime_blocks.sql) — runtime block records.
 - [`017_unit_wallets.sql`](../supabase/migrations/017_unit_wallets.sql) — persistent wallet balances and ledger.
 - [`018_billing_payment_methods.sql`](../supabase/migrations/018_billing_payment_methods.sql) — redacted saved-payment-method metadata.
 - [`019_atomic_unit_wallet_credits.sql`](../supabase/migrations/019_atomic_unit_wallet_credits.sql) — atomic, retry-safe wallet credits.
 - [`020_refund_revocation.sql`](../supabase/migrations/020_refund_revocation.sql) — wallet and install-key revocation on refunds.
 - [`021_stripe_checkout_fulfillment.sql`](../supabase/migrations/021_stripe_checkout_fulfillment.sql) — durable checkout ownership, idempotent fulfillment state, and refund-before-credit enforcement.
 
-Check the Supabase migration history for all six before enabling this workflow
+Check the Supabase migration history for all seven before enabling this workflow
 in production; repository presence alone does not confirm deployment. Configure
 Stripe to send events to `POST /webhooks/stripe` only after the migration and
 `STRIPE_WEBHOOK_SECRET` are installed in production.

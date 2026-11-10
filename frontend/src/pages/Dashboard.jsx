@@ -73,6 +73,16 @@ const CHECKOUT_ERROR_MESSAGES = {
     "Your account needs a verified email before you can buy a package. Sign out, sign back in, then try again.",
   authentication_required:
     "Your session has expired. Please sign in again to buy a package.",
+  checkout_storage_unavailable:
+    "Payment storage is temporarily unavailable. No charge was made. Please try again in a few minutes.",
+  checkout_customer_lookup_unavailable:
+    "We could not load your billing profile. No charge was made. Please try again in a few minutes.",
+  checkout_customer_persist_unavailable:
+    "We could not save your billing profile. No charge was made. Please try again in a few minutes.",
+  checkout_fulfillment_storage_unavailable:
+    "Checkout is temporarily unavailable while payment records are prepared. No charge was made. Please try again shortly.",
+  stripe_checkout_error:
+    "Stripe could not start checkout. No charge was made. Please try again.",
 };
 
 const getErrorMessage = (error) => {
@@ -284,6 +294,7 @@ const Dashboard = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [purchasingId, setPurchasingId] = useState(null);
   const [savingPaymentMethod, setSavingPaymentMethod] = useState(false);
+  const [paymentMethodsRefreshKey, setPaymentMethodsRefreshKey] = useState(0);
   const [pointerGlow, setPointerGlow] = useState({ x: 50, y: 25 });
   const [scrollShift, setScrollShift] = useState(0);
   const [_paymentState, setPaymentState] = useState("idle");
@@ -603,6 +614,7 @@ const Dashboard = () => {
             }
 
             setPaymentState("paid");
+            setPaymentMethodsRefreshKey((key) => key + 1);
             toast.dismiss("pay");
             toast.success(
               `Payment confirmed — ${credited.toLocaleString()} units added and install keys refreshed!`,
@@ -657,6 +669,7 @@ const Dashboard = () => {
     if (cardSetupState === "success") {
       setSavingPaymentMethod(false);
       toast.success("Card setup completed. Refreshing saved payment methods.");
+      setPaymentMethodsRefreshKey((key) => key + 1);
       fetchDashboard({ silent: true });
       navigate("/dashboard", { replace: true });
       return;
@@ -950,8 +963,10 @@ const Dashboard = () => {
       onAddPaymentMethod: handleAddPaymentMethod,
       addingPaymentMethod: savingPaymentMethod,
       organizationId: data?.metadata?.owner_key ?? data?.organization_id ?? "",
+      paymentMethodsRefreshKey,
     }),
     [
+      paymentMethodsRefreshKey,
       data?.has_paid,
       data?.last_payment,
       data?.metadata?.owner_key,

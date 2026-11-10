@@ -9,6 +9,9 @@ import {
   Trash2,
   Star,
   AlertTriangle,
+  ArrowLeftRight,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { useCountUp } from "@/hooks/useCountUp";
 import api, { paymentMethods } from "@/lib/api";
@@ -22,45 +25,47 @@ const normalizeBillingPackages = (data) => {
     throw new Error("Billing catalogue did not include a package map.");
   }
 
-  const tiers = Object.values(packages).map((packageInfo) => {
-    const unitCount = Number(packageInfo?.units);
-    const priceUsd = Number(packageInfo?.price_usd);
-    const tokensPerUnit = Number(packageInfo?.tokens_per_unit);
-    const tokenCoverage = Number(packageInfo?.token_coverage);
-    const id =
-      typeof packageInfo?.package_id === "string"
-        ? packageInfo.package_id.trim()
-        : "";
-    const name =
-      typeof packageInfo?.label === "string" ? packageInfo.label.trim() : "";
+  const tiers = Object.values(packages)
+    .map((packageInfo) => {
+      const unitCount = Number(packageInfo?.units);
+      const priceUsd = Number(packageInfo?.price_usd);
+      const tokensPerUnit = Number(packageInfo?.tokens_per_unit);
+      const tokenCoverage = Number(packageInfo?.token_coverage);
+      const id =
+        typeof packageInfo?.package_id === "string"
+          ? packageInfo.package_id.trim()
+          : "";
+      const name =
+        typeof packageInfo?.label === "string" ? packageInfo.label.trim() : "";
 
-    if (
-      !id ||
-      !name ||
-      !Number.isSafeInteger(unitCount) ||
-      unitCount <= 0 ||
-      !Number.isFinite(priceUsd) ||
-      priceUsd <= 0 ||
-      !Number.isSafeInteger(tokensPerUnit) ||
-      tokensPerUnit <= 0 ||
-      tokenCoverage !== unitCount * tokensPerUnit
-    ) {
-      throw new Error("Billing catalogue contains an invalid package.");
-    }
+      if (
+        !id ||
+        !name ||
+        !Number.isSafeInteger(unitCount) ||
+        unitCount <= 0 ||
+        !Number.isFinite(priceUsd) ||
+        priceUsd <= 0 ||
+        !Number.isSafeInteger(tokensPerUnit) ||
+        tokensPerUnit <= 0 ||
+        tokenCoverage !== unitCount * tokensPerUnit
+      ) {
+        throw new Error("Billing catalogue contains an invalid package.");
+      }
 
-    return {
-      id,
-      name,
-      units: unitCount.toLocaleString(),
-      unitCount,
-      price: `$${priceUsd.toLocaleString("en-US", {
-        maximumFractionDigits: 2,
-      })}`,
-      priceUsd,
-      tokensPerUnit,
-      tokenCoverage,
-    };
-  });
+      return {
+        id,
+        name,
+        units: unitCount.toLocaleString(),
+        unitCount,
+        price: `$${priceUsd.toLocaleString("en-US", {
+          maximumFractionDigits: 2,
+        })}`,
+        priceUsd,
+        tokensPerUnit,
+        tokenCoverage,
+      };
+    })
+    .sort((a, b) => a.priceUsd - b.priceUsd);
 
   if (!tiers.length) {
     throw new Error("Billing catalogue contains no packages.");
@@ -272,6 +277,7 @@ const PaymentMethodPanel = ({
   organizationId,
   onAddPaymentMethod,
   addingPaymentMethod = false,
+  refreshKey = 0,
 }) => {
   const cachedEntry = useMemo(
     () =>
@@ -378,6 +384,13 @@ const PaymentMethodPanel = ({
     hasFetchedRef.current = false;
     await fetchMethods({ force: true });
   }, [fetchMethods]);
+
+  const refreshKeyRef = useRef(refreshKey);
+  useEffect(() => {
+    if (refreshKeyRef.current === refreshKey) return;
+    refreshKeyRef.current = refreshKey;
+    refreshMethods();
+  }, [refreshKey, refreshMethods]);
 
   const addPaymentMethodButton = (
     <button
@@ -601,6 +614,7 @@ const WalletCard = ({
   onAddPaymentMethod,
   addingPaymentMethod = false,
   organizationId = "",
+  paymentMethodsRefreshKey = 0,
 }) => {
   const animated = useCountUp(balance, 1500, [balance]);
   const recentWalletHistory = Array.isArray(walletHistory) ? walletHistory : [];
@@ -610,10 +624,25 @@ const WalletCard = ({
   const [catalogueLoading, setCatalogueLoading] = useState(true);
   const [catalogueError, setCatalogueError] = useState(false);
   const [saveCard, setSaveCard] = useState(false);
+  const [showBack, setShowBack] = useState(false);
+  const [packageState, setPackageState] = useState({ index: 0, step: 1 });
 
   const packageIds = useMemo(
     () => new Set(tiers.map((tier) => tier.id)),
     [tiers],
+  );
+  const turnPackage = useCallback(
+    (step) => {
+      setPackageState((current) => {
+        const lastIndex = Math.max(tiers.length - 1, 0);
+        const from = Math.min(current.index, lastIndex);
+        return {
+          index: Math.min(Math.max(from + step, 0), lastIndex),
+          step,
+        };
+      });
+    },
+    [tiers.length],
   );
   useEffect(() => {
     let active = true;
@@ -671,7 +700,7 @@ const WalletCard = ({
     : "unavailable";
   const walletHealth = {
     active: {
-      label: "Active",
+      label: "Funded",
       classes: "border-[#22C55E]/30 bg-[#22C55E]/10 text-[#22C55E]",
     },
     empty: {
@@ -691,109 +720,186 @@ const WalletCard = ({
     classes: "border-[#F59E0B]/30 bg-[#F59E0B]/10 text-[#F59E0B]",
   };
 
+  const lastPackageIndex = Math.max(tiers.length - 1, 0);
+  const activePackageIndex = Math.min(packageState.index, lastPackageIndex);
+  const tabStep =
+    activePackageIndex === 0
+      ? 1
+      : activePackageIndex === lastPackageIndex
+        ? -1
+        : packageState.step;
+
   return (
-    <div className="glass-platinum rounded-2xl p-7" data-testid="wallet-card">
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Wallet size={18} className="text-[#E5E4E2]" />
-          <h2 className="font-tech text-sm font-semibold uppercase tracking-[0.25em] text-[#E5E4E2]">
-            Unit Wallet
-          </h2>
-        </div>
-        <span
-          className={`rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${walletHealth.classes}`}
-          data-testid="wallet-health"
-          data-wallet-status={normalizedWalletStatus}
+    <div data-testid="wallet-card" className="wallet-body">
+      <div className="mb-3 flex justify-end">
+        <button
+          type="button"
+          onClick={() => setShowBack((current) => !current)}
+          aria-expanded={showBack}
+          aria-controls="wallet-back-face"
+          data-testid="wallet-flip-toggle"
+          className="inline-flex items-center gap-2 rounded-md border border-[#FFD700]/30 px-3 py-1.5 text-xs font-semibold text-[#FFD700] transition hover:bg-[#FFD700]/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FFD700]"
         >
-          {walletHealth.label}
-        </span>
+          <ArrowLeftRight size={12} aria-hidden="true" />
+          {showBack ? "Show balance" : "Show card and history"}
+        </button>
       </div>
 
-      <StripeKeyWarning stripeMode={stripeMode} />
+      <div className="wallet-flip">
+        <div className={`wallet-flip-inner${showBack ? " is-flipped" : ""}`}>
+          <section
+            id="wallet-front-face"
+            className="wallet-face glass-platinum rounded-2xl p-7"
+            aria-label="Wallet balance"
+            aria-hidden={showBack}
+            inert={showBack ? "" : undefined}
+            data-testid="wallet-front"
+          >
+            <div className="mb-6 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Wallet size={18} className="text-[#E5E4E2]" />
+                <h2 className="font-tech text-sm font-semibold uppercase tracking-[0.25em] text-[#E5E4E2]">
+                  Unit Wallet
+                </h2>
+              </div>
+              <span
+                className={`rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${walletHealth.classes}`}
+                data-testid="wallet-health"
+                data-wallet-status={normalizedWalletStatus}
+              >
+                {walletHealth.label}
+              </span>
+            </div>
 
-      <div className="mb-1 text-xs uppercase tracking-widest text-[#BFC1C2]">
-        Available balance
-      </div>
-      <div className="mb-1 flex items-end gap-2">
-        <span
-          className="font-tech text-5xl font-bold leading-none text-white"
-          data-testid="wallet-balance"
-        >
-          {animated.toLocaleString()}
-        </span>
-        <span className="mb-1 text-sm text-[#BFC1C2]">units</span>
-      </div>
-      <p className="mb-6 text-xs text-[#737373]">
-        Pay only for what you use. No subscription, no recurring charge.
-      </p>
+            <StripeKeyWarning stripeMode={stripeMode} />
 
-      {recentWalletHistory.length > 0 && (
-        <section
-          className="mb-6 rounded-xl border border-white/10 bg-black/30 p-4"
-          data-testid="wallet-history"
-          aria-label="Recent wallet activity"
-        >
-          <h3 className="mb-3 text-xs uppercase tracking-widest text-[#BFC1C2]">
-            Recent activity
-          </h3>
-          <div className="flex flex-col gap-2">
-            {recentWalletHistory.slice(0, 5).map((entry, index) => {
-              const units = Number(entry?.units);
-              const safeUnits = Number.isFinite(units) ? Math.abs(units) : 0;
-              const entryType = String(entry?.entry_type).toLowerCase();
-              const isDebit = ["debit", "refund_revoke", "consume"].includes(
-                entryType,
-              );
-              const balanceAfter = Number(entry?.balance_after);
-              return (
-                <div
-                  key={`${entry?.created_at ?? "wallet-entry"}-${index}`}
-                  className="flex items-center justify-between gap-3 text-xs"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-white">
-                      {entry?.label || "Wallet activity"}
-                    </div>
-                    <div className="text-[#737373]">
-                      {entry?.created_at || ""}
-                      {Number.isFinite(balanceAfter) &&
-                        ` · balance ${balanceAfter.toLocaleString()}`}
-                      {entry?.support_reference &&
-                        ` · ref ${entry.support_reference}`}
-                    </div>
-                  </div>
-                  <span
-                    className={
-                      isDebit
-                        ? "shrink-0 text-[#BFC1C2]"
-                        : "shrink-0 text-[#22C55E]"
-                    }
-                  >
-                    {isDebit ? "−" : "+"}
-                    {safeUnits.toLocaleString()} units
+            <div className="mb-1 text-xs uppercase tracking-widest text-[#BFC1C2]">
+              Available balance
+            </div>
+            <div className="mb-1 flex items-end gap-2">
+              <span
+                className="font-tech text-5xl font-bold leading-none text-white"
+                data-testid="wallet-balance"
+              >
+                {animated.toLocaleString()}
+              </span>
+              <span className="mb-1 text-sm text-[#BFC1C2]">units</span>
+            </div>
+            <p className="text-xs text-[#737373]">
+              Pay only for what you use. No subscription, no recurring charge.
+            </p>
+          </section>
+
+          <section
+            id="wallet-back-face"
+            className="wallet-face wallet-face-back glass-platinum rounded-2xl p-7"
+            aria-label="Wallet history and payment method"
+            aria-hidden={!showBack}
+            inert={showBack ? undefined : ""}
+            data-testid="wallet-back"
+          >
+            {recentWalletHistory.length > 0 && (
+              <section
+                className="mb-6 rounded-xl border border-white/10 bg-black/30 p-4"
+                data-testid="wallet-history"
+                aria-label="Recent wallet activity"
+              >
+                <h3 className="mb-3 text-xs uppercase tracking-widest text-[#BFC1C2]">
+                  Recent activity
+                </h3>
+                <div className="flex flex-col gap-2">
+                  {recentWalletHistory.slice(0, 5).map((entry, index) => {
+                    const units = Number(entry?.units);
+                    const safeUnits = Number.isFinite(units)
+                      ? Math.abs(units)
+                      : 0;
+                    const entryType = String(entry?.entry_type).toLowerCase();
+                    const isDebit = [
+                      "debit",
+                      "refund_revoke",
+                      "consume",
+                    ].includes(entryType);
+                    const balanceAfter = Number(entry?.balance_after);
+                    return (
+                      <div
+                        key={`${entry?.created_at ?? "wallet-entry"}-${index}`}
+                        className="flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate text-white">
+                            {entry?.label || "Wallet activity"}
+                          </div>
+                          <div className="text-[#737373]">
+                            {entry?.created_at || ""}
+                            {Number.isFinite(balanceAfter) &&
+                              ` · balance ${balanceAfter.toLocaleString()}`}
+                            {entry?.support_reference &&
+                              ` · ref ${entry.support_reference}`}
+                          </div>
+                        </div>
+                        <span
+                          className={
+                            isDebit
+                              ? "shrink-0 text-[#BFC1C2]"
+                              : "shrink-0 text-[#22C55E]"
+                          }
+                        >
+                          {isDebit ? "−" : "+"}
+                          {safeUnits.toLocaleString()} units
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            <label className="mb-4 flex cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-[#BFC1C2]">
+              <input
+                type="checkbox"
+                checked={saveCard}
+                onChange={(event) => setSaveCard(event.target.checked)}
+                data-testid="save-card-consent"
+                className="mt-0.5 accent-[#FFD700]"
+              />
+              <span>
+                Save my card with Stripe for future purchases. This is optional
+                and does not create a subscription or recurring charge.
+              </span>
+            </label>
+
+            <div
+              className="rounded-xl border border-white/10 bg-black/30 p-4"
+              data-testid="saved-payment-method"
+            >
+              <div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-widest text-[#BFC1C2]">
+                <CreditCard size={14} /> Payment method
+                <StripeModeTag stripeMode={stripeMode} />
+              </div>
+
+              {hasPaid && lastPayment && (
+                <div className="mb-3 flex items-center gap-2 rounded-lg border border-[#22C55E]/20 bg-[#22C55E]/5 px-3 py-2 text-xs">
+                  <ShieldCheck size={13} className="text-[#22C55E]" />
+                  <span className="text-[#22C55E]">
+                    Last purchase:{" "}
+                    <span className="font-semibold">{lastPayment.label}</span> ·
+                    ${Number(lastPayment.amount).toFixed(2)}
                   </span>
                 </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
+              )}
 
-      <label className="mb-4 flex cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-[#BFC1C2]">
-        <input
-          type="checkbox"
-          checked={saveCard}
-          onChange={(event) => setSaveCard(event.target.checked)}
-          data-testid="save-card-consent"
-          className="mt-0.5 accent-[#FFD700]"
-        />
-        <span>
-          Save my card with Stripe for future purchases. This is optional and
-          does not create a subscription or recurring charge.
-        </span>
-      </label>
+              <PaymentMethodPanel
+                organizationId={organizationId}
+                onAddPaymentMethod={onAddPaymentMethod}
+                addingPaymentMethod={addingPaymentMethod}
+                refreshKey={paymentMethodsRefreshKey}
+              />
+            </div>
+          </section>
+        </div>
+      </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="mt-6">
         {catalogueLoading && (
           <div className="text-xs text-[#BFC1C2]" role="status">
             Loading protection packages…
@@ -804,76 +910,92 @@ const WalletCard = ({
             Billing packages are unavailable. Refresh the page to try again.
           </div>
         )}
-        {!catalogueLoading &&
-          !catalogueError &&
-          tiers.map((t) => (
-            <div key={t.id} className="flex flex-col">
-              {t.bestDeal ? (
-                <div className="mb-1.5">
-                  <EnterpriseBadge />
-                </div>
-              ) : (
-                <div className="mb-1.5 h-[22px]" />
-              )}
-              <button
-                type="button"
-                onClick={() => handleCheckoutPurchase(t.id)}
-                disabled={!!purchasingId}
-                data-testid={`purchase-${t.id}`}
-                title={
-                  stripeMode === "unconfigured"
-                    ? "Stripe publishable key is missing from the frontend build, but purchase will still be attempted through the configured checkout flow."
-                    : undefined
-                }
-                className="btn-shimmer flex flex-col items-center justify-center rounded-xl border border-[#E5E4E2]/25 bg-white/5 px-3 py-4 text-center transition hover:border-[#FFD700]/60 hover:bg-white/[0.08] disabled:opacity-60"
-              >
-                <span className="font-tech text-[11px] font-semibold uppercase tracking-widest text-[#BFC1C2]">
-                  {t.name}
-                </span>
-                <span className="font-tech text-base font-bold text-white">
-                  {t.units}
-                </span>
-                <span className="text-[11px] text-[#BFC1C2]">units</span>
-                <span className="mt-1 text-[10px] text-[#737373]">
-                  {t.tokensPerUnit.toLocaleString()} tokens / unit
-                </span>
-                <span className="mt-2 flex items-center gap-1 text-lg font-semibold text-[#FFD700]">
-                  {purchasingId === t.id ? (
-                    <Loader2 size={16} className="animate-spin" />
+        {!catalogueLoading && !catalogueError && tiers.length > 0 && (
+          <div
+            data-testid="wallet-deck"
+            role="group"
+            aria-label="Protection packages"
+            className="wallet-deck mx-auto grid w-full max-w-md"
+          >
+            {tiers.map((t, index) => {
+              const depth = Math.abs(index - activePackageIndex);
+              let deckState = "passed";
+              if (index === activePackageIndex) {
+                deckState = "top";
+              } else if (index > activePackageIndex) {
+                deckState = "stacked";
+              }
+              const isTop = deckState === "top";
+              return (
+                <div
+                  key={t.id}
+                  data-testid={`deck-page-${t.id}`}
+                  data-deck-state={deckState}
+                  aria-hidden={!isTop}
+                  inert={isTop ? undefined : ""}
+                  style={{
+                    zIndex: tiers.length - depth,
+                    "--deck-depth": depth,
+                  }}
+                  className="wallet-deck-page flex flex-col p-3"
+                >
+                  {t.bestDeal ? (
+                    <div className="mb-1.5">
+                      <EnterpriseBadge />
+                    </div>
                   ) : (
-                    t.price
+                    <div className="mb-1.5 h-[22px]" />
                   )}
-                </span>
-              </button>
-            </div>
-          ))}
-      </div>
-
-      <div
-        className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4"
-        data-testid="saved-payment-method"
-      >
-        <div className="mb-3 flex items-center gap-2 text-xs uppercase tracking-widest text-[#BFC1C2]">
-          <CreditCard size={14} /> Payment method
-          <StripeModeTag stripeMode={stripeMode} />
-        </div>
-
-        {hasPaid && lastPayment && (
-          <div className="mb-3 flex items-center gap-2 rounded-lg border border-[#22C55E]/20 bg-[#22C55E]/5 px-3 py-2 text-xs">
-            <ShieldCheck size={13} className="text-[#22C55E]" />
-            <span className="text-[#22C55E]">
-              Last purchase:{" "}
-              <span className="font-semibold">{lastPayment.label}</span> · $
-              {Number(lastPayment.amount).toFixed(2)}
-            </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCheckoutPurchase(t.id)}
+                    disabled={!!purchasingId}
+                    data-testid={`purchase-${t.id}`}
+                    title={
+                      stripeMode === "unconfigured"
+                        ? "Stripe publishable key is missing from the frontend build, but purchase will still be attempted through the configured checkout flow."
+                        : undefined
+                    }
+                    className="btn-shimmer flex flex-col items-center justify-center rounded-xl border border-[#E5E4E2]/25 bg-white/5 px-3 py-4 text-center transition hover:border-[#FFD700]/60 hover:bg-white/[0.08] disabled:opacity-60"
+                  >
+                    <span className="font-tech text-[11px] font-semibold uppercase tracking-widest text-[#BFC1C2]">
+                      {t.name}
+                    </span>
+                    <span className="font-tech text-base font-bold text-white">
+                      {t.units}
+                    </span>
+                    <span className="text-[11px] text-[#BFC1C2]">units</span>
+                    <span className="mt-1 text-[10px] text-[#737373]">
+                      {t.tokensPerUnit.toLocaleString()} tokens / unit
+                    </span>
+                    <span className="mt-2 flex items-center gap-1 text-lg font-semibold text-[#FFD700]">
+                      {purchasingId === t.id ? (
+                        <Loader2 size={16} className="animate-spin" />
+                      ) : (
+                        t.price
+                      )}
+                    </span>
+                  </button>
+                  {isTop && (
+                    <button
+                      type="button"
+                      onClick={() => turnPackage(tabStep)}
+                      data-testid="wallet-deck-tab"
+                      className="wallet-deck-tab"
+                    >
+                      {tabStep > 0 ? (
+                        <ChevronRight size={14} aria-hidden="true" />
+                      ) : (
+                        <ChevronLeft size={14} aria-hidden="true" />
+                      )}
+                      {tabStep > 0 ? "Next Package" : "Previous Package"}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
-
-        <PaymentMethodPanel
-          organizationId={organizationId}
-          onAddPaymentMethod={onAddPaymentMethod}
-          addingPaymentMethod={addingPaymentMethod}
-        />
       </div>
     </div>
   );

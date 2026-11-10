@@ -861,6 +861,76 @@ describe("card setup return", () => {
     expect(mockApiGet).toHaveBeenCalledWith("/dashboard/overview");
     expect(mockNavigate).toHaveBeenCalledWith("/dashboard", { replace: true });
   });
+
+  it("bumps the saved-method refresh key after successful card setup", async () => {
+    mockLocation.search = "?card_setup=success";
+
+    await renderDashboard();
+
+    await waitFor(() => {
+      expect(mockCapturedWalletProps).not.toBeNull();
+      expect(mockCapturedWalletProps.paymentMethodsRefreshKey).toBeGreaterThan(
+        0,
+      );
+    });
+  });
+});
+
+// =============================================================================
+// Checkout storage error messages
+// =============================================================================
+
+describe("checkout storage error messages", () => {
+  const rejectCheckoutWith = (detail) => {
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/sessions") {
+        return Promise.reject({ response: { data: { detail } } });
+      }
+      return Promise.resolve({ data: {} });
+    });
+  };
+
+  it("shows the storage-unavailable message with a no-charge assurance", async () => {
+    rejectCheckoutWith({
+      error: "checkout_storage_unavailable",
+      detail: "storage down",
+      retryable: true,
+    });
+
+    await renderDashboard();
+    await waitFor(() => {
+      expect(mockCapturedWalletProps).not.toBeNull();
+    });
+
+    await act(async () => {
+      await mockCapturedWalletProps.onPurchase("pkg_5000");
+    });
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        "Payment storage is temporarily unavailable. No charge was made. Please try again in a few minutes.",
+      );
+    });
+  });
+
+  it("shows the Stripe checkout error message with a no-charge assurance", async () => {
+    rejectCheckoutWith({ error: "stripe_checkout_error", detail: "boom" });
+
+    await renderDashboard();
+    await waitFor(() => {
+      expect(mockCapturedWalletProps).not.toBeNull();
+    });
+
+    await act(async () => {
+      await mockCapturedWalletProps.onPurchase("pkg_5000");
+    });
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        "Stripe could not start checkout. No charge was made. Please try again.",
+      );
+    });
+  });
 });
 
 // =============================================================================

@@ -2131,6 +2131,88 @@ class TestCheckoutSessionCreation:
         assert exc_info.value.error_code == "checkout_fulfillment_storage_unavailable"
         mock_client.post.assert_not_called()
 
+    def test_checkout_creates_and_persists_customer_before_session_post(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        def _route_post(path: str, params: dict[str, Any] | None = None, **_: Any) -> dict[str, Any]:
+            if path == "/customers":
+                return {"id": "cus_first_buyer_001"}
+            return {
+                "id": "cs_first_buyer_001",
+                "url": "https://checkout.stripe.com/first-buyer",
+                "customer": "cus_first_buyer_001",
+            }
+
+        mock_client.post.side_effect = _route_post
+
+        svc_wired.create_checkout_session(
+            org_id=_ORG,
+            price_id="price_first_buyer_001",
+            unit_credits=5_000,
+            success_url="https://example.com/ok",
+            cancel_url="https://example.com/cancel",
+            owner_key="buyer@ironclaw.test",
+            metadata={"package_id": "pkg_5000"},
+        )
+
+        assert [call.args[0] for call in mock_client.post.call_args_list] == ["/customers", "/checkout/sessions"]
+        session_params = mock_client.post.call_args_list[1].args[1]
+        assert session_params["customer"] == "cus_first_buyer_001"
+        assert "customer_creation" not in session_params
+        assert svc_wired.resolve_customer_id(_ORG) == "cus_first_buyer_001"
+
+    def test_checkout_customer_persist_failure_skips_session_creation(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        mock_client.post.return_value = {"id": "cus_unpersisted_001"}
+        monkeypatch.setattr(
+            "app.services.stripe_service._persist_customer_link",
+            MagicMock(
+                side_effect=StripePersistenceError(
+                    "durable customer link storage is unavailable",
+                    error_code="checkout_customer_persist_unavailable",
+                ),
+            ),
+        )
+
+        with pytest.raises(StripePersistenceError) as exc_info:
+            svc_wired.create_checkout_session(
+                org_id=_ORG,
+                price_id="price_persist_fail_001",
+                success_url="https://example.com/ok",
+                cancel_url="https://example.com/cancel",
+            )
+
+        assert exc_info.value.error_code == "checkout_customer_persist_unavailable"
+        assert [call.args[0] for call in mock_client.post.call_args_list] == ["/customers"]
+
+    def test_checkout_reuses_existing_customer_mapping(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        svc_wired.register_customer_mapping(_ORG, _CUSTOMER_ID)
+        mock_client.post.return_value = {
+            "id": "cs_existing_mapping_001",
+            "url": "https://checkout.stripe.com/existing",
+            "customer": _CUSTOMER_ID,
+        }
+
+        svc_wired.create_checkout_session(
+            org_id=_ORG,
+            price_id="price_existing_mapping_001",
+            success_url="https://example.com/ok",
+            cancel_url="https://example.com/cancel",
+        )
+
+        assert [call.args[0] for call in mock_client.post.call_args_list] == ["/checkout/sessions"]
+        assert mock_client.post.call_args.args[1]["customer"] == _CUSTOMER_ID
+
 
 class TestCompleteCheckoutSession:
     def _seed_session(

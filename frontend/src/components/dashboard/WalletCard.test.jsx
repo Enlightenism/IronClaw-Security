@@ -325,6 +325,7 @@ describe("tier purchase buttons", () => {
 
     await renderWalletCard({ onPurchase, organizationId: "" });
 
+    await openPackage(user, "pkg_25000");
     await user.click(screen.getByTestId("purchase-pkg_25000"));
     expect(onPurchase).toHaveBeenCalledWith("pkg_25000", false);
     expect(onPurchase).toHaveBeenCalledTimes(1);
@@ -336,6 +337,7 @@ describe("tier purchase buttons", () => {
 
     await renderWalletCard({ onPurchase, organizationId: "" });
 
+    await openPackage(user, "pkg_60000");
     await user.click(screen.getByTestId("purchase-pkg_60000"));
     expect(onPurchase).toHaveBeenCalledWith("pkg_60000", false);
     expect(onPurchase).toHaveBeenCalledTimes(1);
@@ -346,6 +348,7 @@ describe("tier purchase buttons", () => {
     const onPurchase = jest.fn();
 
     await renderWalletCard({ onPurchase, organizationId: "" });
+    await user.click(screen.getByTestId("wallet-flip-toggle"));
     const consent = screen.getByTestId("save-card-consent");
     expect(consent).not.toBeChecked();
 
@@ -387,6 +390,112 @@ describe("tier purchase buttons", () => {
     expect(screen.getByTestId("purchase-pkg_5000")).not.toBeDisabled();
     expect(screen.getByTestId("purchase-pkg_25000")).not.toBeDisabled();
     expect(screen.getByTestId("purchase-pkg_60000")).not.toBeDisabled();
+  });
+});
+
+async function openPackage(user, id) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (
+      screen.getByTestId(`deck-page-${id}`).getAttribute("data-deck-state") ===
+      "top"
+    ) {
+      return;
+    }
+    await user.click(screen.getByTestId("wallet-deck-tab"));
+  }
+  throw new Error(`${id} did not reach the top of the package deck.`);
+}
+
+describe("wallet package deck", () => {
+  it("shows Starter on top with a Next Package tab and hides the other pages", async () => {
+    await renderWalletCard({ organizationId: "" });
+
+    expect(screen.getByTestId("deck-page-pkg_5000")).toHaveAttribute(
+      "data-deck-state",
+      "top",
+    );
+    expect(screen.getByTestId("deck-page-pkg_5000")).toHaveAttribute(
+      "aria-hidden",
+      "false",
+    );
+    expect(screen.getByTestId("deck-page-pkg_25000")).toHaveAttribute(
+      "data-deck-state",
+      "stacked",
+    );
+    expect(screen.getByTestId("deck-page-pkg_25000")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    expect(screen.getByTestId("deck-page-pkg_25000")).toHaveAttribute("inert");
+    expect(screen.getAllByTestId("wallet-deck-tab")).toHaveLength(1);
+    expect(screen.getByTestId("wallet-deck-tab")).toHaveTextContent(
+      "Next Package",
+    );
+  });
+
+  it("turns forward and back through the deck with direction-aware tab labels", async () => {
+    const user = userEvent.setup();
+    await renderWalletCard({ organizationId: "" });
+
+    await user.click(screen.getByTestId("wallet-deck-tab"));
+    expect(screen.getByTestId("deck-page-pkg_25000")).toHaveAttribute(
+      "data-deck-state",
+      "top",
+    );
+    expect(screen.getByTestId("wallet-deck-tab")).toHaveTextContent(
+      "Next Package",
+    );
+
+    await user.click(screen.getByTestId("wallet-deck-tab"));
+    expect(screen.getByTestId("deck-page-pkg_60000")).toHaveAttribute(
+      "data-deck-state",
+      "top",
+    );
+    expect(screen.getByTestId("wallet-deck-tab")).toHaveTextContent(
+      "Previous Package",
+    );
+
+    await user.click(screen.getByTestId("wallet-deck-tab"));
+    expect(screen.getByTestId("deck-page-pkg_25000")).toHaveAttribute(
+      "data-deck-state",
+      "top",
+    );
+    expect(screen.getByTestId("wallet-deck-tab")).toHaveTextContent(
+      "Previous Package",
+    );
+
+    await user.click(screen.getByTestId("wallet-deck-tab"));
+    expect(screen.getByTestId("deck-page-pkg_5000")).toHaveAttribute(
+      "data-deck-state",
+      "top",
+    );
+    expect(screen.getByTestId("wallet-deck-tab")).toHaveTextContent(
+      "Next Package",
+    );
+  });
+
+  it("activates the deck tab from the keyboard", async () => {
+    const user = userEvent.setup();
+    await renderWalletCard({ organizationId: "" });
+
+    screen.getByTestId("wallet-deck-tab").focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByTestId("deck-page-pkg_25000")).toHaveAttribute(
+      "data-deck-state",
+      "top",
+    );
+  });
+
+  it("sends the package on top of the deck to the purchase handler", async () => {
+    const user = userEvent.setup();
+    const onPurchase = jest.fn();
+
+    await renderWalletCard({ onPurchase, organizationId: "" });
+    await openPackage(user, "pkg_60000");
+    await user.click(screen.getByTestId("purchase-pkg_60000"));
+
+    expect(onPurchase).toHaveBeenCalledWith("pkg_60000", false);
   });
 });
 
@@ -716,7 +825,9 @@ describe("paymentMethods.list failure", () => {
   });
 
   it("shows an explicit retrieval error rather than an empty-state message", async () => {
+    const user = userEvent.setup();
     await renderWalletCard({ organizationId: uniqueOrgId() });
+    await user.click(screen.getByTestId("wallet-flip-toggle"));
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent(
@@ -728,5 +839,68 @@ describe("paymentMethods.list failure", () => {
       screen.queryByText(/No payment method on file yet/i),
     ).not.toBeInTheDocument();
     expect(mockToastSuccess).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// Wallet flip, package sheen, and saved-method refresh
+// =============================================================================
+
+describe("wallet flip and package sheen", () => {
+  it("toggles between the balance face and the card face with the keyboard", async () => {
+    const user = userEvent.setup();
+    await renderWalletCard({ organizationId: "" });
+
+    const toggle = screen.getByTestId("wallet-flip-toggle");
+    const front = screen.getByTestId("wallet-front");
+    const back = screen.getByTestId("wallet-back");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(front).toHaveAttribute("aria-hidden", "false");
+    expect(front).not.toHaveAttribute("inert");
+    expect(back).toHaveAttribute("aria-hidden", "true");
+    expect(back).toHaveAttribute("inert");
+
+    toggle.focus();
+    await user.keyboard("{Enter}");
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(front).toHaveAttribute("aria-hidden", "true");
+    expect(front).toHaveAttribute("inert");
+    expect(back).toHaveAttribute("aria-hidden", "false");
+    expect(back).not.toHaveAttribute("inert");
+  });
+
+  it("gives every package button the sheen class", async () => {
+    await renderWalletCard({ organizationId: "" });
+
+    for (const id of ["pkg_5000", "pkg_25000", "pkg_60000"]) {
+      expect(screen.getByTestId(`purchase-${id}`)).toHaveClass("btn-shimmer");
+    }
+  });
+
+  it("refetches saved payment methods when the refresh key changes", async () => {
+    const orgId = uniqueOrgId();
+    setupTwoMethods();
+    const view = await renderWalletCard({
+      organizationId: orgId,
+      paymentMethodsRefreshKey: 0,
+    });
+    const callsBefore = mockPaymentMethodsList.mock.calls.length;
+
+    await act(async () => {
+      view.rerender(
+        <WalletCard
+          {...DEFAULT_PROPS}
+          organizationId={orgId}
+          paymentMethodsRefreshKey={1}
+        />,
+      );
+    });
+
+    await waitFor(() => {
+      expect(mockPaymentMethodsList.mock.calls.length).toBeGreaterThan(
+        callsBefore,
+      );
+    });
   });
 });
