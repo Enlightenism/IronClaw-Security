@@ -659,7 +659,7 @@ const Landing = () => {
                     </h3>
                   </div>
 
-                  <ul className="space-y-3 text-sm leading-relaxed text-[#E5E4E2]">
+                  <ul className="space-y-3 text-base leading-relaxed text-[#E5E4E2] sm:text-[15px]">
                     <li className="border-l border-[#FFD700]/30 pl-4">
                       <span className="mb-1 block font-tech text-[10px] uppercase tracking-[0.26em] text-[#BFC1C2]">
                         How it works

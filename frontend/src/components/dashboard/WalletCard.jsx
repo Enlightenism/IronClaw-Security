@@ -7,7 +7,6 @@ import {
   Zap,
   ShieldCheck,
   Trash2,
-  Star,
   AlertTriangle,
   ArrowLeftRight,
   ChevronLeft,
@@ -243,7 +242,7 @@ const StripeModeTag = ({ stripeMode }) => {
   const isLive = stripeMode === "live";
   return (
     <span
-      className={`ml-2 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest ${
+      className={`stripe-mode-tag ml-2 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest ${
         isLive
           ? "border border-[#22C55E]/40 bg-[#22C55E]/10 text-[#22C55E]"
           : "border border-[#38BDF8]/40 bg-[#38BDF8]/10 text-[#38BDF8]"
@@ -422,29 +421,17 @@ const PaymentMethodPanel = ({
     </button>
   );
 
-  const handleSetDefault = async (methodId) => {
-    if (!organizationId || !methodId) return;
-
-    setActionId(methodId);
-    try {
-      await paymentMethods.setDefault(methodId, organizationId);
-      toast.success("Default payment method updated.");
-      await refreshMethods();
-    } catch (error) {
-      toast.error(
-        getPaymentMethodErrorMessage(error, "Could not update default method."),
-      );
-    } finally {
-      setActionId(null);
-    }
-  };
-
   const handleDelete = async (methodId) => {
     if (!organizationId || !methodId) return;
 
     setActionId(methodId);
     try {
       await paymentMethods.delete(methodId, organizationId);
+      const remainingMethods = methods.filter((m) => m.methodid !== methodId);
+      const nextDefaultId = defaultId === methodId ? null : defaultId;
+      setMethods(remainingMethods);
+      setDefaultId(nextDefaultId);
+      syncCache(remainingMethods, nextDefaultId, methodsStatus, methodsMessage);
       toast.success("Payment method removed.");
       await refreshMethods();
     } catch (error) {
@@ -571,22 +558,6 @@ const PaymentMethodPanel = ({
             </div>
 
             <div className="flex items-center gap-1.5">
-              {!isDefault && (
-                <button
-                  type="button"
-                  onClick={() => handleSetDefault(m.methodid)}
-                  disabled={!!actionId}
-                  data-testid={`set-default-${m.methodid}`}
-                  title="Set as default"
-                  className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 text-[#737373] transition hover:border-[#FFD700]/40 hover:text-[#FFD700] disabled:opacity-50"
-                >
-                  {busy ? (
-                    <Loader2 size={11} className="animate-spin" />
-                  ) : (
-                    <Star size={11} />
-                  )}
-                </button>
-              )}
               <button
                 type="button"
                 onClick={() => handleDelete(m.methodid)}

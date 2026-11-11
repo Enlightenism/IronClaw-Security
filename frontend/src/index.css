@@ -431,8 +431,8 @@ svg {
 /* side tab: one per deck, shown only on the top page */
 .wallet-deck-tab {
     position: absolute;
-    top: 50%;
-    right: -0.9rem;
+    top: 42%;
+    right: -1.2rem;
     z-index: 1;
     display: inline-flex;
     align-items: center;
@@ -621,6 +621,13 @@ canvas[data-testid="particle-field"] {
     .wallet-deck-tab svg {
         width: 0.6rem;
         height: 0.6rem;
+    }
+
+    .stripe-mode-tag {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
     }
 }
 

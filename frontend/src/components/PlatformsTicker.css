@@ -231,6 +231,22 @@
   }
 }
 
+@media (max-width: 640px) {
+  .platforms-ticker-item {
+    gap: 12px;
+    padding: 0 28px;
+  }
+
+  .platform-logo {
+    width: 34px;
+    height: 34px;
+  }
+
+  .platform-name {
+    font-size: 26px;
+  }
+}
+
 /* index.css freezes all animations under reduced motion; re-assert the scroll with !important so the ticker keeps moving on every device. */
 @media (prefers-reduced-motion: reduce) {
   .platforms-ticker-track {

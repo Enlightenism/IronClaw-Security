@@ -705,7 +705,7 @@ describe("Payment method panel — current behavior", () => {
     expect(screen.queryByText(/abc123/i)).not.toBeInTheDocument();
   });
 
-  it("renders set-default and delete controls for returned methods", async () => {
+  it("renders delete controls for returned methods without a set-default control", async () => {
     setupTwoMethods();
     await renderWalletCard({ organizationId: uniqueOrgId() });
 
@@ -713,7 +713,9 @@ describe("Payment method panel — current behavior", () => {
       await screen.findByTestId("delete-method-pm_default"),
     ).toBeInTheDocument();
     expect(screen.getByTestId("delete-method-pm_other")).toBeInTheDocument();
-    expect(screen.getByTestId("set-default-pm_other")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("set-default-pm_other"),
+    ).not.toBeInTheDocument();
   });
 
   it("does not show an add-card action that can accidentally start a purchase", async () => {
@@ -729,57 +731,6 @@ describe("Payment method panel — current behavior", () => {
 // =============================================================================
 
 describe("Payment method interactions", () => {
-  it("sets a non-default payment method as default", async () => {
-    const user = userEvent.setup();
-    const orgId = uniqueOrgId();
-    mockPaymentMethodsList
-      .mockResolvedValueOnce(TWO_METHODS_RESPONSE)
-      .mockResolvedValueOnce({
-        data: {
-          status: "ok",
-          defaultmethodid: "pm_other",
-          methods: TWO_METHODS_RESPONSE.data.methods,
-        },
-      });
-    mockPaymentMethodsSetDefault.mockResolvedValue({ data: { status: "ok" } });
-
-    await renderWalletCard({ organizationId: orgId });
-
-    const button = await screen.findByTestId("set-default-pm_other");
-    await user.click(button);
-
-    await waitFor(() => {
-      expect(mockPaymentMethodsSetDefault).toHaveBeenCalledWith(
-        "pm_other",
-        orgId,
-      );
-    });
-
-    expect(mockToastSuccess).toHaveBeenCalledWith(
-      "Default payment method updated.",
-    );
-  });
-
-  it("shows the Stripe action error without retrying through another endpoint", async () => {
-    const user = userEvent.setup();
-    mockPaymentMethodsSetDefault.mockRejectedValue({
-      response: { data: { detail: "Primary set-default failed." } },
-    });
-    mockPaymentMethodsList.mockResolvedValueOnce(TWO_METHODS_RESPONSE);
-
-    await renderWalletCard({ organizationId: uniqueOrgId() });
-
-    const button = await screen.findByTestId("set-default-pm_other");
-    await user.click(button);
-
-    await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith(
-        "Primary set-default failed.",
-      );
-    });
-    expect(mockApiPost).not.toHaveBeenCalled();
-  });
-
   it("removes a payment method", async () => {
     const user = userEvent.setup();
     const orgId = uniqueOrgId();
