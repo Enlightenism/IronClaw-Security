@@ -1688,71 +1688,46 @@ class TestInvoiceResponseDataclass:
 
 
 # ===========================================================================
-# Section N — attach_payment_method
-# ===========================================================================
-
-
-class TestAttachPaymentMethod:
-    def test_attach_payment_method_returns_payment_method_response(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = {
-            "id": _PM_ID,
-            "type": "card",
-            "card": {"brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2028},
-            "customer": _CUSTOMER_ID,
-        }
-        result = svc_wired.attach_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=_PM_ID)
-        assert isinstance(result, PaymentMethodResponse)
-        assert result.payment_method_id == _PM_ID
-        assert result.customer_id == _CUSTOMER_ID
-
-    def test_attach_payment_method_stored_in_service(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = {
-            "id": _PM_ID,
-            "type": "card",
-            "card": {"brand": "mastercard", "last4": "5555", "exp_month": 6, "exp_year": 2027},
-            "customer": _CUSTOMER_ID,
-        }
-        svc_wired.attach_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=_PM_ID)
-        assert _PM_ID in svc_wired._payment_methods
-
-    def test_attach_payment_method_calls_stripe_api(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = {
-            "id": _PM_ID,
-            "type": "card",
-            "card": {"brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2028},
-            "customer": _CUSTOMER_ID,
-        }
-        svc_wired.attach_payment_method(customer_id=_CUSTOMER_ID, payment_method_id=_PM_ID)
-        mock_client.post.assert_called_once()
-        call_path = mock_client.post.call_args[0][0]
-        assert _PM_ID in call_path or "attach" in call_path
-
-
-# ===========================================================================
 # Section O — detach_payment_method
 # ===========================================================================
 
 
+def _stripe_payment_method_payload() -> dict[str, Any]:
+    return {
+        "id": _PM_ID,
+        "object": "payment_method",
+        "type": "card",
+        "customer": _CUSTOMER_ID,
+        "card": {"brand": "visa", "last4": "4242", "exp_month": 12, "exp_year": 2028},
+    }
+
+
 class TestDetachPaymentMethod:
     def test_detach_payment_method_removes_from_store(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.get.return_value = _stripe_payment_method_payload()
         mock_client.post.return_value = {"id": _PM_ID, "customer": None}
         svc_wired._payment_methods[_PM_ID] = _build_payment_method_record()
         svc_wired.detach_payment_method(payment_method_id=_PM_ID)
         assert _PM_ID not in svc_wired._payment_methods
 
     def test_detach_payment_method_calls_stripe_api(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.get.return_value = _stripe_payment_method_payload()
         mock_client.post.return_value = {"id": _PM_ID, "customer": None}
         svc_wired._payment_methods[_PM_ID] = _build_payment_method_record()
         svc_wired.detach_payment_method(payment_method_id=_PM_ID)
+        mock_client.get.assert_called_once_with(f"/payment_methods/{_PM_ID}")
         mock_client.post.assert_called_once()
 
-    def test_detach_missing_payment_method_raises_not_found(self, svc: StripeService) -> None:
+    def test_detach_missing_payment_method_raises_not_found(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.get.side_effect = StripeAPIError("No such payment_method", http_status=404)
         with pytest.raises(StripePaymentMethodNotFoundError):
-            svc.detach_payment_method(payment_method_id="pm_does_not_exist")
+            svc_wired.detach_payment_method(payment_method_id="pm_does_not_exist")
+        mock_client.post.assert_not_called()
 
-    def test_detach_payment_method_not_found_error_is_service_error(self, svc: StripeService) -> None:
+    def test_detach_payment_method_not_found_error_is_service_error(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.get.side_effect = StripeAPIError("No such payment_method", http_status=404)
         with pytest.raises(StripeServiceError):
-            svc.detach_payment_method(payment_method_id="pm_does_not_exist")
+            svc_wired.detach_payment_method(payment_method_id="pm_does_not_exist")
 
 
 # ===========================================================================
@@ -1998,36 +1973,6 @@ class TestListSubscriptionsForOrg:
 
 
 class TestPaymentMethodSetupSession:
-    def test_setup_session_has_no_line_items_or_payment_intent(
-        self,
-        svc_wired: StripeService,
-        mock_client: MagicMock,
-    ) -> None:
-        mock_client.post.return_value = {
-            "id": "cs_setup_test_001",
-            "url": "https://checkout.stripe.com/c/setup_test_001",
-        }
-
-        result = svc_wired.create_payment_method_setup_session(
-            org_id=_ORG,
-            customer_id=_CUSTOMER_ID,
-            success_url="https://example.com/dashboard?card_setup=success",
-            cancel_url="https://example.com/dashboard?card_setup=cancel",
-        )
-
-        assert result == {
-            "session_id": "cs_setup_test_001",
-            "checkout_url": "https://checkout.stripe.com/c/setup_test_001",
-            "org_id": _ORG,
-            "mode": "setup",
-        }
-        params = mock_client.post.call_args.args[1]
-        assert params["mode"] == "setup"
-        assert params["customer"] == _CUSTOMER_ID
-        assert params["payment_method_types[0]"] == "card"
-        assert not any(key.startswith("line_items[") for key in params)
-        assert not any(key.startswith("payment_intent_data[") for key in params)
-
     def test_setup_session_webhook_does_not_credit_wallet(self, svc: StripeService) -> None:
         result = svc.handle_webhook_event(
             {
@@ -2056,19 +2001,17 @@ class TestPaymentMethodSetupSession:
 
 
 class TestCheckoutSessionCreation:
-    @pytest.mark.parametrize("save_card", [False, True])
-    def test_checkout_saves_card_only_with_explicit_consent(
+    def test_checkout_does_not_request_card_saving(
         self,
         svc_wired: StripeService,
         mock_client: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
-        save_card: bool,
     ) -> None:
         mock_client.post.return_value = {
-            "id": "cs_save_card_consent_001",
+            "id": "cs_no_save_card_001",
             "url": "https://checkout.stripe.com/test",
             "customer": _CUSTOMER_ID,
-            "payment_intent": "pi_save_card_consent_001",
+            "payment_intent": "pi_no_save_card_001",
         }
         persisted: dict[str, Any] = {}
         monkeypatch.setattr(
@@ -2086,18 +2029,18 @@ class TestCheckoutSessionCreation:
             customer_id=_CUSTOMER_ID,
             owner_key="buyer@ironclaw.test",
             metadata={"package_id": "pkg_5000"},
-            save_card=save_card,
         )
 
         stripe_params = mock_client.post.call_args.args[1]
-        assert stripe_params.get("payment_intent_data[setup_future_usage]") == ("off_session" if save_card else None)
-        assert stripe_params["metadata[save_card]"] == str(save_card).lower()
-        assert persisted["session_id"] == "cs_save_card_consent_001"
+        assert "payment_intent_data[setup_future_usage]" not in stripe_params
+        assert "customer_creation" not in stripe_params
+        assert "metadata[save_card]" not in stripe_params
+        assert persisted["session_id"] == "cs_no_save_card_001"
         assert persisted["owner_key"] == "buyer@ironclaw.test"
         assert persisted["package_id"] == "pkg_5000"
         assert persisted["units"] == 5_000
-        assert persisted["payment_intent"] == "pi_save_card_consent_001"
-        assert persisted["save_card"] is save_card
+        assert persisted["payment_intent"] == "pi_no_save_card_001"
+        assert "save_card" not in persisted
 
     def test_checkout_preflight_failure_skips_stripe_session_creation(
         self,
@@ -2686,9 +2629,10 @@ class TestStripePaymentMethodNotFoundError:
         err = StripePaymentMethodNotFoundError("pm_ghost_xyz")
         assert "pm_ghost_xyz" in str(err)
 
-    def test_raised_on_detach_of_unknown_pm(self, svc: StripeService) -> None:
+    def test_raised_on_detach_of_unknown_pm(self, svc_wired: StripeService, mock_client: MagicMock) -> None:
+        mock_client.get.side_effect = StripeAPIError("No such payment_method", http_status=404)
         with pytest.raises(StripePaymentMethodNotFoundError):
-            svc.detach_payment_method(payment_method_id="pm_unknown_001")
+            svc_wired.detach_payment_method(payment_method_id="pm_unknown_001")
 
     def test_raised_on_set_default_of_unknown_pm(self, svc: StripeService) -> None:
         with pytest.raises(StripePaymentMethodNotFoundError):

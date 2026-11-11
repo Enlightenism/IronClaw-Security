@@ -141,8 +141,6 @@ const DEFAULT_PROPS = {
   hasPaid: false,
   onPurchase: jest.fn(),
   purchasingId: null,
-  onAddPaymentMethod: jest.fn(),
-  addingPaymentMethod: false,
   organizationId: "",
 };
 
@@ -291,15 +289,12 @@ describe("balance display", () => {
     expect(screen.getByTestId("wallet-balance")).toHaveTextContent("0");
   });
 
-  it("renders the units consumed on the front face", async () => {
-    await renderWalletCard({
-      balance: 12500,
-      unitsConsumed: 480,
-      organizationId: "",
-    });
-    expect(screen.getByTestId("wallet-units-consumed")).toHaveTextContent(
-      (480).toLocaleString(),
-    );
+  it("does not render units used on the front face", async () => {
+    await renderWalletCard({ balance: 12500, organizationId: "" });
+    expect(
+      screen.queryByTestId("wallet-units-consumed"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Units used")).not.toBeInTheDocument();
   });
 
   it("does not claim the wallet is active when health is unavailable", async () => {
@@ -326,7 +321,7 @@ describe("tier purchase buttons", () => {
     await renderWalletCard({ onPurchase, organizationId: "" });
 
     await user.click(screen.getByTestId("purchase-pkg_5000"));
-    expect(onPurchase).toHaveBeenCalledWith("pkg_5000", false);
+    expect(onPurchase).toHaveBeenCalledWith("pkg_5000");
     expect(onPurchase).toHaveBeenCalledTimes(1);
   });
 
@@ -338,7 +333,7 @@ describe("tier purchase buttons", () => {
 
     await openPackage(user, "pkg_25000");
     await user.click(screen.getByTestId("purchase-pkg_25000"));
-    expect(onPurchase).toHaveBeenCalledWith("pkg_25000", false);
+    expect(onPurchase).toHaveBeenCalledWith("pkg_25000");
     expect(onPurchase).toHaveBeenCalledTimes(1);
   });
 
@@ -350,23 +345,21 @@ describe("tier purchase buttons", () => {
 
     await openPackage(user, "pkg_60000");
     await user.click(screen.getByTestId("purchase-pkg_60000"));
-    expect(onPurchase).toHaveBeenCalledWith("pkg_60000", false);
+    expect(onPurchase).toHaveBeenCalledWith("pkg_60000");
     expect(onPurchase).toHaveBeenCalledTimes(1);
   });
 
-  it("passes save-card consent only after the user opts in", async () => {
+  it("does not render a save-card checkbox and sends only the package ID", async () => {
     const user = userEvent.setup();
     const onPurchase = jest.fn();
 
     await renderWalletCard({ onPurchase, organizationId: "" });
     await user.click(screen.getByTestId("wallet-flip-toggle"));
-    const consent = screen.getByTestId("save-card-consent");
-    expect(consent).not.toBeChecked();
+    expect(screen.queryByTestId("save-card-consent")).not.toBeInTheDocument();
 
-    await user.click(consent);
     await user.click(screen.getByTestId("purchase-pkg_5000"));
 
-    expect(onPurchase).toHaveBeenCalledWith("pkg_5000", true);
+    expect(onPurchase).toHaveBeenCalledWith("pkg_5000");
   });
 
   it("does not throw when onPurchase prop is omitted", async () => {
@@ -523,7 +516,7 @@ describe("wallet package deck", () => {
     await openPackage(user, "pkg_60000");
     await user.click(screen.getByTestId("purchase-pkg_60000"));
 
-    expect(onPurchase).toHaveBeenCalledWith("pkg_60000", false);
+    expect(onPurchase).toHaveBeenCalledWith("pkg_60000");
   });
 });
 
@@ -595,30 +588,16 @@ describe("Payment method panel — current behavior", () => {
     expect(screen.getByTestId("saved-payment-method")).toBeInTheDocument();
   });
 
-  it("explains that a card can be saved without making a purchase", async () => {
+  it("explains that a card can be saved during Stripe checkout", async () => {
     await renderWalletCard({ organizationId: uniqueOrgId() });
 
     await waitFor(() => {
       expect(screen.getByText(/No saved card yet/i)).toBeInTheDocument();
       expect(
-        screen.getByText(/Add one securely without making a purchase/i),
+        screen.getByText(/Save my information for faster checkout/i),
       ).toBeInTheDocument();
     });
-    expect(screen.getByTestId("add-payment-method")).toBeEnabled();
-  });
-
-  it("starts the no-charge card setup flow without triggering a package purchase", async () => {
-    const user = userEvent.setup();
-    const onAddPaymentMethod = jest.fn();
-    await renderWalletCard({
-      organizationId: uniqueOrgId(),
-      onAddPaymentMethod,
-    });
-
-    await user.click(screen.getByTestId("add-payment-method"));
-
-    expect(onAddPaymentMethod).toHaveBeenCalledTimes(1);
-    expect(DEFAULT_PROPS.onPurchase).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("add-payment-method")).not.toBeInTheDocument();
   });
 
   it("renders loading copy while payment methods are being fetched", async () => {
@@ -718,11 +697,13 @@ describe("Payment method panel — current behavior", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("does not show an add-card action that can accidentally start a purchase", async () => {
+  it("does not render an add-card action that can accidentally start a purchase", async () => {
     setupTwoMethods();
     await renderWalletCard({ organizationId: uniqueOrgId() });
 
-    expect(screen.queryByTestId("add-new-card-btn")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /add card/i }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -754,6 +735,11 @@ describe("Payment method interactions", () => {
       expect(mockPaymentMethodsDelete).toHaveBeenCalledWith("pm_other", orgId);
     });
 
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("delete-method-pm_other"),
+      ).not.toBeInTheDocument();
+    });
     expect(mockToastSuccess).toHaveBeenCalledWith("Payment method removed.");
   });
 
@@ -808,7 +794,9 @@ describe("Payment method interactions", () => {
 
     await renderWalletCard({ onPurchase, organizationId: uniqueOrgId() });
 
-    expect(screen.queryByTestId("add-new-card-btn")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /add card/i }),
+    ).not.toBeInTheDocument();
     expect(onPurchase).not.toHaveBeenCalled();
   });
 });
@@ -861,6 +849,7 @@ describe("wallet flip and package sheen", () => {
     const front = screen.getByTestId("wallet-front");
     const back = screen.getByTestId("wallet-back");
     expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveTextContent("Show Cards");
     expect(front).toHaveAttribute("aria-hidden", "false");
     expect(front).not.toHaveAttribute("inert");
     expect(back).toHaveAttribute("aria-hidden", "true");
@@ -870,6 +859,7 @@ describe("wallet flip and package sheen", () => {
     await user.keyboard("{Enter}");
 
     expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveTextContent("Show balance");
     expect(front).toHaveAttribute("aria-hidden", "true");
     expect(front).toHaveAttribute("inert");
     expect(back).toHaveAttribute("aria-hidden", "false");

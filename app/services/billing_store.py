@@ -53,7 +53,6 @@ class StripeCheckoutFulfillmentStore:
         units: int,
         payment_intent: str | None,
         customer_id: str | None,
-        save_card: bool,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_session_id = str(session_id or "").strip()
@@ -75,7 +74,8 @@ class StripeCheckoutFulfillmentStore:
                 "p_units": int(units),
                 "p_payment_intent": str(payment_intent or "").strip() or None,
                 "p_customer_id": str(customer_id or "").strip() or None,
-                "p_save_card": bool(save_card),
+                # Card saving is handled by Stripe Checkout; the RPC keeps this column for schema compatibility.
+                "p_save_card": False,
                 "p_metadata": metadata or {},
             },
         )

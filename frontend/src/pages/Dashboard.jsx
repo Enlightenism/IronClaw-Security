@@ -9,7 +9,7 @@ import IntegrationCard from "@/components/dashboard/IntegrationCard";
 import SecurityAnalysis from "@/components/dashboard/SecurityAnalysis";
 import WalletCard from "@/components/dashboard/WalletCard";
 import { useAuth } from "@/context/AuthContext";
-import api, { paymentMethods, payments, wallet } from "@/lib/api";
+import api, { payments } from "@/lib/api";
 
 const DASHBOARD_LOGO_SRC = "/images/logo128pxl.svg";
 const DASHBOARD_KNIGHT_SRC = "/images/Golden%20Knight%204k%202gb.png";
@@ -164,7 +164,6 @@ const Dashboard = () => {
   const [loadingData, setLoadingData] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [purchasingId, setPurchasingId] = useState(null);
-  const [savingPaymentMethod, setSavingPaymentMethod] = useState(false);
   const [paymentMethodsRefreshKey, setPaymentMethodsRefreshKey] = useState(0);
   const [pointerGlow, setPointerGlow] = useState({ x: 50, y: 25 });
   const [scrollShift, setScrollShift] = useState(0);
@@ -414,24 +413,14 @@ const Dashboard = () => {
               return;
             }
 
-            const [snapshot, ledgerResponse] = await Promise.all([
-              fetchDashboard({ silent: true }),
-              wallet.getLedger(),
-            ]);
+            const snapshot = await fetchDashboard({ silent: true });
             if (!snapshot) {
               throw new Error("Dashboard and install-key refresh failed.");
             }
 
-            const walletBalance = Number(ledgerResponse?.data?.balance);
             const dashboardBalance = Number(snapshot.dashboard?.wallet_units);
-            if (
-              !Number.isSafeInteger(walletBalance) ||
-              !Number.isSafeInteger(dashboardBalance) ||
-              walletBalance !== dashboardBalance
-            ) {
-              throw new Error(
-                "Wallet balance views have not synchronized yet.",
-              );
+            if (!Number.isSafeInteger(dashboardBalance)) {
+              throw new Error("Wallet balance could not be confirmed.");
             }
 
             const installMetadata = snapshot.tokens?.install_metadata;
@@ -501,26 +490,9 @@ const Dashboard = () => {
     const params = new URLSearchParams(location.search);
     const sessionId = params.get("session_id");
     const checkoutState = params.get("checkout");
-    const cardSetupState = params.get("card_setup");
 
     if (!sessionId) {
       polledRef.current = false;
-    }
-
-    if (cardSetupState === "success") {
-      setSavingPaymentMethod(false);
-      toast.success("Card setup completed. Refreshing saved payment methods.");
-      setPaymentMethodsRefreshKey((key) => key + 1);
-      fetchDashboard({ silent: true });
-      navigate("/dashboard", { replace: true });
-      return;
-    }
-
-    if (cardSetupState === "cancel") {
-      setSavingPaymentMethod(false);
-      toast.error("Card setup was canceled. No charge was made.");
-      navigate("/dashboard", { replace: true });
-      return;
     }
 
     if (checkoutState === "cancel") {
@@ -549,7 +521,7 @@ const Dashboard = () => {
     }
   }, [fetchDashboard, location.search, navigate, pollPayment]);
 
-  const handlePurchase = useCallback(async (rawPackageId, saveCard = false) => {
+  const handlePurchase = useCallback(async (rawPackageId) => {
     const packageId = normalizePackageId(rawPackageId);
 
     if (!packageId) {
@@ -575,7 +547,6 @@ const Dashboard = () => {
         quantity: 1,
         successUrl: verifiedSuccessUrl,
         cancelUrl: cancelUrl.toString(),
-        saveCard: saveCard === true,
       });
 
       const redirectUrl = res?.checkout_url || res?.url;
@@ -592,34 +563,6 @@ const Dashboard = () => {
     } catch (e) {
       toast.error(getErrorMessage(e));
       setPurchasingId(null);
-    }
-  }, []);
-
-  const handleAddPaymentMethod = useCallback(async () => {
-    setSavingPaymentMethod(true);
-    const successUrl = new URL(`${globalThis.location.origin}/dashboard`);
-    successUrl.searchParams.set("card_setup", "success");
-    const cancelUrl = new URL(`${globalThis.location.origin}/dashboard`);
-    cancelUrl.searchParams.set("card_setup", "cancel");
-
-    try {
-      const { data: result } = await paymentMethods.createSetupSession(
-        successUrl.toString(),
-        cancelUrl.toString(),
-      );
-      const redirectUrl = result?.checkout_url || result?.url;
-      if (!redirectUrl) {
-        throw new Error("Missing secure card setup URL.");
-      }
-
-      if (typeof globalThis.location.assign === "function") {
-        globalThis.location.assign(redirectUrl);
-      } else {
-        globalThis.location.href = redirectUrl;
-      }
-    } catch (error) {
-      setSavingPaymentMethod(false);
-      toast.error(getErrorMessage(error));
     }
   }, []);
 
@@ -726,22 +669,14 @@ const Dashboard = () => {
     setPaymentMethodsRefreshKey((key) => key + 1);
     try {
       const { data: reconciliation } = await payments.reconcileRecent();
-      const [snapshot, ledgerResponse] = await Promise.all([
-        fetchDashboard({ silent: true }),
-        wallet.getLedger(),
-      ]);
+      const snapshot = await fetchDashboard({ silent: true });
       if (!snapshot) {
         throw new Error("Dashboard and install-key refresh failed.");
       }
 
-      const walletBalance = Number(ledgerResponse?.data?.balance);
       const dashboardBalance = Number(snapshot.dashboard?.wallet_units);
-      if (
-        !Number.isSafeInteger(walletBalance) ||
-        !Number.isSafeInteger(dashboardBalance) ||
-        walletBalance !== dashboardBalance
-      ) {
-        throw new Error("Wallet balance views have not synchronized yet.");
+      if (!Number.isSafeInteger(dashboardBalance)) {
+        throw new Error("Wallet balance could not be confirmed.");
       }
 
       const sessions = Array.isArray(reconciliation?.sessions)
@@ -844,7 +779,6 @@ const Dashboard = () => {
   const walletProps = useMemo(
     () => ({
       balance: data?.wallet_units ?? 0,
-      unitsConsumed: Number(data?.wallet?.units_consumed) || 0,
       walletStatus: data?.wallet_status ?? "unavailable",
       lastPayment: data?.last_payment,
       walletHistory: Array.isArray(data?.wallet_history)
@@ -853,8 +787,6 @@ const Dashboard = () => {
       hasPaid: data?.has_paid,
       onPurchase: handlePurchase,
       purchasingId,
-      onAddPaymentMethod: handleAddPaymentMethod,
-      addingPaymentMethod: savingPaymentMethod,
       organizationId: data?.metadata?.owner_key ?? data?.organization_id ?? "",
       paymentMethodsRefreshKey,
     }),
@@ -865,13 +797,10 @@ const Dashboard = () => {
       data?.metadata?.owner_key,
       data?.organization_id,
       data?.wallet_units,
-      data?.wallet?.units_consumed,
       data?.wallet_status,
       data?.wallet_history,
-      handleAddPaymentMethod,
       handlePurchase,
       purchasingId,
-      savingPaymentMethod,
     ],
   );
 

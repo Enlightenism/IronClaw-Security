@@ -312,11 +312,6 @@ class CheckoutSessionCreateRequest(BaseModel):
     cancel_url: str = Field(..., alias="cancelUrl", description="Redirect URL on cancelled payment")
     customer_id: str | None = Field(default=None, alias="customerId", description="Existing Stripe customer ID")
     metadata: dict[str, Any] = Field(default_factory=dict)
-    save_card: bool = Field(
-        default=False,
-        alias="saveCard",
-        description="Explicit consent to save this card for future off-session use",
-    )
     organization_id: str | None = Field(default=None, alias="organizationId")
     organizationid: str | None = Field(default=None)
     org_id: str | None = Field(default=None, alias="orgId")
@@ -395,31 +390,6 @@ class CustomerCreateRequest(BaseModel):
             return None
         normalized = value.strip()
         return normalized or None
-
-
-class AttachPaymentMethodRequest(BaseModel):
-    payment_method_id: str = Field(..., alias="paymentMethodId", description="Stripe PaymentMethod ID to attach")
-    set_as_default: bool = Field(default=False, alias="setAsDefault")
-
-    @field_validator("payment_method_id")
-    @classmethod
-    def normalize_payment_method_id(cls, value: str) -> str:
-        return value.strip()
-
-
-class PaymentMethodSetupSessionRequest(BaseModel):
-    success_url: str = Field(..., alias="successUrl")
-    cancel_url: str = Field(..., alias="cancelUrl")
-
-    @field_validator("success_url", "cancel_url")
-    @classmethod
-    def validate_redirect_url(cls, value: str) -> str:
-        normalized = value.strip()
-        if not _is_valid_http_url(normalized):
-            raise ValueError("invalid redirect URL, must be absolute http(s) URL")
-        if not _is_allowed_redirect_url(normalized):
-            raise ValueError("invalid redirect URL host")
-        return normalized
 
 
 class SetDefaultPaymentMethodRequest(BaseModel):
@@ -1053,67 +1023,6 @@ async def get_or_create_customer_api(
     return await get_or_create_customer(body=body, request=request, auth=auth, svc=svc)
 
 
-@router.post(
-    "/payment-methods/setup-session",
-    status_code=status.HTTP_201_CREATED,
-    tags=["billing", "payment-methods"],
-)
-async def create_payment_method_setup_session(
-    body: PaymentMethodSetupSessionRequest,
-    auth: AuthContext = Depends(get_auth_context),
-    svc: StripeService = Depends(get_stripe_service),
-) -> JSONResponse:
-    if getattr(auth, "authenticated", False) is not True:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "authentication_required"},
-        )
-
-    owner_key = resolve_authenticated_billing_owner(auth)
-    if not owner_key:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "verified_billing_identity_required"},
-        )
-
-    org_id = _resolve_org_id(auth) or owner_key
-    try:
-        customer_id = svc.get_or_create_stripe_customer(
-            org_id=org_id,
-            metadata={"owner_key": owner_key},
-        )
-        result = svc.create_payment_method_setup_session(
-            org_id=org_id,
-            customer_id=customer_id,
-            success_url=body.success_url,
-            cancel_url=body.cancel_url,
-        )
-    except StripeServiceError as exc:
-        logger.exception("stripe_router.payment_method_setup_session_failed org_id=%s", org_id)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={
-                "error": "payment_method_setup_unavailable",
-                "detail": "Stripe could not start secure card setup. Please try again.",
-            },
-        ) from exc
-
-    return JSONResponse(status_code=status.HTTP_201_CREATED, content=result)
-
-
-@api_router.post(
-    "/payment-methods/setup-session",
-    status_code=status.HTTP_201_CREATED,
-    tags=["billing", "payment-methods"],
-)
-async def create_payment_method_setup_session_api(
-    body: PaymentMethodSetupSessionRequest,
-    auth: AuthContext = Depends(get_auth_context),
-    svc: StripeService = Depends(get_stripe_service),
-) -> JSONResponse:
-    return await create_payment_method_setup_session(body=body, auth=auth, svc=svc)
-
-
 @router.post("/checkout/sessions", status_code=status.HTTP_201_CREATED, tags=["billing", "checkout"])
 async def create_checkout_session(
     request: Request,
@@ -1204,7 +1113,6 @@ async def create_checkout_session(
             customer_id=customer_id,
             owner_key=owner_key,
             metadata=metadata,
-            save_card=body.save_card,
         )
     except StripePersistenceError as exc:
         logger.exception(
@@ -1631,60 +1539,6 @@ async def get_metered_usage_log_api(
     svc: StripeService = Depends(get_stripe_service),
 ) -> JSONResponse:
     return await get_metered_usage_log(request=request, limit=limit, auth=auth, svc=svc)
-
-
-@router.post("/payment-methods/attach", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
-async def attach_payment_method(
-    body: AttachPaymentMethodRequest,
-    request: Request,
-    auth: AuthContext = Depends(get_auth_context),
-    svc: StripeService = Depends(get_stripe_service),
-) -> JSONResponse:
-    org_id = _require_org_id(auth=auth, request=request, body=body)
-    customer_id = _require_customer_id(svc, org_id)
-    try:
-        result = svc.attach_payment_method(
-            customer_id=customer_id,
-            payment_method_id=body.payment_method_id,
-            set_as_default=body.set_as_default,
-        )
-    except StripeServiceError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"error": "attach_error", "detail": str(exc)},
-        ) from exc
-
-    return JSONResponse(status_code=status.HTTP_200_OK, content=result.to_dict())
-
-
-@router.post("/payment-methods", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
-async def attach_payment_method_alias(
-    body: AttachPaymentMethodRequest,
-    request: Request,
-    auth: AuthContext = Depends(get_auth_context),
-    svc: StripeService = Depends(get_stripe_service),
-) -> JSONResponse:
-    return await attach_payment_method(body=body, request=request, auth=auth, svc=svc)
-
-
-@api_router.post("/payment-methods/attach", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
-async def attach_payment_method_api(
-    body: AttachPaymentMethodRequest,
-    request: Request,
-    auth: AuthContext = Depends(get_auth_context),
-    svc: StripeService = Depends(get_stripe_service),
-) -> JSONResponse:
-    return await attach_payment_method(body=body, request=request, auth=auth, svc=svc)
-
-
-@api_router.post("/payment-methods", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])
-async def attach_payment_method_api_alias(
-    body: AttachPaymentMethodRequest,
-    request: Request,
-    auth: AuthContext = Depends(get_auth_context),
-    svc: StripeService = Depends(get_stripe_service),
-) -> JSONResponse:
-    return await attach_payment_method(body=body, request=request, auth=auth, svc=svc)
 
 
 @router.post("/payment-methods/{payment_method_id}/detach", status_code=status.HTTP_200_OK, tags=["billing", "payment-methods"])

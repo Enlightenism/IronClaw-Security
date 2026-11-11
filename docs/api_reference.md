@@ -509,20 +509,15 @@ session status is authoritative.
 
 #### Saved payment methods
 
-`POST /billing/payment-methods/setup-session` creates a hosted Stripe Setup
-Checkout session without charging the customer. Its request body contains
-`successUrl` and `cancelUrl`; URLs must use an allowed application host. The
-`201` response contains `session_id`, `checkout_url`, `org_id`, and `mode`.
-After setup, `GET /billing/payment-methods` retrieves the saved methods from
-Stripe and returns redacted card details such as brand, last four digits, and
-expiration. The dashboard displays them through
+Cards are saved only through Stripe Checkout's "Save my information for faster
+checkout" option during a paid checkout. IronClaw does not send a save-card flag
+and does not offer a separate card-setup route. `GET /billing/payment-methods`
+retrieves the saved methods from Stripe and returns redacted card details such
+as brand, last four digits, and expiration. The dashboard displays them through
 `GET /api/ui/billing/payment-methods?organizationid={organization_id}` (also
 available at `/ui/billing/payment-methods`), whose `methods` array is sourced
-from Stripe when a customer is mapped. Checkout saves a card for future
-off-session use only when the authenticated user explicitly opts in with
-`saveCard: true`; omitted or false consent does not set Stripe's future-use
-option. A retrieval error is returned as `502`, not an empty success response.
-Full card numbers are never stored by IronClaw.
+from Stripe when a customer is mapped. A retrieval error is returned as `502`,
+not an empty success response. Full card numbers are never stored by IronClaw.
 
 #### Database deployment prerequisites
 

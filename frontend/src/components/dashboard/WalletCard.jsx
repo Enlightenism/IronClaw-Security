@@ -279,12 +279,7 @@ const getPaymentMethodErrorMessage = (error, fallback) => {
   return fallback;
 };
 
-const PaymentMethodPanel = ({
-  organizationId,
-  onAddPaymentMethod,
-  addingPaymentMethod = false,
-  refreshKey = 0,
-}) => {
+const PaymentMethodPanel = ({ organizationId, refreshKey = 0 }) => {
   const cachedEntry = useMemo(
     () =>
       organizationId ? (paymentMethodCache.get(organizationId) ?? null) : null,
@@ -398,45 +393,20 @@ const PaymentMethodPanel = ({
     refreshMethods();
   }, [refreshKey, refreshMethods]);
 
-  const addPaymentMethodButton = (
-    <button
-      type="button"
-      onClick={onAddPaymentMethod}
-      disabled={
-        !organizationId ||
-        typeof onAddPaymentMethod !== "function" ||
-        addingPaymentMethod
-      }
-      data-testid="add-payment-method"
-      className="self-start rounded-md border border-[#FFD700]/30 px-3 py-1.5 text-xs font-semibold text-[#FFD700] transition hover:bg-[#FFD700]/10 disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      {addingPaymentMethod ? (
-        <span className="inline-flex items-center gap-2">
-          <Loader2 size={12} className="animate-spin" />
-          Opening secure setup…
-        </span>
-      ) : (
-        "Add card securely"
-      )}
-    </button>
-  );
-
   const handleDelete = async (methodId) => {
     if (!organizationId || !methodId) return;
 
     setActionId(methodId);
     try {
       await paymentMethods.delete(methodId, organizationId);
-      const remainingMethods = methods.filter((m) => m.methodid !== methodId);
-      const nextDefaultId = defaultId === methodId ? null : defaultId;
-      setMethods(remainingMethods);
-      setDefaultId(nextDefaultId);
-      syncCache(remainingMethods, nextDefaultId, methodsStatus, methodsMessage);
       toast.success("Payment method removed.");
       await refreshMethods();
     } catch (error) {
       toast.error(
-        getPaymentMethodErrorMessage(error, "Could not remove payment method."),
+        getPaymentMethodErrorMessage(
+          error,
+          error?.message || "Could not remove payment method.",
+        ),
       );
     } finally {
       setActionId(null);
@@ -449,7 +419,6 @@ const PaymentMethodPanel = ({
         <div className="flex items-center gap-2 py-2 text-xs text-[#737373]">
           <Loader2 size={13} className="animate-spin" /> Loading saved methods…
         </div>
-        {addPaymentMethodButton}
       </div>
     );
   }
@@ -470,7 +439,6 @@ const PaymentMethodPanel = ({
             Retry
           </button>
         </div>
-        {addPaymentMethodButton}
       </div>
     );
   }
@@ -495,10 +463,9 @@ const PaymentMethodPanel = ({
             {methodsStatus === "customer_mapping_unavailable"
               ? methodsMessage ||
                 "Saved cards cannot be verified because the Stripe customer mapping is unavailable."
-              : "No saved card yet. Add one securely without making a purchase."}
+              : "No saved card yet. Check Save my information for faster checkout on the Stripe payment page to save one."}
           </span>
         </div>
-        {addPaymentMethodButton}
       </div>
     );
   }
@@ -576,22 +543,18 @@ const PaymentMethodPanel = ({
           </div>
         );
       })}
-      {addPaymentMethodButton}
     </div>
   );
 };
 
 const WalletCard = ({
   balance = 0,
-  unitsConsumed = 0,
   walletStatus = "unavailable",
   lastPayment,
   walletHistory = [],
   hasPaid,
   onPurchase,
   purchasingId,
-  onAddPaymentMethod,
-  addingPaymentMethod = false,
   organizationId = "",
   paymentMethodsRefreshKey = 0,
 }) => {
@@ -602,7 +565,6 @@ const WalletCard = ({
   const [tiers, setTiers] = useState([]);
   const [catalogueLoading, setCatalogueLoading] = useState(true);
   const [catalogueError, setCatalogueError] = useState(false);
-  const [saveCard, setSaveCard] = useState(false);
   const [showBack, setShowBack] = useState(false);
   const [packageState, setPackageState] = useState({ index: 0, step: 1 });
 
@@ -664,9 +626,9 @@ const WalletCard = ({
         return;
       }
 
-      onPurchase(tierId, saveCard);
+      onPurchase(tierId);
     },
-    [onPurchase, packageIds, saveCard],
+    [onPurchase, packageIds],
   );
 
   const normalizedWalletStatus = [
@@ -720,7 +682,7 @@ const WalletCard = ({
           className="inline-flex items-center gap-2 rounded-md border border-[#FFD700]/30 px-3 py-1.5 text-xs font-semibold text-[#FFD700] transition hover:bg-[#FFD700]/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#FFD700]"
         >
           <ArrowLeftRight size={12} aria-hidden="true" />
-          {showBack ? "Show balance" : "Show card and history"}
+          {showBack ? "Show balance" : "Show Cards"}
         </button>
       </div>
 
@@ -767,17 +729,6 @@ const WalletCard = ({
             <p className="text-xs text-[#737373]">
               Pay only for what you use. No subscription, no recurring charge.
             </p>
-            <div className="mt-5 flex items-center justify-between border-t border-white/15 pt-4">
-              <span className="text-xs uppercase tracking-widest text-[#BFC1C2]">
-                Units used
-              </span>
-              <span
-                className="font-tech text-lg font-bold text-white"
-                data-testid="wallet-units-consumed"
-              >
-                {(Number(unitsConsumed) || 0).toLocaleString()}
-              </span>
-            </div>
           </section>
 
           <section
@@ -844,20 +795,6 @@ const WalletCard = ({
               </section>
             )}
 
-            <label className="mb-4 flex cursor-pointer items-start gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-[#BFC1C2]">
-              <input
-                type="checkbox"
-                checked={saveCard}
-                onChange={(event) => setSaveCard(event.target.checked)}
-                data-testid="save-card-consent"
-                className="mt-0.5 accent-[#FFD700]"
-              />
-              <span>
-                Save my card with Stripe for future purchases. This is optional
-                and does not create a subscription or recurring charge.
-              </span>
-            </label>
-
             <div
               className="rounded-xl border border-white/10 bg-black/30 p-4"
               data-testid="saved-payment-method"
@@ -880,8 +817,6 @@ const WalletCard = ({
 
               <PaymentMethodPanel
                 organizationId={organizationId}
-                onAddPaymentMethod={onAddPaymentMethod}
-                addingPaymentMethod={addingPaymentMethod}
                 refreshKey={paymentMethodsRefreshKey}
               />
             </div>

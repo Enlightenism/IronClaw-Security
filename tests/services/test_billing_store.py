@@ -102,7 +102,6 @@ def test_stripe_checkout_fulfillment_store_persists_trusted_session_fields(
         units=5_000,
         payment_intent="pi_store_001",
         customer_id="cus_store_001",
-        save_card=True,
         metadata={"source": "stripe.checkout"},
     )
 
@@ -120,7 +119,7 @@ def test_stripe_checkout_fulfillment_store_persists_trusted_session_fields(
             "p_units": 5_000,
             "p_payment_intent": "pi_store_001",
             "p_customer_id": "cus_store_001",
-            "p_save_card": True,
+            "p_save_card": False,
             "p_metadata": {"source": "stripe.checkout"},
         },
     )

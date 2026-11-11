@@ -5,7 +5,7 @@ import os
 import re
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app.core.auth import AuthContext, get_auth_context
@@ -62,9 +62,6 @@ __all__ = [
     "_safe_data",
     "_safe_single_row",
     "_apply_eq",
-    "_apply_neq",
-    "_find_matching_row",
-    "_resolve_inserted_method_id",
     "_BRAND_DISPLAY",
     "_MAX_METHODS",
     "_STATUS_COLOR",
@@ -75,8 +72,6 @@ __all__ = [
     "DeletePaymentMethodResponse",
     "PackageCatalogueEntry",
     "SetDefaultPaymentMethodResponse",
-    "AddPaymentMethodRequest",
-    "AddPaymentMethodResponse",
     "router",
     "get_supabase_client",
     "is_supabase_configured",
@@ -199,20 +194,6 @@ class BillingPaymentMethodsNotFoundResponse(BaseModel):
     message: str
     generatedat: str
     environment: str
-
-
-class AddPaymentMethodRequest(BaseModel):
-    stripe_payment_method_id: str = Field(min_length=1)
-    set_as_default: bool = False
-
-
-class AddPaymentMethodResponse(BaseModel):
-    status: str
-    methodid: str
-    organizationid: str
-    generatedat: str
-    environment: str
-    message: str
 
 
 class SetDefaultPaymentMethodResponse(BaseModel):
@@ -526,28 +507,6 @@ def _apply_eq(query: Any, field: str, value: Any) -> Any:
     return query
 
 
-def _apply_neq(query: Any, field: str, value: Any) -> Any:
-    if hasattr(query, "neq"):
-        return query.neq(field, value)
-    return query
-
-
-def _find_matching_row(rows: list[dict[str, Any]], organizationid: str, methodid: str) -> dict[str, Any] | None:
-    for row in rows:
-        row_org = str(row.get("organization_id") or row.get("organizationid") or "").strip()
-        row_method = _normalize_method_id(row.get("stripe_payment_method_id") or row.get("payment_method_id") or row.get("id") or row.get("methodid"))
-        if row_org == organizationid and row_method == methodid:
-            return row
-    return None
-
-
-def _resolve_inserted_method_id(insert_result: Any, fallback_methodid: str) -> str:
-    row = _safe_single_row(insert_result)
-    if not row:
-        return fallback_methodid
-    return _normalize_method_id(row.get("stripe_payment_method_id") or row.get("payment_method_id") or row.get("id") or row.get("methodid") or fallback_methodid)
-
-
 def _fetch_payment_methods_from_stripe(
     svc: StripeService,
     organizationid: str,
@@ -750,102 +709,6 @@ async def get_payment_methods(
     )
 
 
-@router.post(
-    "/api/ui/billing/payment-methods",
-    include_in_schema=False,
-    response_model=AddPaymentMethodResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-@router.post(
-    "/ui/billing/payment-methods",
-    include_in_schema=False,
-    response_model=AddPaymentMethodResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-@router.post(
-    "/api/ui/billing/payment-method",
-    include_in_schema=False,
-    response_model=AddPaymentMethodResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-@router.post(
-    "/ui/billing/payment-method",
-    include_in_schema=False,
-    response_model=AddPaymentMethodResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def add_payment_method(
-    request: Request,
-    response: Response,
-    payload: AddPaymentMethodRequest = Body(...),
-    auth: AuthContext = Depends(get_auth_context),
-) -> AddPaymentMethodResponse:
-    _ensure_supabase_available_for_write()
-
-    organizationid = _require_org_id(auth=auth, request=request)
-    env = _get_environment()
-    generatedat = datetime.now(UTC).isoformat()
-    normalized_methodid = _normalize_method_id(payload.stripe_payment_method_id)
-
-    if not normalized_methodid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "payment_method_id_required", "detail": "Payment method ID is required."},
-        )
-
-    existing_methods = _fetch_payment_methods_from_supabase(organizationid=organizationid)
-    if len(existing_methods) >= _MAX_METHODS:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": "payment_method_limit_reached",
-                "detail": f"Maximum allowed payment methods per organization is {_MAX_METHODS}.",
-            },
-        )
-
-    client = get_supabase_client()
-    table = _supabase_table(client)
-
-    insert_payload = {
-        "organization_id": organizationid,
-        "stripe_payment_method_id": normalized_methodid,
-        "is_default": bool(payload.set_as_default),
-        "status": "active",
-        "created_at": generatedat,
-    }
-
-    try:
-        insert_query = table.insert(insert_payload)
-        insert_result = _safe_execute(insert_query)
-        resolved_methodid = _resolve_inserted_method_id(insert_result, normalized_methodid)
-
-        if payload.set_as_default:
-            reset_query = table.update({"is_default": False})
-            reset_query = _apply_eq(reset_query, "organization_id", organizationid)
-            reset_query = _apply_neq(reset_query, "stripe_payment_method_id", resolved_methodid)
-            _safe_execute(reset_query)
-
-            set_query = table.update({"is_default": True})
-            set_query = _apply_eq(set_query, "organization_id", organizationid)
-            set_query = _apply_eq(set_query, "stripe_payment_method_id", resolved_methodid)
-            _safe_execute(set_query)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"error": "payment_method_insert_error", "detail": str(exc), "methodid": normalized_methodid},
-        ) from exc
-
-    response.status_code = status.HTTP_201_CREATED
-    return AddPaymentMethodResponse(
-        status="created",
-        methodid=resolved_methodid,
-        organizationid=organizationid,
-        generatedat=generatedat,
-        environment=env,
-        message=f"Payment method '{resolved_methodid}' has been added for organization '{organizationid}'.",
-    )
-
-
 @router.patch(
     "/api/ui/billing/payment-methods/{methodid}/default",
     operation_id="billing_set_default_payment_method",
@@ -959,6 +822,8 @@ async def delete_payment_method(
     auth: AuthContext = Depends(get_auth_context),
     svc: StripeService = Depends(get_stripe_service),
 ) -> DeletePaymentMethodResponse:
+    _ensure_supabase_available_for_write()
+
     organizationid = _require_org_id(auth=auth, request=request)
     env = _get_environment()
     generatedat = datetime.now(UTC).isoformat()
@@ -984,11 +849,6 @@ async def delete_payment_method(
                 },
             )
         svc.detach_payment_method(payment_method_id=normalized_methodid)
-        if is_supabase_configured():
-            delete_query = _supabase_table(get_supabase_client()).delete()
-            delete_query = _apply_eq(delete_query, "organization_id", organizationid)
-            delete_query = _apply_eq(delete_query, "stripe_payment_method_id", normalized_methodid)
-            _safe_execute(delete_query)
     except HTTPException:
         raise
     except StripePaymentMethodNotFoundError as exc:
@@ -1003,6 +863,17 @@ async def delete_payment_method(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={"error": "detach_error", "detail": str(exc), "methodid": normalized_methodid},
+        ) from exc
+
+    try:
+        delete_query = _supabase_table(get_supabase_client()).delete()
+        delete_query = _apply_eq(delete_query, "organization_id", organizationid)
+        delete_query = _apply_eq(delete_query, "stripe_payment_method_id", normalized_methodid)
+        _safe_execute(delete_query)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "payment_method_delete_error", "detail": str(exc), "methodid": normalized_methodid},
         ) from exc
 
     return DeletePaymentMethodResponse(

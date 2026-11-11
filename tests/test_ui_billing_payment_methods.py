@@ -525,16 +525,6 @@ class TestStripeWebhookSecretNote:
 
 
 class TestUiWriteRoutes:
-    def test_post_payment_methods_returns_503(self, authed_client: TestClient) -> None:
-        resp = authed_client.post(
-            "/ui/billing/payment-methods",
-            params={"organizationid": "org-001"},
-            json={"stripe_payment_method_id": "pm_test_abc", "set_as_default": False},
-        )
-        assert resp.status_code == 503
-        body = resp.json()
-        assert "detail" in body
-
     def test_patch_default_updates_stripe_without_supabase(
         self,
         authed_client: TestClient,

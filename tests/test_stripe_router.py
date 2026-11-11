@@ -205,19 +205,6 @@ class TestMeteredSync:
 
 
 class TestResolveCustomerIdNone:
-    def test_attach_payment_method_no_customer_returns_404(self, client: TestClient, mock_svc: MagicMock) -> None:
-        mock_svc._org_customer_map.clear()
-
-        resp = client.post(
-            _billing_path("/payment-methods/attach"),
-            json={"paymentMethodId": PM_ID, "setAsDefault": False},
-            headers=_auth_headers(),
-        )
-
-        assert resp.status_code == 404
-        detail = resp.json().get("detail", "")
-        assert "no_stripe_customer_for_org" in str(detail)
-
     def test_set_default_payment_method_no_customer_returns_404(self, client: TestClient, mock_svc: MagicMock) -> None:
         mock_svc._org_customer_map.clear()
 
@@ -239,58 +226,6 @@ class TestResolveCustomerIdNone:
         body = resp.json()
         assert body["payment_methods"] == []
         assert body["customer_id"] is None
-
-
-class TestPaymentMethodSetupSession:
-    def test_creates_no_charge_setup_session_for_authenticated_customer(
-        self,
-        client: TestClient,
-        mock_svc: MagicMock,
-    ) -> None:
-        mock_svc.get_or_create_stripe_customer.return_value = CUSTOMER_ID
-        mock_svc.create_payment_method_setup_session.return_value = {
-            "session_id": "cs_setup_test_001",
-            "checkout_url": "https://checkout.stripe.com/c/setup_test_001",
-            "org_id": ORG_ID,
-            "mode": "setup",
-        }
-
-        response = client.post(
-            _billing_path("/payment-methods/setup-session"),
-            json={
-                "successUrl": _ALLOWED_SUCCESS_URL,
-                "cancelUrl": _ALLOWED_CANCEL_URL,
-            },
-            headers=_auth_headers(),
-        )
-
-        assert response.status_code == 201
-        assert response.json()["mode"] == "setup"
-        mock_svc.get_or_create_stripe_customer.assert_called_once()
-        mock_svc.create_payment_method_setup_session.assert_called_once_with(
-            org_id=ORG_ID,
-            customer_id=CUSTOMER_ID,
-            success_url=_ALLOWED_SUCCESS_URL,
-            cancel_url=_ALLOWED_CANCEL_URL,
-        )
-
-    def test_rejects_untrusted_setup_redirect_host(
-        self,
-        client: TestClient,
-        mock_svc: MagicMock,
-    ) -> None:
-        response = client.post(
-            _billing_path("/payment-methods/setup-session"),
-            json={
-                "successUrl": "https://attacker.example/complete",
-                "cancelUrl": _ALLOWED_CANCEL_URL,
-            },
-            headers=_auth_headers(),
-        )
-
-        assert response.status_code == 422
-        mock_svc.get_or_create_stripe_customer.assert_not_called()
-        mock_svc.create_payment_method_setup_session.assert_not_called()
 
 
 class TestDebitUnits:
@@ -410,22 +345,6 @@ class TestPatchObjectLockAndMap:
         result = _resolve_customer_id(svc, ORG_ID)
 
         assert result is None
-
-    def test_attach_route_404_controlled_via_patch_object(self) -> None:
-        svc = _build_mock_svc()
-        app.dependency_overrides[get_stripe_service] = lambda: svc
-        app.dependency_overrides[get_auth_context] = _override_get_auth_context
-        try:
-            c = TestClient(app, raise_server_exceptions=False)
-            resp = c.post(
-                _billing_path("/payment-methods/attach"),
-                json={"paymentMethodId": PM_ID},
-                headers=_auth_headers(),
-            )
-            assert resp.status_code == 404
-        finally:
-            app.dependency_overrides.pop(get_stripe_service, None)
-            app.dependency_overrides.pop(get_auth_context, None)
 
     def test_set_default_route_404_controlled_via_patch_object(self) -> None:
         svc = _build_mock_svc()
@@ -617,7 +536,6 @@ class TestCheckoutSessionRoutes:
                         "org_id": "attacker-org",
                         "unit_credits": "999999",
                     },
-                    "saveCard": True,
                 },
                 headers=_auth_headers(),
             )
@@ -640,7 +558,6 @@ class TestCheckoutSessionRoutes:
                 "org_id": ORG_ID,
                 "unit_credits": "5000",
             },
-            save_card=True,
         )
 
     def test_create_checkout_session_ignores_request_owner_and_customer_ids(
@@ -684,7 +601,6 @@ class TestCheckoutSessionRoutes:
         assert checkout_kwargs["customer_id"] is None
         assert checkout_kwargs["metadata"]["org_id"] == "buyer@ironclaw.test"
         assert checkout_kwargs["metadata"]["owner_key"] == "buyer@ironclaw.test"
-        assert checkout_kwargs["save_card"] is False
 
     @pytest.mark.parametrize(
         ("success_url", "cancel_url"),
@@ -831,7 +747,6 @@ class TestCheckoutSessionRoutes:
                 "unit_credits": "10000",
                 "owner_key": "buyer@ironclaw.test",
             },
-            save_card=False,
         )
 
     def test_create_checkout_session_requires_billing_owner(
@@ -1461,34 +1376,6 @@ class TestAdditionalRoutes:
         body = resp.json()
         assert body["subscription_id"] == SUBSCRIPTION_ID
         assert body["status"] == "active"
-
-    def test_attach_payment_method_success(self, client: TestClient, mock_svc: MagicMock) -> None:
-        mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID
-        mock_svc.attach_payment_method.return_value = _obj_with_to_dict(
-            payment_method_id=PM_ID,
-            customer_id=CUSTOMER_ID,
-            type="card",
-            brand="visa",
-            last4="4242",
-            exp_month=12,
-            exp_year=2030,
-            is_default=False,
-            created_at="2026-06-28T00:00:00Z",
-            schema_version="1.0",
-        )
-
-        resp = client.post(
-            _billing_path("/payment-methods/attach"),
-            json={"paymentMethodId": PM_ID, "setAsDefault": False},
-            headers=_auth_headers(),
-        )
-
-        assert resp.status_code == 200
-        mock_svc.attach_payment_method.assert_called_once_with(
-            customer_id=CUSTOMER_ID,
-            payment_method_id=PM_ID,
-            set_as_default=False,
-        )
 
     def test_set_default_payment_method_success(self, client: TestClient, mock_svc: MagicMock) -> None:
         mock_svc._org_customer_map[ORG_ID] = CUSTOMER_ID

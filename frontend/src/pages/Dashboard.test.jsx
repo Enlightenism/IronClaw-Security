@@ -58,13 +58,6 @@ jest.mock("@/lib/api", () => ({
         `/billing/checkout/sessions/${encodeURIComponent(sessionId)}/reconcile`,
       ),
   },
-  paymentMethods: {
-    createSetupSession: (successUrl, cancelUrl) =>
-      mockApiPost("/billing/payment-methods/setup-session", {
-        successUrl,
-        cancelUrl,
-      }),
-  },
   wallet: {
     getLedger: () => mockApiGet("/billing/units/ledger"),
   },
@@ -784,7 +777,8 @@ describe("session_id payment polling", () => {
     expect(mockApiPost).toHaveBeenCalledWith(
       "/billing/checkout/sessions/cs_test_abc/reconcile",
     );
-    expect(mockApiGet).toHaveBeenCalledWith("/billing/units/ledger");
+    expect(mockApiGet).toHaveBeenCalledWith("/dashboard/overview");
+    expect(mockApiGet).not.toHaveBeenCalledWith("/billing/units/ledger");
     expect(mockCapturedWalletProps.balance).toBe(5000);
     for (const program of [
       "openclaw",
@@ -895,35 +889,6 @@ describe("session_id payment polling", () => {
     expect(mockToastSuccess).not.toHaveBeenCalledWith(
       expect.stringContaining("Checkout completed"),
     );
-  });
-});
-
-describe("card setup return", () => {
-  it("refreshes the dashboard after successful no-charge card setup", async () => {
-    mockLocation.search = "?card_setup=success";
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(mockToastSuccess).toHaveBeenCalledWith(
-        "Card setup completed. Refreshing saved payment methods.",
-      );
-    });
-    expect(mockApiGet).toHaveBeenCalledWith("/dashboard/overview");
-    expect(mockNavigate).toHaveBeenCalledWith("/dashboard", { replace: true });
-  });
-
-  it("bumps the saved-method refresh key after successful card setup", async () => {
-    mockLocation.search = "?card_setup=success";
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(mockCapturedWalletProps).not.toBeNull();
-      expect(mockCapturedWalletProps.paymentMethodsRefreshKey).toBeGreaterThan(
-        0,
-      );
-    });
   });
 });
 
@@ -1077,7 +1042,7 @@ describe("handlePurchase — valid package", () => {
     });
 
     await act(async () => {
-      await mockCapturedWalletProps.onPurchase("pkg_5000", true);
+      await mockCapturedWalletProps.onPurchase("pkg_5000");
     });
 
     expect(mockApiPost).toHaveBeenCalledWith("/billing/checkout/sessions", {
@@ -1088,7 +1053,6 @@ describe("handlePurchase — valid package", () => {
         "http://localhost/dashboard?checkout=cancel&package_id=pkg_5000",
       mode: "payment",
       quantity: 1,
-      saveCard: true,
     });
   });
 
@@ -1282,38 +1246,6 @@ describe("handlePurchase — valid package", () => {
         expect.stringContaining("Missing checkout URL"),
       );
     });
-  });
-
-  it("starts hosted card setup without creating a paid package checkout", async () => {
-    const setupUrl = "https://checkout.stripe.com/c/setup_test_001";
-    mockApiPost.mockImplementation((url) => {
-      if (url === "/billing/payment-methods/setup-session") {
-        return Promise.resolve({ data: { checkout_url: setupUrl } });
-      }
-      return Promise.resolve({ data: {} });
-    });
-
-    await renderDashboard();
-    await waitFor(() => {
-      expect(mockCapturedWalletProps).not.toBeNull();
-    });
-
-    await act(async () => {
-      await mockCapturedWalletProps.onAddPaymentMethod();
-    });
-
-    expect(mockApiPost).toHaveBeenCalledWith(
-      "/billing/payment-methods/setup-session",
-      {
-        successUrl: "http://localhost/dashboard?card_setup=success",
-        cancelUrl: "http://localhost/dashboard?card_setup=cancel",
-      },
-    );
-    expect(mockApiPost).not.toHaveBeenCalledWith(
-      "/billing/checkout/sessions",
-      expect.anything(),
-    );
-    expect(globalThis.location.assign).toHaveBeenCalledWith(setupUrl);
   });
 });
 

@@ -169,7 +169,6 @@ const withOrgId = (orgId) => `organizationid=${encodeURIComponent(orgId)}`;
 
 const sanitizeCheckoutPayload = (payload = {}) => {
   const safePayload = { ...payload };
-  safePayload.saveCard = safePayload.saveCard === true;
 
   if (safePayload.card) {
     delete safePayload.card;
@@ -318,22 +317,6 @@ export const payments = {
 
 export const paymentMethods = {
   list: (orgId) => api.get(`/ui/billing/payment-methods?${withOrgId(orgId)}`),
-
-  createSetupSession: (successUrl, cancelUrl) =>
-    api.post("/billing/payment-methods/setup-session", {
-      successUrl,
-      cancelUrl,
-    }),
-
-  attach: (paymentMethodId, orgId, options = {}) => {
-    const payload = {
-      paymentMethodId: String(paymentMethodId || "").trim(),
-      setAsDefault: Boolean(options.setAsDefault),
-      ...(orgId ? { organizationid: String(orgId) } : {}),
-    };
-
-    return api.post("/ui/billing/payment-methods", payload);
-  },
 
   setDefault: (methodId, orgId) =>
     api.patch(

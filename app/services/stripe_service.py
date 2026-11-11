@@ -936,6 +936,11 @@ class StripeService:
 
     def _resolve_wallet_owner_key(self, org_id: str, owner_key: str | None = None) -> str:
         if owner_key is None:
+            # Personal checkouts use the billing owner (email or supabase_user_<sub>) as org_id,
+            # so that value is the wallet key the dashboard reads; only org IDs map to ic_org_.
+            normalized_org_id = str(org_id).strip().lower()
+            if "@" in normalized_org_id or normalized_org_id.startswith(("supabase_user_", "ic_org_")):
+                return normalized_org_id
             return self._canonical_org_owner_key(org_id)
         normalized_owner_key = str(owner_key).strip().lower()
         if not normalized_owner_key:
@@ -1278,73 +1283,40 @@ class StripeService:
     # Payment methods
     # ------------------------------------------------------------------
 
-    def attach_payment_method(
-        self,
-        customer_id: str,
-        payment_method_id: str,
-        *,
-        set_as_default: bool = False,
-    ) -> PaymentMethodResponse:
-        """
-        Attach a Stripe payment method to a customer via the API and cache locally.
-        Optionally set as the customer's default payment method.
-        Raises StripeIdempotencyError if the key is already registered with a
-        different payload. Raises StripeAPIError on Stripe network failures.
-        """
-        idem_key = f"attach-pm-{customer_id}-{payment_method_id}"
-        with self._lock:
-            if idem_key in self._idempotency_keys:
-                existing_pm_id = self._idempotency_keys[idem_key]
-                if existing_pm_id != payment_method_id:
-                    raise StripeIdempotencyError(idem_key, "conflicting payment_method_id")
-                record = self._payment_methods.get(payment_method_id)
-                if record:
-                    return PaymentMethodResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
-
-        resp = self._get_client().post(
-            f"/payment_methods/{payment_method_id}/attach",
-            {"customer": customer_id},
-        )
-
-        card = resp.get("card", {})
-        now = _utcnow_iso()
-        record = _PaymentMethodRecord(
-            payment_method_id=resp.get("id", payment_method_id),
-            customer_id=customer_id,
-            type=resp.get("type", "card"),
-            brand=card.get("brand", "unknown"),
-            last4=card.get("last4", "0000"),
-            exp_month=int(card.get("exp_month", 0)),
-            exp_year=int(card.get("exp_year", 0)),
-            is_default=set_as_default,
-            created_at=now,
-        )
-
-        with self._lock:
-            self._payment_methods[record.payment_method_id] = record
-            self._idempotency_keys[idem_key] = payment_method_id
-
-        if set_as_default:
-            self.set_default_payment_method(customer_id, record.payment_method_id)
-
-        logger.info(
-            "stripe.payment_method_attached customer=%s pm=%s default=%s",
-            customer_id,
-            record.payment_method_id,
-            set_as_default,
-        )
-        return PaymentMethodResponse(**record.to_dict(), schema_version=_SCHEMA_VERSION)
-
     def detach_payment_method(self, payment_method_id: str) -> PaymentMethodResponse:
         """
-        Detach a payment method from its customer via the Stripe API and remove
-        from local cache.
-        Raises StripePaymentMethodNotFoundError if not found locally.
+        Detach a payment method from its customer via the Stripe API and drop the local cache entry.
+        Stripe is the source of truth, so the method is read from Stripe rather than the in-memory cache.
+        Raises StripePaymentMethodNotFoundError if Stripe does not know an attached payment method.
         """
-        with self._lock:
-            record = self._payment_methods.get(payment_method_id)
-        if record is None:
+        try:
+            raw_method = self._get_client().get(f"/payment_methods/{payment_method_id}")
+        except StripeAPIError as exc:
+            if exc.http_status == 404:
+                raise StripePaymentMethodNotFoundError(payment_method_id) from exc
+            raise
+        if not isinstance(raw_method, dict):
+            raise StripeServiceError("Stripe returned an invalid payment method.")
+        raw_customer_id = raw_method.get("customer")
+        if isinstance(raw_customer_id, dict):
+            raw_customer_id = raw_customer_id.get("id")
+        if not raw_customer_id:
             raise StripePaymentMethodNotFoundError(payment_method_id)
+
+        card = raw_method.get("card") if isinstance(raw_method.get("card"), dict) else {}
+        with self._lock:
+            cached = self._payment_methods.get(payment_method_id)
+        record = _PaymentMethodRecord(
+            payment_method_id=payment_method_id,
+            customer_id=str(raw_customer_id),
+            type=str(raw_method.get("type") or "card"),
+            brand=str(card.get("brand") or "unknown"),
+            last4=str(card.get("last4") or ""),
+            exp_month=int(card.get("exp_month") or 0),
+            exp_year=int(card.get("exp_year") or 0),
+            is_default=cached.is_default if cached is not None else False,
+            created_at=cached.created_at if cached is not None else _utcnow_iso(),
+        )
 
         self._get_client().post(f"/payment_methods/{payment_method_id}/detach", {})
 
@@ -1611,7 +1583,6 @@ class StripeService:
             "quantity": quantity,
             "unit_credits": unit_credits,
             "mode": checkout_mode,
-            "save_card": raw_save_card == "true",
         }
 
     def _is_payment_intent_refunded(self, payment_intent_id: str) -> bool:
@@ -1720,7 +1691,6 @@ class StripeService:
         units: int,
         payment_intent: str | None,
         customer_id: str | None,
-        save_card: bool,
         metadata: dict[str, Any],
     ) -> dict[str, Any]:
         from app.services.billing_store import get_stripe_checkout_fulfillment_store
@@ -1734,7 +1704,6 @@ class StripeService:
                 units=units,
                 payment_intent=payment_intent,
                 customer_id=customer_id,
-                save_card=save_card,
                 metadata=metadata,
             )
         except Exception as exc:  # noqa: BLE001
@@ -1839,52 +1808,6 @@ class StripeService:
             "units_revoked": units_revoked,
         }
 
-    def create_payment_method_setup_session(
-        self,
-        *,
-        org_id: str,
-        customer_id: str,
-        success_url: str,
-        cancel_url: str,
-    ) -> dict[str, str]:
-        normalized_org_id = str(org_id).strip()
-        normalized_customer_id = str(customer_id).strip()
-        if not normalized_org_id or not normalized_customer_id:
-            raise StripeServiceError("org_id and customer_id are required for payment method setup")
-        if not success_url.strip() or not cancel_url.strip():
-            raise StripeServiceError("success_url and cancel_url are required")
-
-        params = {
-            "mode": StripeCheckoutMode.SETUP.value,
-            "success_url": success_url.strip(),
-            "cancel_url": cancel_url.strip(),
-            "customer": normalized_customer_id,
-            "payment_method_types[0]": "card",
-            "metadata[org_id]": normalized_org_id,
-            "metadata[ironclaw_source]": "ironclaw-security",
-            "metadata[flow]": "saved_payment_method_setup",
-        }
-        try:
-            response = self._get_client().post("/checkout/sessions", params)
-        except StripeAPIError:
-            logger.exception(
-                "stripe.payment_method_setup_session_create_failed org=%s",
-                normalized_org_id,
-            )
-            raise
-
-        session_id = str(response.get("id") or "").strip()
-        checkout_url = str(response.get("url") or "").strip()
-        if not session_id or not checkout_url:
-            raise StripeServiceError("Stripe returned an incomplete payment method setup session.")
-
-        return {
-            "session_id": session_id,
-            "checkout_url": checkout_url,
-            "org_id": normalized_org_id,
-            "mode": StripeCheckoutMode.SETUP.value,
-        }
-
     def create_checkout_session(
         self,
         org_id: str,
@@ -1898,7 +1821,6 @@ class StripeService:
         customer_id: str | None = None,
         owner_key: str | None = None,
         metadata: dict[str, Any] | None = None,
-        save_card: bool = False,
     ) -> CheckoutSessionResponse:
         """
         Create a Stripe Checkout Session.
@@ -1954,10 +1876,6 @@ class StripeService:
             session_meta["owner_key"] = normalized_owner_key
         else:
             session_meta.pop("owner_key", None)
-        if mode == StripeCheckoutMode.PAYMENT:
-            session_meta["save_card"] = "true" if save_card else "false"
-        else:
-            session_meta.pop("save_card", None)
         session_meta[_CHECKOUT_INTEGRITY_SIGNATURE_KEY] = self._sign_checkout_integrity_metadata(session_meta)
 
         # Storage checks and the customer mapping run before the session POST so a storage failure
@@ -1977,10 +1895,6 @@ class StripeService:
 
         if mode == StripeCheckoutMode.PAYMENT:
             params["payment_method_types[0]"] = "card"
-            if save_card:
-                params["payment_intent_data[setup_future_usage]"] = "off_session"
-            if not customer_id:
-                params["customer_creation"] = "always"
 
         # Carry the buyer's owner key onto the subscription so renewal credits land in the same wallet.
         if mode == StripeCheckoutMode.SUBSCRIPTION and session_meta.get("owner_key"):
@@ -2030,7 +1944,6 @@ class StripeService:
                 units=unit_credits,
                 payment_intent=payment_intent_id,
                 customer_id=checkout_customer_id,
-                save_card=save_card,
                 metadata=session_meta,
             )
 
@@ -3161,7 +3074,6 @@ class StripeService:
                 units=unit_credits,
                 payment_intent=payment_intent,
                 customer_id=customer_id,
-                save_card=integrity["save_card"],
                 metadata=metadata,
             )
             payment_intent_refunded = fulfillment_record.get("fulfillment_status") == "refunded"

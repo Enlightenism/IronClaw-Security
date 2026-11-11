@@ -243,6 +243,13 @@ def _configure_mock_payment_method_listing(
         if path == "/payment_methods":
             customer_id = str((params or {}).get("customer") or "")
             return {"data": methods_by_customer.get(customer_id, [])}
+        if path.startswith("/payment_methods/"):
+            pm_id = path.rsplit("/", 1)[-1]
+            for methods in methods_by_customer.values():
+                for method in methods:
+                    if method["id"] == pm_id:
+                        return method
+            raise StripeAPIError("No such payment_method", http_status=404)
         raise AssertionError(f"Unexpected Stripe GET request: {path}")
 
     mock_client.get.side_effect = _get
@@ -1728,8 +1735,8 @@ class TestServiceReset:
         assert svc._client is None
 
     def test_reset_clears_payment_methods(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = _mock_pm_resp()
-        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
+        _configure_mock_payment_method_listing(mock_client, methods_by_customer={_TEST_CUSTOMER_ID: [_mock_pm_resp()]})
+        svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)
         svc_with_client.reset()
         assert svc_with_client._payment_methods == {}
 
@@ -2099,62 +2106,6 @@ class TestExceptionShapes:
 
 
 class TestPaymentMethods:
-    def test_attach_payment_method_returns_response(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = _mock_pm_resp()
-        resp = svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
-        assert isinstance(resp, PaymentMethodResponse)
-        assert resp.payment_method_id == _TEST_PM_ID
-        assert resp.customer_id == _TEST_CUSTOMER_ID
-
-    def test_attach_payment_method_stores_locally(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = _mock_pm_resp()
-        _configure_mock_payment_method_listing(
-            mock_client,
-            methods_by_customer={_TEST_CUSTOMER_ID: [_mock_pm_resp()]},
-        )
-        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
-        methods = svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)
-        assert any(m.payment_method_id == _TEST_PM_ID for m in methods)
-
-    def test_attach_payment_method_calls_stripe(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = _mock_pm_resp()
-        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
-        call_path = mock_client.post.call_args[0][0]
-        assert "/attach" in call_path
-        assert _TEST_PM_ID in call_path
-
-    def test_attach_payment_method_idempotent_same_payload(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = _mock_pm_resp()
-        r1 = svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
-        r2 = svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
-        assert r1.payment_method_id == r2.payment_method_id
-        assert mock_client.post.call_count == 1
-
-    def test_attach_payment_method_set_as_default(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        # attach (1 post) + set_default customer update (1 post) = 2 total
-        mock_client.post.side_effect = [
-            _mock_pm_resp(),
-            {},  # /customers/{id} update from set_default_payment_method
-        ]
-        resp = svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID, set_as_default=True)
-        assert resp.is_default is True
-
-    def test_detach_payment_method_removes_from_cache(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = _mock_pm_resp()
-        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
-        mock_client.post.return_value = {}
-        _configure_mock_payment_method_listing(
-            mock_client,
-            methods_by_customer={_TEST_CUSTOMER_ID: []},
-        )
-        svc_with_client.detach_payment_method(_TEST_PM_ID)
-        methods = svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)
-        assert all(m.payment_method_id != _TEST_PM_ID for m in methods)
-
-    def test_detach_payment_method_not_found_raises(self, svc: StripeService) -> None:
-        with pytest.raises(StripePaymentMethodNotFoundError):
-            svc.detach_payment_method("pm_nonexistent")
-
     def test_list_payment_methods_empty_when_none_attached(
         self,
         svc_with_client: StripeService,
@@ -2164,7 +2115,6 @@ class TestPaymentMethods:
         assert svc_with_client.list_payment_methods("cus_empty") == []
 
     def test_list_payment_methods_filters_by_customer(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.side_effect = [_mock_pm_resp(_TEST_PM_ID, "cus_A"), _mock_pm_resp(_TEST_PM_ID_2, "cus_B")]
         _configure_mock_payment_method_listing(
             mock_client,
             methods_by_customer={
@@ -2172,60 +2122,62 @@ class TestPaymentMethods:
                 "cus_B": [_mock_pm_resp(_TEST_PM_ID_2, "cus_B")],
             },
         )
-        svc_with_client.attach_payment_method("cus_A", _TEST_PM_ID)
-        svc_with_client.attach_payment_method("cus_B", _TEST_PM_ID_2)
         methods_a = svc_with_client.list_payment_methods("cus_A")
         assert len(methods_a) == 1
+        assert isinstance(methods_a[0], PaymentMethodResponse)
         assert methods_a[0].customer_id == "cus_A"
 
+    def test_detach_payment_method_removes_from_cache(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        _configure_mock_payment_method_listing(mock_client, methods_by_customer={_TEST_CUSTOMER_ID: [_mock_pm_resp()]})
+        svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)
+        mock_client.post.return_value = {}
+        svc_with_client.detach_payment_method(_TEST_PM_ID)
+        assert _TEST_PM_ID not in svc_with_client._payment_methods
+        mock_client.post.assert_called_with(f"/payment_methods/{_TEST_PM_ID}/detach", {})
+
+    def test_detach_payment_method_not_found_raises(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
+        mock_client.get.side_effect = StripeAPIError("No such payment_method", http_status=404)
+        with pytest.raises(StripePaymentMethodNotFoundError):
+            svc_with_client.detach_payment_method("pm_nonexistent")
+        mock_client.post.assert_not_called()
+
     def test_set_default_payment_method_marks_default(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.side_effect = [
-            _mock_pm_resp(_TEST_PM_ID),
-            _mock_pm_resp(_TEST_PM_ID_2),
-            {},  # /customers/{id} update from set_default_payment_method
-        ]
-        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
-        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID_2)
+        _configure_mock_payment_method_listing(
+            mock_client,
+            methods_by_customer={_TEST_CUSTOMER_ID: [_mock_pm_resp(_TEST_PM_ID), _mock_pm_resp(_TEST_PM_ID_2)]},
+        )
+        svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)
+        mock_client.post.return_value = {}
         resp = svc_with_client.set_default_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID_2)
         assert resp.is_default is True
 
     def test_set_default_clears_previous_default(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.side_effect = [
-            _mock_pm_resp(_TEST_PM_ID),  # call 1: attach pm1
-            {},  # call 2: /customers/{id} for set_default of pm1
-            _mock_pm_resp(_TEST_PM_ID_2),  # call 3: attach pm2
-            {},  # call 4: /customers/{id} for set_default of pm2
-        ]
+        defaults: dict[str, str | None] = {_TEST_CUSTOMER_ID: _TEST_PM_ID}
         _configure_mock_payment_method_listing(
             mock_client,
-            methods_by_customer={
-                _TEST_CUSTOMER_ID: [
-                    _mock_pm_resp(_TEST_PM_ID),
-                    _mock_pm_resp(_TEST_PM_ID_2),
-                ],
-            },
-            default_by_customer={_TEST_CUSTOMER_ID: _TEST_PM_ID_2},
+            methods_by_customer={_TEST_CUSTOMER_ID: [_mock_pm_resp(_TEST_PM_ID), _mock_pm_resp(_TEST_PM_ID_2)]},
+            default_by_customer=defaults,
         )
-        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID, set_as_default=True)
-        svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID_2)
+        svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)
+        mock_client.post.return_value = {}
         svc_with_client.set_default_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID_2)
+        defaults[_TEST_CUSTOMER_ID] = _TEST_PM_ID_2
         methods = svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)
-        defaults = [m for m in methods if m.is_default]
-        assert len(defaults) == 1
-        assert defaults[0].payment_method_id == _TEST_PM_ID_2
+        default_ids = [m.payment_method_id for m in methods if m.is_default]
+        assert default_ids == [_TEST_PM_ID_2]
 
     def test_set_default_not_found_raises(self, svc: StripeService) -> None:
         with pytest.raises(StripePaymentMethodNotFoundError):
             svc.set_default_payment_method(_TEST_CUSTOMER_ID, "pm_ghost")
 
     def test_payment_method_response_has_schema_version(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = _mock_pm_resp()
-        resp = svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
+        _configure_mock_payment_method_listing(mock_client, methods_by_customer={_TEST_CUSTOMER_ID: [_mock_pm_resp()]})
+        resp = svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)[0]
         assert resp.schema_version == "1.0"
 
     def test_payment_method_response_to_dict(self, svc_with_client: StripeService, mock_client: MagicMock) -> None:
-        mock_client.post.return_value = _mock_pm_resp()
-        resp = svc_with_client.attach_payment_method(_TEST_CUSTOMER_ID, _TEST_PM_ID)
+        _configure_mock_payment_method_listing(mock_client, methods_by_customer={_TEST_CUSTOMER_ID: [_mock_pm_resp()]})
+        resp = svc_with_client.list_payment_methods(_TEST_CUSTOMER_ID)[0]
         d = resp.to_dict()
         assert d["payment_method_id"] == _TEST_PM_ID
         assert d["brand"] == "visa"

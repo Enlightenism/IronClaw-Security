@@ -350,10 +350,10 @@ describe("payments.createCheckout", () => {
     mockPost.mockResolvedValueOnce({ data: {} });
     const payload = { plan: "starter", quantity: 1 };
     payments.createCheckout(payload);
-    expect(mockPost).toHaveBeenCalledWith("/billing/checkout/sessions", {
-      ...payload,
-      saveCard: false,
-    });
+    expect(mockPost).toHaveBeenCalledWith(
+      "/billing/checkout/sessions",
+      payload,
+    );
   });
 
   it("removes raw card values and carries saved Stripe payment metadata without leaking PAN data", () => {
@@ -384,23 +384,11 @@ describe("payments.createCheckout", () => {
     expect(sentPayload.paymentMethod).toBeUndefined();
     expect(sentPayload.paymentMethodId).toBe("pm_saved_123");
     expect(sentPayload.customerId).toBe("cus_123");
-    expect(sentPayload.saveCard).toBe(false);
+    expect(sentPayload).not.toHaveProperty("saveCard");
     expect(sentPayload.organizationId).toBeUndefined();
     expect(sentPayload.owner_key).toBeUndefined();
     expect(sentPayload.unitCredits).toBeUndefined();
     expect(JSON.stringify(sentPayload)).not.toContain("4242424242424242");
-  });
-
-  it("preserves explicit save-card consent only when true", () => {
-    mockPost.mockResolvedValueOnce({ data: {} });
-
-    payments.createCheckout({
-      packageId: "pkg5000",
-      saveCard: true,
-    });
-
-    const [, sentPayload] = mockPost.mock.calls.at(-1);
-    expect(sentPayload.saveCard).toBe(true);
   });
 });
 
@@ -450,24 +438,6 @@ describe("paymentMethods.list", () => {
     const [url] = mockGet.mock.calls[0];
     expect(url).toContain(
       `organizationid=${encodeURIComponent("org/special chars&more")}`,
-    );
-  });
-});
-
-describe("paymentMethods.createSetupSession", () => {
-  it("requests a hosted setup session without any package purchase fields", () => {
-    mockPost.mockResolvedValueOnce({ data: {} });
-    paymentMethods.createSetupSession(
-      "https://moving-forward.ca/dashboard?card_setup=success",
-      "https://moving-forward.ca/dashboard?card_setup=cancel",
-    );
-
-    expect(mockPost).toHaveBeenCalledWith(
-      "/billing/payment-methods/setup-session",
-      {
-        successUrl: "https://moving-forward.ca/dashboard?card_setup=success",
-        cancelUrl: "https://moving-forward.ca/dashboard?card_setup=cancel",
-      },
     );
   });
 });

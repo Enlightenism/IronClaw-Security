@@ -85,7 +85,6 @@ class DashboardInstallKeyView(BaseModel):
 
 class DashboardWalletKPI(BaseModel):
     unit_balance: int
-    units_consumed: int
     total_purchased_units: int
     updated_at: str | None
 
@@ -485,7 +484,6 @@ def _build_wallet_kpi(
         return None
     return DashboardWalletKPI(
         unit_balance=wallet.balance_units,
-        units_consumed=wallet.total_consumed_units,
         total_purchased_units=wallet.total_purchased_units,
         updated_at=_iso(wallet.updated_at),
     )
@@ -670,7 +668,6 @@ def get_dashboard_overview(
         wallet_meta.update(
             {
                 "unit_balance": wallet_kpi.unit_balance,
-                "units_consumed": wallet_kpi.units_consumed,
                 "total_purchased_units": wallet_kpi.total_purchased_units,
                 "updated_at": wallet_kpi.updated_at,
             }

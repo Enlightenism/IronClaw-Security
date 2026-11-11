@@ -670,6 +670,22 @@ class TestDashboardWalletKPIs:
         finally:
             _clear_registry_overrides()
 
+    def test_wallet_block_omits_units_consumed(self, dashboard_client: TestClient) -> None:
+        mock_wallet = _make_unit_wallet_registry(_OWNER_KEY, balance=750, consumed=250, purchased=1000)
+        _apply_registry_overrides(_make_install_key_registry(), mock_wallet, _make_billing_registry(_OWNER_KEY))
+        try:
+            response = dashboard_client.get(
+                "/dashboard/overview",
+                params={"owner_key": _OWNER_KEY},
+            )
+            assert response.status_code == 200
+            wallet = response.json()["metadata"]["wallet"]
+            assert wallet["unit_balance"] == 750
+            assert wallet["total_purchased_units"] == 1000
+            assert "units_consumed" not in wallet
+        finally:
+            _clear_registry_overrides()
+
     def test_last_payment_reflects_newest_package_credit(self, dashboard_client: TestClient) -> None:
         older_package = UNIT_PACKAGE_CATALOG[0]
         newer_package = UNIT_PACKAGE_CATALOG[-1]
