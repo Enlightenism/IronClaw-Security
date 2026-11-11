@@ -34,7 +34,7 @@ _T_WEBHOOK_SUBSCRIPTIONS = "webhook_subscriptions"
 _T_WEBHOOK_DELIVERIES = "webhook_deliveries"
 _T_INSTALL_KEYS = "install_keys"
 _T_PAYMENT_TRANSACTIONS = "payment_transactions"
-_T_USERS = "users"
+_T_SECURITY_AUDIT_EVENTS = "security_audit_events"
 
 
 _COL_POLICY_RULE_ID = "policy_rule_id"
@@ -150,6 +150,37 @@ def upsert_audit_event(record: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             return data
         return record
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+def insert_security_audit_event(record: dict[str, Any]) -> None:
+    operation = "insert_security_audit_event"
+    try:
+        client = get_supabase_service_client()
+        client.table(_T_SECURITY_AUDIT_EVENTS).insert(record).execute()
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
+_SECURITY_AUDIT_PAGE_SIZE = 1000
+
+
+def list_security_audit_events() -> list[dict[str, Any]]:
+    operation = "list_security_audit_events"
+    try:
+        client = get_supabase_service_client()
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            q = client.table(_T_SECURITY_AUDIT_EVENTS).select("*").order("created_at", desc=True).order("event_id", desc=True).range(offset, offset + _SECURITY_AUDIT_PAGE_SIZE - 1)
+            data = q.execute().data
+            page = [row for row in data if isinstance(row, dict)] if isinstance(data, list) else []
+            rows.extend(page)
+            if len(page) < _SECURITY_AUDIT_PAGE_SIZE:
+                break
+            offset += _SECURITY_AUDIT_PAGE_SIZE
+        return list(reversed(rows))
     except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
         raise _wrap(operation, exc) from exc
 
@@ -947,95 +978,6 @@ def mark_payment_transaction_paid(transaction_id: str) -> None:
         raise _wrap(operation, exc) from exc
 
 
-def increment_user_wallet_units(user_id: str, delta: int) -> None:
-    """Increment users.wallet_units by delta for the given user_id.
-
-    Fetches the current wallet_units value, adds delta, and writes it back.
-    Delta must be >= 1.
-    """
-    operation = "increment_user_wallet_units"
-    if not user_id or not user_id.strip():
-        raise PersistenceError(operation, "user_id is required")
-    if delta < 1:
-        raise PersistenceError(operation, "delta must be >= 1")
-    try:
-        client = get_supabase_service_client()
-        resp = client.table(_T_USERS).select("wallet_units").eq("id", user_id.strip()).maybe_single().execute()
-        row = resp.data
-        if isinstance(row, list):
-            row = row[0] if row else None
-        current: int = int(row.get("wallet_units", 0)) if isinstance(row, dict) else 0
-        client.table(_T_USERS).update({"wallet_units": current + delta, "updated_at": _now_utc()}).eq("id", user_id.strip()).execute()
-    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
-        raise _wrap(operation, exc) from exc
-
-
-def fulfill_checkout_session(session_id: str, session_metadata: dict[str, Any]) -> None:
-    """Idempotent fulfillment for a completed Stripe Checkout session.
-
-    Steps:
-    1. Look up payment_transactions row by stripe_session_id.
-    2. Return immediately if already credited (idempotency guard).
-    3. Mark the transaction paid/credited.
-    4. Increment users.wallet_units by the units value from the transaction
-       row, falling back to session_metadata['units'] if not present on
-       the transaction row.
-
-    Raises PersistenceError on any DB failure; raises ValueError when
-    the session cannot be resolved to a transaction row or user_id.
-    """
-    operation = "fulfill_checkout_session"
-    if not session_id or not session_id.strip():
-        raise PersistenceError(operation, "session_id is required")
-
-    txn = get_payment_transaction_by_session(session_id.strip())
-    if txn is None:
-        raise ValueError(f"[{operation}] no payment_transaction found for stripe_session_id={session_id!r}")
-
-    if txn.get("credited"):
-        _logger.info(
-            "fulfill_checkout_session.already_credited session_id=%s txn_id=%s",
-            session_id,
-            txn.get("id"),
-        )
-        return
-
-    transaction_id: str = str(txn.get("id", ""))
-    if not transaction_id:
-        raise PersistenceError(operation, f"payment_transaction row missing id for session_id={session_id!r}")
-
-    units: int = 0
-    raw_units = txn.get("units") or session_metadata.get("units")
-    if raw_units is not None:
-        try:
-            units = int(raw_units)
-        except (TypeError, ValueError):
-            units = 0
-
-    user_id: str = str(txn.get("user_id", ""))
-    if not user_id:
-        raise PersistenceError(operation, f"payment_transaction row missing user_id for session_id={session_id!r}")
-
-    mark_payment_transaction_paid(transaction_id)
-
-    if units > 0:
-        increment_user_wallet_units(user_id, units)
-    else:
-        _logger.warning(
-            "fulfill_checkout_session.zero_units session_id=%s txn_id=%s — wallet not incremented",
-            session_id,
-            transaction_id,
-        )
-
-    _logger.info(
-        "fulfill_checkout_session.complete session_id=%s txn_id=%s user_id=%s units=%s",
-        session_id,
-        transaction_id,
-        user_id,
-        units,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Public surface
 # ---------------------------------------------------------------------------
@@ -1081,6 +1023,4 @@ __all__ = [
     "increment_install_key_units",
     "get_payment_transaction_by_session",
     "mark_payment_transaction_paid",
-    "increment_user_wallet_units",
-    "fulfill_checkout_session",
 ]

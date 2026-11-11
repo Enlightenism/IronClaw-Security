@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 import logging
+import os
 from threading import Lock
 from typing import Any
 from uuid import uuid4
@@ -74,9 +75,33 @@ class SecurityAuditEventStore:
     security runtime events with seeded defaults and thread-safe access.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        durable_writer: Callable[[AuditEventRecord], None] | None = None,
+        durable_loader: Callable[[], list[AuditEventRecord]] | None = None,
+    ) -> None:
         self._lock = Lock()
         self._items: list[AuditEventRecord] = []
+        self._durable_writer = durable_writer
+        self._durable_loader = durable_loader
+        self._hydrated = durable_loader is None
+
+    def _hydrate(self) -> None:
+        if self._hydrated or self._durable_loader is None:
+            return
+        try:
+            durable_items = self._durable_loader()
+        except Exception:
+            logger.warning("security audit store: durable history unavailable; will retry", exc_info=True)
+            return
+        with self._lock:
+            if self._hydrated:
+                return
+            known_ids = {item.event_id for item in self._items}
+            # Durable history predates anything recorded in this process, so it is placed first.
+            self._items[:0] = [item for item in durable_items if item.event_id not in known_ids]
+            self._hydrated = True
 
     def seed_defaults(self) -> None:
         with self._lock:
@@ -155,11 +180,16 @@ class SecurityAuditEventStore:
         verdict: str | None = None,
         event_type: str | None = None,
         severity: str | None = None,
-        limit: int = 100,
+        limit: int | None = 100,
         include_seeded: bool = True,
+        newest_first: bool = False,
+        predicate: Callable[[AuditEventRecord], bool] | None = None,
     ) -> list[AuditEventRecord]:
+        self._hydrate()
         with self._lock:
             items = list(self._items)
+        if newest_first:
+            items.reverse()
 
         if actor_id:
             items = [item for item in items if item.actor_id == actor_id]
@@ -177,6 +207,9 @@ class SecurityAuditEventStore:
             items = [item for item in items if item.severity == severity]
         if not include_seeded:
             items = [item for item in items if not _is_seeded(item)]
+        # Applied before the limit so one tenant's volume cannot push another tenant's events out of the window.
+        if predicate is not None:
+            items = [item for item in items if predicate(item)]
 
         return items[:limit]
 
@@ -231,9 +264,16 @@ class SecurityAuditEventStore:
         with self._lock:
             self._items.append(event)
 
+        if self._durable_writer is not None and (event.verdict or "").lower() == "block":
+            try:
+                self._durable_writer(event)
+            except Exception:
+                logger.warning("security audit store: failed to persist block event %s", event.event_id, exc_info=True)
+
         return event
 
     def get_event(self, event_id: str) -> AuditEventRecord | None:
+        self._hydrate()
         normalized = event_id.strip() if event_id else ""
         if not normalized:
             raise ValueError("event_id is required")
@@ -254,10 +294,12 @@ class SecurityAuditEventStore:
         return None
 
     def count(self) -> int:
+        self._hydrate()
         with self._lock:
             return len(self._items)
 
     def summarize(self, *, include_seeded: bool = True) -> dict[str, Any]:
+        self._hydrate()
         with self._lock:
             items = list(self._items)
         if not include_seeded:
@@ -289,8 +331,73 @@ class SecurityAuditEventStore:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_SECURITY_AUDIT_STORE = SecurityAuditEventStore()
-_SECURITY_AUDIT_STORE.seed_defaults()
+
+def _durable_storage_enabled() -> bool:
+    persistence_mode = os.environ.get("IRONCLAW_PERSISTENCE_MODE", "").strip().lower()
+    environment_name = (os.environ.get("IRONCLAW_ENV") or os.environ.get("APP_ENV") or os.environ.get("ENVIRONMENT", "")).strip().lower()
+    return persistence_mode == "supabase" or environment_name in {"prod", "production"}
+
+
+def _event_to_row(event: AuditEventRecord) -> dict[str, Any]:
+    return {
+        "event_id": event.event_id,
+        "event_type": event.event_type,
+        "severity": event.severity,
+        "verdict": event.verdict,
+        "summary": event.summary,
+        "actor_id": event.actor_id,
+        "session_id": event.session_id,
+        "request_id": event.request_id,
+        "trace_id": event.trace_id,
+        "integration_id": event.integration_id,
+        "metadata": event.metadata,
+        "created_at": event.created_at.isoformat(),
+    }
+
+
+def _row_to_event(row: dict[str, Any]) -> AuditEventRecord:
+    created_at = datetime.fromisoformat(str(row["created_at"]).replace("Z", "+00:00"))
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    metadata = row.get("metadata")
+    return AuditEventRecord(
+        event_id=str(row["event_id"]),
+        event_type=str(row["event_type"]),
+        severity=str(row["severity"]),
+        created_at=created_at,
+        actor_id=row.get("actor_id"),
+        session_id=row.get("session_id"),
+        request_id=row.get("request_id"),
+        trace_id=row.get("trace_id"),
+        integration_id=row.get("integration_id"),
+        verdict=row.get("verdict"),
+        summary=str(row.get("summary") or ""),
+        metadata=dict(metadata) if isinstance(metadata, dict) else {},
+    )
+
+
+def _persist_block_event(event: AuditEventRecord) -> None:
+    from app.core.supabase_persistence import insert_security_audit_event
+
+    insert_security_audit_event(_event_to_row(event))
+
+
+def _load_block_events() -> list[AuditEventRecord]:
+    from app.core.supabase_persistence import list_security_audit_events
+
+    return [_row_to_event(row) for row in list_security_audit_events()]
+
+
+def _build_security_audit_store() -> SecurityAuditEventStore:
+    if _durable_storage_enabled():
+        store = SecurityAuditEventStore(durable_writer=_persist_block_event, durable_loader=_load_block_events)
+    else:
+        store = SecurityAuditEventStore()
+    store.seed_defaults()
+    return store
+
+
+_SECURITY_AUDIT_STORE = _build_security_audit_store()
 
 
 def get_security_audit_store() -> SecurityAuditEventStore:

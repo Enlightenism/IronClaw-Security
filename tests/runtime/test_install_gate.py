@@ -320,3 +320,18 @@ def test_unpinned_install_is_audited_without_incident() -> None:
     assert events[0].severity == "high"
     assert events[0].metadata["reason_codes"] == ["unresolvable_install_source"]
     assert "evil-pkg" not in str(events[0].metadata)
+
+
+def test_install_gate_audit_records_install_key_id() -> None:
+    owner_key = "owner-install-gate-key"
+
+    evaluate_install_command(
+        "npm install evil-pkg",
+        platform="claude_code",
+        owner_key=owner_key,
+        install_key_id="ik_claude_code_test",
+    )
+
+    events = _install_gate_records(owner_key)
+    assert len(events) == 1
+    assert events[0].metadata["install_key_id"] == "ik_claude_code_test"

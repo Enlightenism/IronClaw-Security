@@ -5,14 +5,7 @@
  * Runner: Jest + @testing-library/react + @testing-library/jest-dom
  */
 
-import {
-  act,
-  cleanup,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // ── react-router-dom mock ─────────────────────────────────────────────────
@@ -82,6 +75,8 @@ const mockToastSuccess = jest.fn();
 const mockToastError = jest.fn();
 const mockToastLoading = jest.fn();
 const mockToastDismiss = jest.fn();
+const mockToastWarning = jest.fn();
+const mockToastInfo = jest.fn();
 
 jest.mock("sonner", () => ({
   toast: {
@@ -89,6 +84,8 @@ jest.mock("sonner", () => ({
     error: (...args) => mockToastError(...args),
     loading: (...args) => mockToastLoading(...args),
     dismiss: (...args) => mockToastDismiss(...args),
+    warning: (...args) => mockToastWarning(...args),
+    info: (...args) => mockToastInfo(...args),
   },
 }));
 
@@ -367,6 +364,27 @@ describe("dashboard navigation", () => {
     await renderDashboard();
 
     expect(screen.getByTestId("contact-bubble")).toHaveTextContent("CONTACT");
+  });
+
+  it("renders free learning resources in the dashboard footer", async () => {
+    await renderDashboard();
+
+    expect(screen.getByTestId("footer-resources")).toBeInTheDocument();
+    expect(screen.getByText("Cyber Security")).toBeInTheDocument();
+
+    const expectedHrefs = [
+      "https://tryhackme.com",
+      "https://www.netacad.com",
+      "https://portswigger.net/web-security",
+      "https://overthewire.org",
+      "https://owasp.org",
+    ];
+    expectedHrefs.forEach((href, i) => {
+      const link = screen.getByTestId(`footer-resource-link-${i}`);
+      expect(link).toHaveAttribute("href", href);
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    });
   });
 
   it("does not emit React act warnings while dashboard data resolves", async () => {
@@ -823,6 +841,45 @@ describe("session_id payment polling", () => {
       );
     });
     expect(reconcileAttempts).toBe(2);
+  });
+
+  it("warns and stops polling when units are credited but install keys are pending", async () => {
+    mockLocation.search = "?session_id=cs_test_abc&package_id=pkg_5000";
+    setupPaidCheckoutApis("cs_test_abc");
+    let reconcileAttempts = 0;
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/sessions/cs_test_abc/reconcile") {
+        reconcileAttempts += 1;
+        return Promise.resolve({
+          data: {
+            payment_confirmed: true,
+            fulfillment_status: "install_keys_pending",
+            units_credited: 5000,
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDashboard();
+    await waitFor(() => {
+      expect(mockToastWarning).toHaveBeenCalledWith(
+        expect.stringContaining("5,000 units were added"),
+        expect.objectContaining({
+          action: expect.objectContaining({ label: "Retry sync" }),
+        }),
+      );
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(4000);
+      await Promise.resolve();
+    });
+
+    expect(reconcileAttempts).toBe(1);
+    expect(mockToastSuccess).not.toHaveBeenCalledWith(
+      expect.stringContaining("Payment confirmed"),
+    );
   });
 
   it("does not mark checkout as paid when Stripe's session ID is missing", async () => {
@@ -1600,187 +1657,7 @@ describe("dashboard structure", () => {
     expect(mockCapturedSecurityProps.unitsWeek).toBe(77);
     expect(mockCapturedSecurityProps.dailyUsage).toEqual(dailyUsage);
     expect(mockCapturedSecurityProps.attacks).toEqual(attacks);
-    expect(screen.getByTestId("attack-feed-blocked-total")).toHaveTextContent(
-      "5",
-    );
-  });
-});
-
-// =============================================================================
-// Attack feed pagination
-// =============================================================================
-
-describe("attack feed pagination", () => {
-  it("renders empty state when no attacks are available", async () => {
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("attack-feed")).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId("attack-feed-empty")).toBeInTheDocument();
-    expect(screen.getByTestId("attack-feed-summary")).toHaveTextContent(
-      "0-0 of 0",
-    );
-    expect(screen.queryAllByTestId("attack-feed-item")).toHaveLength(0);
-  });
-
-  it("renders only the first 25 attacks on page 1", async () => {
-    const attacks = Array.from({ length: 30 }, (_, index) =>
-      makeAttack(index + 1),
-    );
-
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({
-          data: withInstallKeyDashboard(DEFAULT_DASH, { attacks }),
-        });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({ data: DEFAULT_TOKENS });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getAllByTestId("attack-feed-item")).toHaveLength(25);
-    });
-
-    expect(screen.getByTestId("attack-feed-summary")).toHaveTextContent(
-      "1-25 of 30",
-    );
-    expect(screen.getByTestId("attack-feed-page")).toHaveTextContent(
-      "Page 1 / 2",
-    );
-    expect(screen.getByText("Attack 1")).toBeInTheDocument();
-    expect(screen.getByText("Attack 25")).toBeInTheDocument();
-    expect(screen.queryByText("Attack 26")).not.toBeInTheDocument();
-  });
-
-  it("moves to the next page when Next is clicked", async () => {
-    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
-    const attacks = Array.from({ length: 30 }, (_, index) =>
-      makeAttack(index + 1),
-    );
-
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({
-          data: withInstallKeyDashboard(DEFAULT_DASH, { attacks }),
-        });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({ data: DEFAULT_TOKENS });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("attack-feed-next")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByTestId("attack-feed-next"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("attack-feed-page")).toHaveTextContent(
-        "Page 2 / 2",
-      );
-    });
-
-    expect(screen.getByTestId("attack-feed-summary")).toHaveTextContent(
-      "26-30 of 30",
-    );
-    expect(screen.getAllByTestId("attack-feed-item")).toHaveLength(5);
-    expect(screen.getByText("Attack 26")).toBeInTheDocument();
-    expect(screen.getByText("Attack 30")).toBeInTheDocument();
-    expect(screen.queryByText("Attack 25")).not.toBeInTheDocument();
-  });
-
-  it("disables Prev on the first page and Next on the last page", async () => {
-    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
-    const attacks = Array.from({ length: 30 }, (_, index) =>
-      makeAttack(index + 1),
-    );
-
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({
-          data: withInstallKeyDashboard(DEFAULT_DASH, { attacks }),
-        });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({ data: DEFAULT_TOKENS });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("attack-feed-prev")).toBeDisabled();
-      expect(screen.getByTestId("attack-feed-next")).not.toBeDisabled();
-    });
-
-    await user.click(screen.getByTestId("attack-feed-next"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("attack-feed-prev")).not.toBeDisabled();
-      expect(screen.getByTestId("attack-feed-next")).toBeDisabled();
-    });
-  });
-
-  it("resets attack feed to page 1 after a refresh loads a new attack set", async () => {
-    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
-    const firstAttackSet = Array.from({ length: 30 }, (_, index) =>
-      makeAttack(index + 1),
-    );
-    const refreshedAttackSet = Array.from({ length: 5 }, (_, index) =>
-      makeAttack(index + 101),
-    );
-
-    mockApiGet
-      .mockResolvedValueOnce({
-        data: withInstallKeyDashboard(DEFAULT_DASH, {
-          attacks: firstAttackSet,
-        }),
-      })
-      .mockResolvedValueOnce({ data: DEFAULT_TOKENS })
-      .mockResolvedValueOnce({
-        data: withInstallKeyDashboard(DEFAULT_DASH, {
-          attacks: refreshedAttackSet,
-        }),
-      })
-      .mockResolvedValueOnce({ data: DEFAULT_TOKENS });
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("attack-feed-next")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByTestId("attack-feed-next"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("attack-feed-page")).toHaveTextContent(
-        "Page 2 / 2",
-      );
-    });
-
-    await user.click(screen.getByTestId("refresh-btn"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("attack-feed-page")).toHaveTextContent(
-        "Page 1 / 1",
-      );
-    });
-
-    const feed = screen.getByTestId("attack-feed");
-    expect(within(feed).getByText("Attack 101")).toBeInTheDocument();
-    expect(within(feed).queryByText("Attack 26")).not.toBeInTheDocument();
+    expect(mockCapturedSecurityProps.blockedAttacksTotal).toBe(5);
   });
 });
 
@@ -1854,12 +1731,14 @@ describe("refresh behavior", () => {
             sessions_matched: 1,
             sessions_reconciled: 1,
             units_credited: 5000,
+            newly_credited_units: 5000,
             sessions: [
               {
                 session_id: "cs_refresh_001",
                 status: "fulfilled",
                 fulfillment_status: "fulfilled",
                 units_credited: 5000,
+                newly_credited_units: 5000,
               },
             ],
             truncated: false,
@@ -1877,9 +1756,61 @@ describe("refresh behavior", () => {
 
     await waitFor(() => {
       expect(mockToastSuccess).toHaveBeenCalledWith(
-        expect.stringContaining("5,000 units are in your wallet"),
+        expect.stringContaining("5,000 units added to your wallet"),
       );
     });
+  });
+
+  it("does not re-announce credits on a repeat Refresh when nothing new was credited", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.resolve({
+          data: { ...DEFAULT_DASH, wallet_units: 5000 },
+        });
+      }
+      if (url === "/billing/units/ledger") {
+        return Promise.resolve({ data: { balance: 5000, ledger: [] } });
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({ data: PAID_TOKENS });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/reconcile-recent") {
+        return Promise.resolve({
+          data: {
+            status: "complete",
+            sessions_matched: 1,
+            sessions_reconciled: 1,
+            units_credited: 5000,
+            newly_credited_units: 0,
+            sessions: [
+              {
+                session_id: "cs_refresh_001",
+                status: "fulfilled",
+                fulfillment_status: "fulfilled",
+                units_credited: 5000,
+                newly_credited_units: 0,
+              },
+            ],
+            truncated: false,
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDashboard();
+    await user.click(screen.getByTestId("refresh-btn"));
+
+    await waitFor(() => {
+      expect(mockToastInfo).toHaveBeenCalledWith(
+        expect.stringContaining("Wallet is up to date"),
+      );
+    });
+    expect(mockToastSuccess).not.toHaveBeenCalled();
   });
 
   it("shows the backend reconciliation failure instead of a generic sync message", async () => {
@@ -1998,44 +1929,127 @@ describe("refresh behavior", () => {
     expect(mockToastSuccess).not.toHaveBeenCalled();
   });
 
-  it("does not report success when Stripe finds no paid checkout", async () => {
+  it("reports no-paid-checkout as informational, not as an error or success", async () => {
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/reconcile-recent") {
+        return Promise.resolve({
+          data: {
+            status: "no_paid_sessions_found",
+            sessions_matched: 0,
+            sessions_reconciled: 0,
+            units_credited: 0,
+            newly_credited_units: 0,
+            sessions: [],
+            truncated: false,
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
 
     await renderDashboard();
     await user.click(screen.getByTestId("refresh-btn"));
 
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith(
-        expect.stringContaining("No paid checkout was found"),
+      expect(mockToastInfo).toHaveBeenCalledWith(
+        expect.stringContaining("No completed checkout payment was found"),
       );
     });
+    expect(mockToastError).not.toHaveBeenCalledWith(
+      expect.stringContaining("No paid checkout"),
+    );
+    expect(mockToastSuccess).not.toHaveBeenCalled();
   });
 
-  it("starts the live refresh interval without posting to /events/simulate", async () => {
-    await renderDashboard();
+  it("reports expired unpaid checkouts as informational, never as a sync failure", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/reconcile-recent") {
+        return Promise.resolve({
+          data: {
+            status: "no_paid_sessions_found",
+            sessions_matched: 0,
+            sessions_reconciled: 0,
+            units_credited: 0,
+            newly_credited_units: 0,
+            sessions: [],
+            expired_checkouts: [
+              {
+                session_id: "cs_expired_001",
+                status: "expired",
+                units_credited: 0,
+                action: "none",
+              },
+            ],
+            truncated: false,
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
 
-    const dashboardCallsBefore = mockApiGet.mock.calls.filter(
-      ([url]) => url === "/dashboard/overview",
-    ).length;
+    await renderDashboard();
+    await user.click(screen.getByTestId("refresh-btn"));
+
+    await waitFor(() => {
+      expect(mockToastInfo).toHaveBeenCalledWith(
+        expect.stringContaining("1 checkout was started but not completed"),
+      );
+    });
+    expect(mockToastError).not.toHaveBeenCalled();
+  });
+
+  it("ignores a second Refresh press while a payment sync is in flight", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    let resolveReconcile;
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/reconcile-recent") {
+        return new Promise((resolve) => {
+          resolveReconcile = resolve;
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDashboard();
+    const refreshButton = screen.getByTestId("refresh-btn");
+    await user.click(refreshButton);
+    await user.click(refreshButton);
+
+    expect(refreshButton).toBeDisabled();
+    expect(
+      mockApiPost.mock.calls.filter(
+        ([url]) => url === "/billing/checkout/reconcile-recent",
+      ),
+    ).toHaveLength(1);
 
     await act(async () => {
-      jest.advanceTimersByTime(20000);
+      resolveReconcile({
+        data: {
+          status: "no_paid_sessions_found",
+          sessions_matched: 0,
+          sessions_reconciled: 0,
+          units_credited: 0,
+          newly_credited_units: 0,
+          sessions: [],
+          expired_checkouts: [],
+          truncated: false,
+        },
+      });
     });
 
     await waitFor(() => {
-      const dashboardCallsAfter = mockApiGet.mock.calls.filter(
-        ([url]) => url === "/dashboard/overview",
-      ).length;
-      expect(dashboardCallsAfter).toBeGreaterThan(dashboardCallsBefore);
+      expect(refreshButton).not.toBeDisabled();
     });
-    expect(mockApiPost).not.toHaveBeenCalledWith(
-      "/events/simulate",
-      expect.anything(),
-    );
   });
 
-  it("starts the refresh interval and re-fetches /dashboard after 5 minutes", async () => {
+  it("does not re-fetch dashboard data on a timer, so only Refresh updates it", async () => {
     await renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("refresh-btn")).toBeInTheDocument();
+    });
 
     const dashboardCallsBefore = mockApiGet.mock.calls.filter(
       ([url]) => url === "/dashboard/overview",
@@ -2045,11 +2059,13 @@ describe("refresh behavior", () => {
       jest.advanceTimersByTime(5 * 60 * 1000);
     });
 
-    await waitFor(() => {
-      const dashboardCallsAfter = mockApiGet.mock.calls.filter(
-        ([url]) => url === "/dashboard/overview",
-      ).length;
-      expect(dashboardCallsAfter).toBeGreaterThan(dashboardCallsBefore);
-    });
+    const dashboardCallsAfter = mockApiGet.mock.calls.filter(
+      ([url]) => url === "/dashboard/overview",
+    ).length;
+    expect(dashboardCallsAfter).toBe(dashboardCallsBefore);
+    expect(mockApiPost).not.toHaveBeenCalledWith(
+      "/events/simulate",
+      expect.anything(),
+    );
   });
 });

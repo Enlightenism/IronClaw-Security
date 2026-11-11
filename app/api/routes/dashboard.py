@@ -595,6 +595,14 @@ def get_dashboard_overview(
     incident_store = get_incident_store()
     audit_store = get_audit_store()
 
+    def _matches_owner(event: Any) -> bool:
+        return _record_matches_dashboard_identity(
+            event,
+            owner_key=resolved_owner,
+            principal_id=principal_id,
+            organization_id=organization_id,
+        )
+
     incidents = [
         incident
         for incident in incident_store.list_incidents(include_seeded=False)
@@ -605,16 +613,13 @@ def get_dashboard_overview(
             organization_id=organization_id,
         )
     ]
-    audit_events = [
-        event
-        for event in audit_store.list_events(limit=500, include_seeded=False)
-        if _record_matches_dashboard_identity(
-            event,
-            owner_key=resolved_owner,
-            principal_id=principal_id,
-            organization_id=organization_id,
-        )
-    ]
+    audit_events = audit_store.list_events(
+        limit=500,
+        include_seeded=False,
+        newest_first=True,
+        predicate=_matches_owner,
+    )
+    owner_blocked_total = sum(1 for event in audit_store.list_events(limit=None, include_seeded=False, predicate=_matches_owner) if (event.verdict or "").lower() == "block")
 
     open_incidents = [i for i in incidents if i.status in {"open", "triaged"}]
     blocked_events = [e for e in audit_events if (e.verdict or "").lower() == "block"]
@@ -653,6 +658,7 @@ def get_dashboard_overview(
         install_keys=install_key_records,
         wallet_summary=wallet.as_summary() if wallet is not None else {},
         audit_events=audit_events,
+        blocked_activity_total=owner_blocked_total,
     )
 
     wallet_status = "not_created" if wallet is None else "active" if wallet.balance_units > 0 else "empty"

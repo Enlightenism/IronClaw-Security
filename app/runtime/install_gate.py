@@ -135,6 +135,7 @@ def _record_decision(
     agent_id: str | None,
     client_id: str | None,
     owner_key: str | None,
+    install_key_id: str | None = None,
 ) -> None:
     try:
         append_telemetry_event(
@@ -167,6 +168,7 @@ def _record_decision(
             "pinned": decision.pinned,
             "fingerprint": decision.fingerprint,
             "artifacts": decision.artifacts,
+            "install_key_id": install_key_id,
         },
     )
 
@@ -178,13 +180,21 @@ def evaluate_install_command(
     agent_id: str | None = None,
     client_id: str | None = None,
     owner_key: str | None = None,
+    install_key_id: str | None = None,
 ) -> InstallGateDecision:
     try:
         decision = _evaluate(command, platform)
     except Exception:
         logger.exception("install gate evaluation failed; blocking")
         decision = _deny(FAMILY_UNKNOWN, None, "install_gate_error")
-    _record_decision(decision, platform=platform, agent_id=agent_id, client_id=client_id, owner_key=owner_key)
+    _record_decision(
+        decision,
+        platform=platform,
+        agent_id=agent_id,
+        client_id=client_id,
+        owner_key=owner_key,
+        install_key_id=install_key_id,
+    )
     return decision
 
 

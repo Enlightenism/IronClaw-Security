@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import ContactBubble from "@/components/ContactBubble";
@@ -11,9 +11,18 @@ import WalletCard from "@/components/dashboard/WalletCard";
 import { useAuth } from "@/context/AuthContext";
 import api, { paymentMethods, payments, wallet } from "@/lib/api";
 
-const ATTACKS_PAGE_SIZE = 25;
 const DASHBOARD_LOGO_SRC = "/images/logo128pxl.svg";
 const DASHBOARD_KNIGHT_SRC = "/images/Golden%20Knight%204k%202gb.png";
+const FOOTER_RESOURCE_LINKS = [
+  { label: "TryHackMe", href: "https://tryhackme.com" },
+  { label: "Cisco Networking Academy", href: "https://www.netacad.com" },
+  {
+    label: "PortSwigger Web Security Academy",
+    href: "https://portswigger.net/web-security",
+  },
+  { label: "OverTheWire", href: "https://overthewire.org" },
+  { label: "OWASP", href: "https://owasp.org" },
+];
 const INSTALL_KEY_PROGRAMS = [
   {
     program: "openclaw",
@@ -145,143 +154,6 @@ const getErrorMessage = (error) => {
 
   return "Could not start checkout.";
 };
-
-const AttackFeed = memo(function AttackFeed({
-  attacks,
-  blockedActivityTotal = 0,
-}) {
-  const [page, setPage] = useState(1);
-
-  useEffect(() => {
-    setPage(1);
-  }, [attacks]);
-
-  const totalPages = Math.max(1, Math.ceil(attacks.length / ATTACKS_PAGE_SIZE));
-
-  const paginatedAttacks = useMemo(() => {
-    const start = (page - 1) * ATTACKS_PAGE_SIZE;
-    return attacks.slice(start, start + ATTACKS_PAGE_SIZE);
-  }, [attacks, page]);
-
-  const startItem =
-    attacks.length === 0 ? 0 : (page - 1) * ATTACKS_PAGE_SIZE + 1;
-  const endItem = Math.min(page * ATTACKS_PAGE_SIZE, attacks.length);
-
-  return (
-    <section
-      className="rounded-2xl border border-white/10 bg-white/[0.03] p-5"
-      data-testid="attack-feed"
-    >
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">Attack Feed</h2>
-          <p className="mt-1 text-sm text-[#BFC1C2]">
-            Paginated results to keep large incident sets lightweight.
-          </p>
-        </div>
-        <div
-          className="font-tech text-xs text-[#BFC1C2]"
-          data-testid="attack-feed-summary"
-        >
-          {startItem}-{endItem} of {attacks.length}
-        </div>
-      </div>
-      <p
-        className="mb-4 text-xs text-[#BFC1C2]"
-        data-testid="attack-feed-blocked-total"
-      >
-        Total blocked attacks: {blockedActivityTotal.toLocaleString()}
-      </p>
-
-      {attacks.length === 0 ? (
-        <div
-          className="rounded-xl border border-dashed border-white/10 bg-black/20 px-4 py-8 text-center text-sm text-[#BFC1C2]"
-          data-testid="attack-feed-empty"
-        >
-          No attack events available.
-        </div>
-      ) : (
-        <>
-          <div className="space-y-3">
-            {paginatedAttacks.map((attack, index) => {
-              const key =
-                attack?.id ??
-                attack?.timestamp ??
-                attack?.created_at ??
-                `${page}-${index}`;
-
-              return (
-                <article
-                  key={key}
-                  className="rounded-xl border border-white/10 bg-black/20 p-4"
-                  data-testid="attack-feed-item"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold text-white">
-                        {attack?.title ||
-                          attack?.type ||
-                          attack?.name ||
-                          "Security event"}
-                      </div>
-                      <div className="mt-1 text-xs text-[#BFC1C2]">
-                        {attack?.description ||
-                          attack?.summary ||
-                          attack?.details ||
-                          "No additional event details provided."}
-                      </div>
-                    </div>
-                    <div className="text-right text-xs text-[#BFC1C2]">
-                      <div>
-                        {attack?.severity || attack?.status || "observed"}
-                      </div>
-                      <div className="mt-1">
-                        {attack?.timestamp || attack?.created_at || ""}
-                      </div>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              disabled={page === 1}
-              data-testid="attack-feed-prev"
-              className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm text-[#BFC1C2] transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <ChevronLeft size={16} />
-              Prev
-            </button>
-
-            <div
-              className="font-tech text-xs text-[#BFC1C2]"
-              data-testid="attack-feed-page"
-            >
-              Page {page} / {totalPages}
-            </div>
-
-            <button
-              type="button"
-              onClick={() =>
-                setPage((current) => Math.min(totalPages, current + 1))
-              }
-              disabled={page === totalPages}
-              data-testid="attack-feed-next"
-              className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm text-[#BFC1C2] transition hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Next
-              <ChevronRight size={16} />
-            </button>
-          </div>
-        </>
-      )}
-    </section>
-  );
-});
 
 const Dashboard = () => {
   const { user, session, loading, logout } = useAuth();
@@ -460,26 +332,6 @@ const Dashboard = () => {
     if (isAuthenticated) fetchDashboard();
   }, [fetchDashboard, isAuthenticated]);
 
-  useEffect(() => {
-    if (!isAuthenticated) return undefined;
-
-    const refresh = setInterval(
-      () => {
-        fetchDashboard({ silent: true });
-      },
-      5 * 60 * 1000,
-    );
-
-    const live = setInterval(() => {
-      fetchDashboard({ silent: true });
-    }, 20000);
-
-    return () => {
-      clearInterval(refresh);
-      clearInterval(live);
-    };
-  }, [fetchDashboard, isAuthenticated]);
-
   const pollPayment = useCallback(
     async (sessionId, attempts = 0) => {
       const maxAttempts = 15;
@@ -529,6 +381,27 @@ const Dashboard = () => {
           try {
             const { data: reconciled } = await payments.reconcile(sessionId);
             const credited = Number(reconciled?.units_credited ?? 0);
+            if (
+              reconciled?.payment_confirmed === true &&
+              reconciled?.fulfillment_status === "install_keys_pending" &&
+              Number.isSafeInteger(credited) &&
+              credited > 0
+            ) {
+              fetchDashboard({ silent: true });
+              toast.dismiss("pay");
+              setPaymentState("fulfillment_error");
+              setPurchasingId(null);
+              toast.warning(
+                `${credited.toLocaleString()} units were added to your wallet, but install keys are still being prepared. Contact support with checkout session ${sessionId} if they do not appear shortly.`,
+                {
+                  action: {
+                    label: "Retry sync",
+                    onClick: () => pollPayment(sessionId, 0),
+                  },
+                },
+              );
+              return;
+            }
             if (
               reconciled?.payment_confirmed !== true ||
               reconciled?.fulfillment_status !== "fulfilled" ||
@@ -758,6 +631,34 @@ const Dashboard = () => {
   const dashboardFooter = (
     <footer className="relative z-10 mt-12 border-t border-white/10 py-8 sm:py-10">
       <div className="mx-auto flex max-w-7xl flex-col items-center gap-3 px-4 text-center sm:px-6">
+        <section
+          aria-labelledby="footer-resources-title"
+          data-testid="footer-resources"
+          className="flex w-full max-w-4xl flex-col items-center gap-3 border-b border-white/10 pb-6"
+        >
+          <h3
+            id="footer-resources-title"
+            className="font-tech text-xs font-bold uppercase tracking-[0.2em] text-white"
+          >
+            Free Resources For Learning{" "}
+            <span className="metal-gold-text">Cyber Security</span>
+          </h3>
+          <ul className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs">
+            {FOOTER_RESOURCE_LINKS.map((resource, i) => (
+              <li key={resource.href}>
+                <a
+                  href={resource.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid={`footer-resource-link-${i}`}
+                  className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+                >
+                  {resource.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
         <div className="flex flex-col items-center gap-2 sm:flex-row sm:gap-2">
           <img
             src="/images/Golden%20Knight%20Logo128.png"
@@ -814,8 +715,15 @@ const Dashboard = () => {
     </footer>
   );
 
+  const refreshInFlightRef = useRef(false);
+
   const handleRefresh = useCallback(async () => {
+    if (refreshInFlightRef.current) {
+      return;
+    }
+    refreshInFlightRef.current = true;
     setRefreshing(true);
+    setPaymentMethodsRefreshKey((key) => key + 1);
     try {
       const { data: reconciliation } = await payments.reconcileRecent();
       const [snapshot, ledgerResponse] = await Promise.all([
@@ -872,8 +780,8 @@ const Dashboard = () => {
         reconciliation?.status === "no_paid_sessions_found" ||
         Number(reconciliation?.sessions_matched) === 0
       ) {
-        toast.error(
-          "No paid checkout was found for this account. No new charge was made; contact support if Stripe shows a completed payment.",
+        toast.info(
+          "No completed checkout payment was found for this account, so no units were added.",
         );
       } else {
         const installKeysReady = INSTALL_KEY_PROGRAMS.every(({ program }) => {
@@ -905,14 +813,30 @@ const Dashboard = () => {
             "Stripe found a paid session, but wallet credit could not be confirmed.",
           );
         }
-        toast.success(
-          `Payment confirmed — ${unitsCredited.toLocaleString()} units are in your wallet and install keys are refreshed.`,
+        const newlyCredited = Number(reconciliation?.newly_credited_units ?? 0);
+        if (Number.isSafeInteger(newlyCredited) && newlyCredited > 0) {
+          toast.success(
+            `Payment confirmed — ${newlyCredited.toLocaleString()} units added to your wallet. Install keys are up to date.`,
+          );
+        } else {
+          toast.info(
+            "Wallet is up to date. Every completed payment was already credited, so no new units were added.",
+          );
+        }
+      }
+      const expiredCount = Array.isArray(reconciliation?.expired_checkouts)
+        ? reconciliation.expired_checkouts.length
+        : 0;
+      if (expiredCount > 0) {
+        toast.info(
+          `${expiredCount.toLocaleString()} checkout${expiredCount === 1 ? " was" : "s were"} started but not completed. ${expiredCount === 1 ? "It was" : "They were"} never charged or credited.`,
         );
       }
     } catch (error) {
       await fetchDashboard({ silent: true });
       toast.error(`Payment sync failed. ${getErrorMessage(error)}`);
     } finally {
+      refreshInFlightRef.current = false;
       setRefreshing(false);
     }
   }, [fetchDashboard]);
@@ -965,6 +889,11 @@ const Dashboard = () => {
       attacks: Array.isArray(installKeyDashboard.attacks)
         ? installKeyDashboard.attacks
         : [],
+      blockedAttacksTotal: Number.isSafeInteger(
+        installKeyDashboard.blocked_activity_total,
+      )
+        ? installKeyDashboard.blocked_activity_total
+        : 0,
     }),
     [installKeyDashboard],
   );
@@ -1036,13 +965,6 @@ const Dashboard = () => {
     });
   }, [createInstallClaim, installKeyStatusByProgram, tokens?.install_metadata]);
 
-  const attackFeedItems = securityProps.attacks;
-  const blockedActivityTotal = Number.isSafeInteger(
-    installKeyDashboard.blocked_activity_total,
-  )
-    ? installKeyDashboard.blocked_activity_total
-    : 0;
-
   if (loading || (loadingData && !data)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#050607]">
@@ -1094,7 +1016,7 @@ const Dashboard = () => {
       </div>
 
       <nav className="sticky top-0 z-40 border-b border-white/10 bg-[#050607]/80 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 max-sm:flex-col max-sm:justify-center max-sm:gap-4">
           <button
             type="button"
             onClick={() => navigate("/")}
@@ -1107,7 +1029,12 @@ const Dashboard = () => {
               className="brand-logo-image"
             />
             <span className="font-tech text-lg font-bold tracking-tight">
-              IRONCLAW<span className="metal-gold-text">-SECURITY</span>
+              IRONCLAW
+              <span className="metal-gold-text">
+                <span className="max-sm:hidden">-</span>
+                <span className="sm:hidden"> </span>
+                SECURITY
+              </span>
             </span>
           </button>
 
@@ -1157,8 +1084,9 @@ const Dashboard = () => {
           <button
             type="button"
             onClick={handleRefresh}
+            disabled={refreshing}
             data-testid="refresh-btn"
-            className="hidden items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-[#BFC1C2] transition hover:text-white sm:flex"
+            className="items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-[#BFC1C2] transition hover:text-white flex disabled:cursor-not-allowed disabled:opacity-60"
           >
             <RefreshCw
               size={15}
@@ -1172,10 +1100,6 @@ const Dashboard = () => {
           <div className="space-y-6 order-1 lg:order-2">
             <MemoWalletCard {...walletProps} />
             <MemoSecurityAnalysis {...securityProps} />
-            <AttackFeed
-              attacks={attackFeedItems}
-              blockedActivityTotal={blockedActivityTotal}
-            />
           </div>
 
           <div className="space-y-3 order-2 lg:order-1">

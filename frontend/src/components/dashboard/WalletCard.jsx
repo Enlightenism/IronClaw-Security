@@ -273,6 +273,13 @@ const StripeKeyWarning = ({ stripeMode }) => {
   );
 };
 
+const getPaymentMethodErrorMessage = (error, fallback) => {
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === "string" && detail) return detail;
+  if (typeof detail?.detail === "string" && detail.detail) return detail.detail;
+  return fallback;
+};
+
 const PaymentMethodPanel = ({
   organizationId,
   onAddPaymentMethod,
@@ -425,7 +432,7 @@ const PaymentMethodPanel = ({
       await refreshMethods();
     } catch (error) {
       toast.error(
-        error?.response?.data?.detail ?? "Could not update default method.",
+        getPaymentMethodErrorMessage(error, "Could not update default method."),
       );
     } finally {
       setActionId(null);
@@ -442,7 +449,7 @@ const PaymentMethodPanel = ({
       await refreshMethods();
     } catch (error) {
       toast.error(
-        error?.response?.data?.detail ?? "Could not remove payment method.",
+        getPaymentMethodErrorMessage(error, "Could not remove payment method."),
       );
     } finally {
       setActionId(null);

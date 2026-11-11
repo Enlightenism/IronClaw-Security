@@ -72,7 +72,7 @@ def test_route_forwards_agent_and_client_ids(test_client: TestClient, monkeypatc
 
     assert r.status_code == 200
     assert len(captured) == 1
-    assert {key: value for key, value in captured[0].items() if key != "owner_key"} == {"command": "goose run", "platform": "goose", "agent_id": "ag-1", "client_id": "cl-1"}
+    assert {key: value for key, value in captured[0].items() if key != "owner_key"} == {"command": "goose run", "platform": "goose", "agent_id": "ag-1", "client_id": "cl-1", "install_key_id": None}
 
 
 class _StubInstallKeyRegistry:
@@ -94,6 +94,7 @@ def test_install_key_scopes_owner_for_matching_platform(test_client: TestClient,
 
     assert r.status_code == 200
     assert captured[0]["owner_key"] == "owner-1"
+    assert captured[0]["install_key_id"] == "key-1"
 
 
 def test_install_key_platform_mismatch_returns_403(test_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

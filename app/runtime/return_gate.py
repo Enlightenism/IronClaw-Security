@@ -112,6 +112,7 @@ def _record_decision(
     client_id: str | None,
     session_id: str | None,
     owner_key: str | None,
+    install_key_id: str | None = None,
 ) -> None:
     try:
         append_telemetry_event(
@@ -139,7 +140,7 @@ def _record_decision(
         decision_id=decision.sandbox_id,
         session_id=session_id,
         agent_id=agent_id,
-        details={"stage": decision.stage, "risk_score": decision.risk_score},
+        details={"stage": decision.stage, "risk_score": decision.risk_score, "install_key_id": install_key_id},
     )
 
 
@@ -188,6 +189,7 @@ def run_return_gate(
         client_id=client_id,
         session_id=session_id,
         owner_key=owner_key,
+        install_key_id=install_key_id,
     )
     return decision
 

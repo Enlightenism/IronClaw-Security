@@ -223,7 +223,7 @@ describe("SecurityAnalysis", () => {
     );
   });
 
-  it("renders attack rows with threat, risk score, and verdict", () => {
+  it("renders attack rows with timestamp, threat, and a Blocked verdict", () => {
     render(
       <SecurityAnalysis
         unitsToday={12}
@@ -236,42 +236,27 @@ describe("SecurityAnalysis", () => {
     expect(screen.getByText("Prompt Injection")).toBeInTheDocument();
     expect(screen.getByText("Secrets Leakage")).toBeInTheDocument();
     expect(screen.getByText("Malware File")).toBeInTheDocument();
-    expect(screen.getByText("22")).toBeInTheDocument();
-    expect(screen.getByText("74")).toBeInTheDocument();
-    expect(screen.getByText("91")).toBeInTheDocument();
-    expect(screen.getByText("ALLOW")).toBeInTheDocument();
-    expect(screen.getAllByText("BLOCK")).toHaveLength(2);
+    expect(screen.queryByText("Risk")).not.toBeInTheDocument();
+    expect(screen.queryByText("22")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Blocked")).toHaveLength(ATTACKS.length);
+    expect(screen.queryByText("BLOCK")).not.toBeInTheDocument();
+    expect(screen.queryByText("ALLOW")).not.toBeInTheDocument();
   });
 
-  it("retains styles for legacy verdicts in historical rows", () => {
-    const historicalAttacks = [
-      {
-        id: "legacy-warn",
-        timestamp: "2026-07-12T11:20:00.000Z",
-        threat_type: "Legacy warning",
-        risk_score: 58,
-        verdict: "WARN",
-      },
-      {
-        id: "legacy-quarantine",
-        timestamp: "2026-07-12T11:25:00.000Z",
-        threat_type: "Legacy quarantine",
-        risk_score: 69,
-        verdict: "QUARANTINE",
-      },
-    ];
-
+  it("shows the all-time blocked attacks total in the live attack log", () => {
     render(
       <SecurityAnalysis
         unitsToday={12}
         unitsWeek={45}
         dailyUsage={DAILY_USAGE}
-        attacks={historicalAttacks}
+        attacks={ATTACKS}
+        blockedAttacksTotal={1234}
       />,
     );
 
-    expect(screen.getByText("WARN")).toHaveClass("text-[#EAB308]");
-    expect(screen.getByText("QUARANTINE")).toHaveClass("text-[#737373]");
+    const total = screen.getByTestId("attack-log-blocked-total");
+    expect(total).toHaveTextContent("Total blocked attacks: 1,234");
+    expect(screen.getByTestId("attack-log")).toBeInTheDocument();
   });
 
   it("falls back to empty attack state when attacks are empty with live incoming stats", () => {

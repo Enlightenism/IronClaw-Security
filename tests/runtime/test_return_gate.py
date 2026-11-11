@@ -166,6 +166,24 @@ def test_allow_is_audited_without_incident(monkeypatch: pytest.MonkeyPatch, tele
     assert events[0].severity == "low"
 
 
+def test_block_audit_records_install_key_id(monkeypatch: pytest.MonkeyPatch, telemetry: list[tuple[Any, Any]]) -> None:
+    _block_scan(monkeypatch)
+    owner_key = "owner-return-gate-key"
+
+    run_return_gate(
+        platform="claude_code",
+        payload={"stdout": "secret"},
+        content="secret",
+        broker_client=_FakeBroker(_ALLOW_BROKER),
+        owner_key=owner_key,
+        install_key_id="ik_claude_code_test",
+    )
+
+    events = _gate_records(owner_key)
+    assert len(events) == 1
+    assert events[0].metadata["install_key_id"] == "ik_claude_code_test"
+
+
 def test_allow_when_in_process_and_sandbox_both_allow(monkeypatch: pytest.MonkeyPatch, telemetry: list[tuple[Any, Any]]) -> None:
     _allow_scan(monkeypatch)
     broker = _FakeBroker(_ALLOW_BROKER)

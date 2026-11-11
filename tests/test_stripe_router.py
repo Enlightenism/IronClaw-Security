@@ -15,6 +15,7 @@ from app.routers.stripe_router import get_checkout_auth_context, get_stripe_serv
 from app.services.stripe_service import (
     MeteredSyncResponse,
     StripeCheckoutMode,
+    StripeInstallKeyProvisioningError,
     StripeInsufficientUnitsError,
     StripePersistenceError,
     StripeService,
@@ -1176,6 +1177,33 @@ class TestCheckoutSessionRoutes:
 
         assert response.status_code == 502
         assert response.json()["detail"]["error"] == "reconcile_error"
+
+    def test_reconcile_checkout_session_reports_pending_install_keys_after_credit(
+        self,
+        client: TestClient,
+        mock_svc: MagicMock,
+    ) -> None:
+        mock_svc.retrieve_checkout_session.return_value = {
+            "session_id": SESSION_ID,
+            "status": "complete",
+            "payment_status": "paid",
+            "org_id": ORG_ID,
+            "metadata": {"owner_key": "buyer@ironclaw.test"},
+        }
+        mock_svc.reconcile_checkout_session.side_effect = StripeInstallKeyProvisioningError("install keys failed")
+        mock_svc.get_checkout_units_credited.return_value = 5000
+
+        response = client.post(
+            _billing_path(f"/checkout/sessions/{SESSION_ID}/reconcile"),
+            headers=_auth_headers(),
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["payment_confirmed"] is True
+        assert body["fulfillment_status"] == "install_keys_pending"
+        assert body["error"] == "install_key_provisioning_failed"
+        assert body["units_credited"] == 5000
 
     def test_reconcile_recent_checkout_sessions_returns_wallet_verified_results(
         self,

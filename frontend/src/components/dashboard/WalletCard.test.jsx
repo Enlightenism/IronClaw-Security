@@ -824,6 +824,33 @@ describe("Payment method interactions", () => {
     expect(mockApiPost).not.toHaveBeenCalled();
   });
 
+  it("shows the nested detail message when removal returns an object detail", async () => {
+    const user = userEvent.setup();
+    mockPaymentMethodsDelete.mockRejectedValue({
+      response: {
+        data: {
+          detail: {
+            error: "detach_error",
+            detail: "Stripe could not detach the card.",
+            methodid: "pm_other",
+          },
+        },
+      },
+    });
+    mockPaymentMethodsList.mockResolvedValueOnce(TWO_METHODS_RESPONSE);
+
+    await renderWalletCard({ organizationId: uniqueOrgId() });
+
+    const button = await screen.findByTestId("delete-method-pm_other");
+    await user.click(button);
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        "Stripe could not detach the card.",
+      );
+    });
+  });
+
   it("does not expose a card button that can trigger a paid package checkout", async () => {
     const onPurchase = jest.fn();
     setupTwoMethods();

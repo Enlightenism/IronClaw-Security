@@ -300,10 +300,6 @@ def executeaction(
         mergedmetadata["install_key_id"] = install_key_id
         mergedmetadata["program"] = install_program
 
-    if install_key_id is not None:
-        mergedmetadata["install_key_id"] = install_key_id
-        mergedmetadata["program"] = install_program
-
     install_decision = None
     if request.actiontype in INSTALL_CHECKED_ACTIONS:
         install_decision = gate_shell_payload(
@@ -352,6 +348,7 @@ def executeaction(
                     "categories": categories if isinstance(categories, list) else [],
                     "scan_id": promptinjection.get("scan_id"),
                     "client_id": request.clientid,
+                    "install_key_id": install_key_id,
                 },
             )
 

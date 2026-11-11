@@ -131,6 +131,45 @@ def test_dashboard_sync_maps_runtime_usage_and_sanitized_attack_events() -> None
     assert "sensitive prompt contents" not in str(summary["attacks"][0])
 
 
+def test_dashboard_sync_surfaces_gate_reason_platform_and_key_for_attacks() -> None:
+    service = InstallKeyDashboardSyncService()
+    owner_key = "owner_dash_reason"
+    today = datetime.now(UTC)
+
+    summary = service.build_dashboard_summary(
+        owner_key=owner_key,
+        install_keys=[
+            _record(key_id="ik_openclaw_reason", owner_key=owner_key, program="openclaw"),
+        ],
+        wallet_summary={"owner_key": owner_key, "balance_units": 10, "install_key_usage": {}},
+        audit_events=[
+            SimpleNamespace(
+                event_id="audit-action-block-1",
+                event_type="action_gate_decision",
+                severity="high",
+                created_at=today,
+                verdict="block",
+                metadata={
+                    "gate": "action",
+                    "platform": "openclaw",
+                    "reason_codes": ["prompt_injection_detected"],
+                    "install_key_id": "ik_openclaw_reason",
+                    "summary": "sensitive prompt contents are not dashboard metadata",
+                },
+            ),
+        ],
+    )
+
+    attack = summary["attacks"][0]
+    assert attack["title"] == "Prompt Injection Detected"
+    assert attack["threat_type"] == "prompt_injection_detected"
+    assert attack["platform"] == "openclaw"
+    assert attack["key_id"] == "ik_openclaw_reason"
+    assert attack["reason_codes"] == ["prompt_injection_detected"]
+    assert attack["description"] == "Blocked by IronClaw policy (block) on openclaw: prompt_injection_detected."
+    assert "sensitive prompt contents" not in str(attack)
+
+
 def test_dashboard_sync_rejects_generic_platform_auth_as_owner() -> None:
     service = InstallKeyDashboardSyncService()
 

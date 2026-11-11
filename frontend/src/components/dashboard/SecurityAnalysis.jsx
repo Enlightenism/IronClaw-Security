@@ -22,15 +22,6 @@ const LEGACY_VERDICT_STYLES = {
   WARN: "bg-[#EAB308]/10 text-[#EAB308] border-[#EAB308]/25",
 };
 
-const VERDICT_COLORS = {
-  ALLOW: "#22C55E",
-  BLOCK: "#EF4444",
-};
-
-const LEGACY_VERDICT_COLORS = {
-  WARN: "#EAB308",
-};
-
 const normalizeVerdict = (verdict) => String(verdict ?? "").toUpperCase();
 
 const verdictStyle = (verdict) => {
@@ -39,13 +30,6 @@ const verdictStyle = (verdict) => {
     VERDICT_STYLES[normalized] ??
     LEGACY_VERDICT_STYLES[normalized] ??
     "bg-[#737373]/10 text-[#737373] border-[#737373]/25"
-  );
-};
-
-const verdictColor = (verdict) => {
-  const normalized = normalizeVerdict(verdict);
-  return (
-    VERDICT_COLORS[normalized] ?? LEGACY_VERDICT_COLORS[normalized] ?? "#737373"
   );
 };
 
@@ -118,16 +102,14 @@ const TableSkeleton = () => (
     className="rounded-xl border border-white/10"
     data-testid="attack-log-skeleton"
   >
-    <div className="grid grid-cols-4 gap-4 border-b border-white/5 px-4 py-3 text-[10px] uppercase tracking-wider text-[#737373]">
+    <div className="grid grid-cols-3 gap-4 border-b border-white/5 px-4 py-3 text-[10px] uppercase tracking-wider text-[#737373]">
       <div>Timestamp</div>
       <div>Threat</div>
-      <div>Risk</div>
       <div>Verdict</div>
     </div>
     <div className="space-y-3 p-4">
       {[0, 1, 2, 3].map((row) => (
-        <div key={row} className="grid grid-cols-4 gap-4">
-          <div className="h-4 animate-pulse rounded bg-white/10" />
+        <div key={row} className="grid grid-cols-3 gap-4">
           <div className="h-4 animate-pulse rounded bg-white/10" />
           <div className="h-4 animate-pulse rounded bg-white/10" />
           <div className="h-4 animate-pulse rounded bg-white/10" />
@@ -142,6 +124,7 @@ const EMPTY_CACHE = {
   unitsWeek: 0,
   dailyUsage: [],
   attacks: [],
+  blockedAttacksTotal: 0,
 };
 
 let securityAnalysisCache = null;
@@ -151,12 +134,14 @@ const SecurityAnalysis = ({
   unitsWeek = 0,
   dailyUsage = [],
   attacks = [],
+  blockedAttacksTotal = 0,
 }) => {
   const hasIncomingData =
     unitsToday > 0 ||
     unitsWeek > 0 ||
     dailyUsage.length > 0 ||
-    attacks.length > 0;
+    attacks.length > 0 ||
+    blockedAttacksTotal > 0;
 
   const [cachedData, setCachedData] = useState(
     () => securityAnalysisCache || EMPTY_CACHE,
@@ -171,6 +156,7 @@ const SecurityAnalysis = ({
         unitsWeek,
         dailyUsage,
         attacks,
+        blockedAttacksTotal,
       };
 
       securityAnalysisCache = nextData;
@@ -204,14 +190,29 @@ const SecurityAnalysis = ({
         hydrationTimerRef.current = null;
       }
     };
-  }, [unitsToday, unitsWeek, dailyUsage, attacks, hasIncomingData]);
+  }, [
+    unitsToday,
+    unitsWeek,
+    dailyUsage,
+    attacks,
+    blockedAttacksTotal,
+    hasIncomingData,
+  ]);
 
   const displayData = useMemo(
     () =>
       hasIncomingData
-        ? { unitsToday, unitsWeek, dailyUsage, attacks }
+        ? { unitsToday, unitsWeek, dailyUsage, attacks, blockedAttacksTotal }
         : cachedData,
-    [hasIncomingData, unitsToday, unitsWeek, dailyUsage, attacks, cachedData],
+    [
+      hasIncomingData,
+      unitsToday,
+      unitsWeek,
+      dailyUsage,
+      attacks,
+      blockedAttacksTotal,
+      cachedData,
+    ],
   );
 
   const chartCells = useMemo(
@@ -246,22 +247,11 @@ const SecurityAnalysis = ({
           <td className="px-4 py-2.5 text-white">{a.threat_type}</td>
           <td className="px-4 py-2.5">
             <span
-              className="font-tech rounded px-2 py-0.5 text-[11px] font-bold"
-              style={{
-                color: verdictColor(a.verdict),
-                background: `${verdictColor(a.verdict)}1a`,
-              }}
-            >
-              {a.risk_score}
-            </span>
-          </td>
-          <td className="px-4 py-2.5">
-            <span
               className={`rounded border px-2 py-0.5 text-[10px] font-semibold ${verdictStyle(
                 a.verdict,
               )}`}
             >
-              {a.verdict}
+              Blocked
             </span>
           </td>
         </motion.tr>
@@ -345,15 +335,26 @@ const SecurityAnalysis = ({
         </div>
       )}
 
-      <div className="mb-3 flex items-center gap-2 text-[10px] uppercase tracking-widest text-[#BFC1C2]">
-        <ShieldAlert size={13} /> Live attack log
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-[#BFC1C2]">
+          <ShieldAlert size={13} /> Live attack log
+        </div>
+        <div
+          className="font-tech text-xs text-[#BFC1C2]"
+          data-testid="attack-log-blocked-total"
+        >
+          Total blocked attacks:{" "}
+          <span className="font-semibold text-[#EF4444]">
+            {displayData.blockedAttacksTotal.toLocaleString()}
+          </span>
+        </div>
       </div>
 
       {isHydrating ? (
         <TableSkeleton />
       ) : (
         <div
-          className="max-h-72 overflow-y-auto rounded-xl border border-white/10"
+          className="max-h-[32rem] overflow-y-auto rounded-xl border border-white/10"
           data-testid="attack-log"
         >
           <table className="w-full text-left text-xs">
@@ -361,7 +362,6 @@ const SecurityAnalysis = ({
               <tr className="text-[10px] uppercase tracking-wider text-[#737373]">
                 <th className="px-4 py-3 font-medium">Timestamp</th>
                 <th className="px-4 py-3 font-medium">Threat</th>
-                <th className="px-4 py-3 font-medium">Risk</th>
                 <th className="px-4 py-3 font-medium">Verdict</th>
               </tr>
             </thead>
@@ -370,7 +370,7 @@ const SecurityAnalysis = ({
               {displayData.attacks.length === 0 && (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={3}
                     className="px-4 py-8 text-center text-[#737373]"
                   >
                     No threats recorded yet.

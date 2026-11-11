@@ -6,24 +6,9 @@ import json
 import os
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app.api.routes.integrations import (
-    _CANONICAL_PLATFORM_ORDER,
-)
-from app.api.routes.integrations import (
-    InstallKeyClaimRedeemRequest as CanonicalInstallKeyClaimRedeemRequest,
-)
-from app.api.routes.integrations import (
-    create_integration_install_claim as _create_canonical_install_claim,
-)
-from app.api.routes.integrations import (
-    get_integrations_token as _get_canonical_integrations_token,
-)
-from app.api.routes.integrations import (
-    redeem_install_key_claim as _redeem_canonical_install_key_claim,
-)
 from app.core.auth import get_auth_context
 from app.routes.integrations.installer import (
     IntegrationInstallRequest,
@@ -176,22 +161,6 @@ class IntegrationObservabilityResponse(BaseModel):
     integration_id: str
     metrics: dict[str, Any]
     traces: list[dict[str, Any]]
-
-
-class IntegrationTokenResponse(BaseModel):
-    status: str = "locked"
-    user_token: str
-    claude_code_command: str = ""
-    openclaw_command: str = ""
-    cursor_command: str = ""
-    goose_command: str = ""
-    gemini_cli_command: str = ""
-    copilot_command: str = ""
-    hermes_command: str = ""
-    security_guardian_command: str = ""
-    supported_platforms: list[str] = Field(default_factory=list)
-    command_metadata: dict[str, str] = Field(default_factory=dict)
-    install_metadata: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -460,48 +429,6 @@ def get_verifier(integration_id: str) -> dict[str, Any]:
     if not normalized:
         raise HTTPException(status_code=404, detail="integration not found")
     return _verifier_payload(normalized)
-
-
-# ---------------------------------------------------------------------------
-# Token helper for frontend dashboard
-# ---------------------------------------------------------------------------
-
-
-@router.get("/token", response_model=IntegrationTokenResponse)
-async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> IntegrationTokenResponse:
-    payload = await _get_canonical_integrations_token(auth)
-    return IntegrationTokenResponse(
-        status=str(payload.get("status", "locked")),
-        user_token=str(payload.get("user_token", "")),
-        claude_code_command=str(payload.get("claude_code_command", "")),
-        openclaw_command=str(payload.get("openclaw_command", "")),
-        cursor_command=str(payload.get("cursor_command", "")),
-        goose_command=str(payload.get("goose_command", "")),
-        gemini_cli_command=str(payload.get("gemini_cli_command", "")),
-        copilot_command=str(payload.get("copilot_command", "")),
-        hermes_command=str(payload.get("hermes_command", "")),
-        security_guardian_command=str(payload.get("security_guardian_command", "")),
-        supported_platforms=list(payload.get("supported_platforms", list(_CANONICAL_PLATFORM_ORDER))),
-        command_metadata={str(k): str(v) for k, v in (payload.get("command_metadata") or {}).items()},
-        install_metadata={str(k): dict(v) for k, v in (payload.get("install_metadata") or {}).items()},
-    )
-
-
-@router.post("/installers/{integration_id}/claim", status_code=status.HTTP_201_CREATED)
-def create_integration_install_claim(
-    integration_id: str,
-    response: Response,
-    auth: Any = Depends(get_auth_context),
-) -> dict[str, Any]:
-    return _create_canonical_install_claim(integration_id, response, auth)
-
-
-@router.post("/install-claims/redeem")
-def redeem_install_key_claim(
-    payload: CanonicalInstallKeyClaimRedeemRequest,
-    response: Response,
-) -> dict[str, str]:
-    return _redeem_canonical_install_key_claim(payload, response)
 
 
 # ---------------------------------------------------------------------------

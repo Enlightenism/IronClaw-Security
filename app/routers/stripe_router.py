@@ -24,6 +24,7 @@ from app.services.stripe_service import (
     PACKAGE_CATALOGUE,
     TOKENS_PER_UNIT,
     StripeCheckoutMode,
+    StripeInstallKeyProvisioningError,
     StripeInsufficientUnitsError,
     StripePaymentMethodNotFoundError,
     StripePersistenceError,
@@ -1409,6 +1410,14 @@ async def reconcile_checkout_session(
             code="checkout_session_not_found",
             extra={"session_id": session_id},
         ) from exc
+    except StripeInstallKeyProvisioningError:
+        logger.error("stripe.reconcile_install_keys_pending session=%s", session_id)
+        result = {
+            "payment_status": "paid",
+            "payment_confirmed": True,
+            "fulfillment_status": "install_keys_pending",
+            "error": "install_key_provisioning_failed",
+        }
     except StripeServiceError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

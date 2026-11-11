@@ -609,6 +609,19 @@ canvas[data-testid="particle-field"] {
         opacity: 0.32;
         animation-duration: 10s;
     }
+
+    .wallet-deck-tab {
+        top: 40%;
+        gap: 0.2rem;
+        padding: 0.3rem 0.4rem 0.3rem 0.35rem;
+        font-size: 0.5625rem;
+        letter-spacing: 0.05em;
+    }
+
+    .wallet-deck-tab svg {
+        width: 0.6rem;
+        height: 0.6rem;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {

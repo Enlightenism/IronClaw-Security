@@ -184,15 +184,27 @@ class InstallKeyDashboardSyncService:
         if not isinstance(metadata, dict):
             metadata = {}
         event_type = str(self._row_value(event, "event_type") or "").strip()
-        threat_type = str(metadata.get("category") or event_type or "security_event").strip()
+        raw_reason_codes = metadata.get("reason_codes")
+        reason_codes = [str(code).strip() for code in raw_reason_codes if str(code).strip()] if isinstance(raw_reason_codes, list) else []
+        platform = str(metadata.get("platform") or "").strip().lower() or None
+        key_id = str(metadata.get("install_key_id") or "").strip() or None
+        threat_type = str(metadata.get("category") or (reason_codes[0] if reason_codes else "") or event_type or "security_event").strip()
         severity = str(self._row_value(event, "severity") or "unknown").strip()
+        description = f"Blocked by IronClaw policy ({verdict})"
+        if platform:
+            description += f" on {platform}"
+        if reason_codes:
+            description += f": {', '.join(reason_codes)}"
         return {
             "id": event_id,
             "title": threat_type.replace("-", " ").replace("_", " ").title(),
-            "description": f"Blocked by IronClaw policy ({verdict}).",
+            "description": f"{description}.",
             "severity": severity,
             "timestamp": timestamp_value,
             "threat_type": threat_type,
+            "platform": platform,
+            "key_id": key_id,
+            "reason_codes": reason_codes,
             "risk_score": severity,
             "verdict": verdict.upper(),
         }
@@ -204,6 +216,7 @@ class InstallKeyDashboardSyncService:
         install_keys: Any,
         wallet_summary: dict[str, Any] | None,
         audit_events: Any = (),
+        blocked_activity_total: int | None = None,
     ) -> dict[str, Any]:
         normalized_owner = self._normalize_owner_key(owner_key)
         if self._looks_like_generic_platform_auth(normalized_owner):
@@ -291,7 +304,7 @@ class InstallKeyDashboardSyncService:
         return {
             "owner_key": normalized_owner,
             "wallet_total_units": wallet_total_units,
-            "blocked_activity_total": len(attacks),
+            "blocked_activity_total": len(attacks) if blocked_activity_total is None else max(blocked_activity_total, len(attacks)),
             "units_today": units_today,
             "units_week": units_week,
             "daily_usage": daily_usage,

@@ -2350,6 +2350,7 @@ class TestReconcileCheckoutSession:
         assert reconciliation["status"] == "complete"
         assert reconciliation["sessions_reconciled"] == 1
         assert reconciliation["units_credited"] == 5000
+        assert reconciliation["newly_credited_units"] == 5000
         assert [r["session_id"] for r in reconciliation["sessions"]] == ["cs_owner_001"]
         owner_wallet = svc_wired._wallet_registry.get_wallet(owner)  # noqa: SLF001
         assert owner_wallet is not None
@@ -2375,6 +2376,7 @@ class TestReconcileCheckoutSession:
         mock_client.get.side_effect = [
             {"object": "list", "data": [first], "has_more": True},
             {"object": "list", "data": [second], "has_more": False},
+            {"object": "list", "data": [], "has_more": False},
         ]
 
         reconciliation = svc_wired.reconcile_owner_checkout_sessions(owner)
@@ -2384,6 +2386,8 @@ class TestReconcileCheckoutSession:
         assert reconciliation["sessions_scanned"] == 2
         assert reconciliation["sessions_reconciled"] == 2
         assert reconciliation["units_credited"] == 7500
+        assert reconciliation["newly_credited_units"] == 7500
+        assert reconciliation["expired_checkouts"] == []
         assert mock_client.get.call_args_list[0].kwargs["params"] == {
             "limit": 100,
             "status": "complete",
@@ -2393,6 +2397,10 @@ class TestReconcileCheckoutSession:
             "status": "complete",
             "starting_after": "cs_owner_page_001",
         }
+        expired_params = mock_client.get.call_args_list[2].kwargs["params"]
+        assert expired_params["limit"] == 100
+        assert expired_params["status"] == "expired"
+        assert isinstance(expired_params["created[gte]"], int)
 
     def test_reconcile_owner_checkout_sessions_retry_reports_existing_ledger_credit(
         self,
@@ -2413,6 +2421,8 @@ class TestReconcileCheckoutSession:
         retry = svc_wired.reconcile_owner_checkout_sessions(owner)
 
         assert first["units_credited"] == retry["units_credited"] == 5000
+        assert first["newly_credited_units"] == 5000
+        assert retry["newly_credited_units"] == 0
         assert retry["sessions_reconciled"] == 1
         owner_wallet = svc_wired._wallet_registry.get_wallet(owner)  # noqa: SLF001
         assert owner_wallet is not None
@@ -2461,7 +2471,7 @@ class TestReconcileCheckoutSession:
                 "has_more": True,
             }
             for index in range(5)
-        ]
+        ] + [{"object": "list", "data": [], "has_more": False}]
 
         reconciliation = svc_wired.reconcile_owner_checkout_sessions("buyer@ironclaw.test")
 
@@ -2470,7 +2480,54 @@ class TestReconcileCheckoutSession:
         assert reconciliation["sessions_scanned"] == 5
         assert reconciliation["sessions_matched"] == 0
         assert reconciliation["truncated"] is True
-        assert mock_client.get.call_count == 5
+        assert reconciliation["expired_checkouts"] == []
+        assert mock_client.get.call_count == 6
+
+    def test_reconcile_owner_checkout_sessions_reports_owner_expired_checkouts_without_credit(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        owner = "buyer@ironclaw.test"
+        expired_mine = _build_checkout_completed_event(
+            unit_credits=5000,
+            session_id="cs_owner_expired_001",
+            owner_key=owner,
+        )[
+            "data"
+        ]["object"]
+        expired_mine.update({"status": "expired", "payment_status": "unpaid"})
+        expired_other = _build_checkout_completed_event(
+            unit_credits=2500,
+            session_id="cs_owner_expired_002",
+            owner_key="other@ironclaw.test",
+        )[
+            "data"
+        ]["object"]
+        expired_other.update({"status": "expired", "payment_status": "unpaid"})
+
+        def _list_sessions(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+            if params and params.get("status") == "expired":
+                return {"object": "list", "data": [expired_mine, expired_other], "has_more": False}
+            return {"object": "list", "data": [], "has_more": False}
+
+        mock_client.get.side_effect = _list_sessions
+
+        reconciliation = svc_wired.reconcile_owner_checkout_sessions(owner)
+
+        assert reconciliation["status"] == "no_paid_sessions_found"
+        assert reconciliation["sessions_matched"] == 0
+        assert reconciliation["units_credited"] == 0
+        assert reconciliation["newly_credited_units"] == 0
+        assert reconciliation["expired_checkouts"] == [
+            {
+                "session_id": "cs_owner_expired_001",
+                "status": "expired",
+                "units_credited": 0,
+                "action": "none",
+            },
+        ]
+        assert svc_wired._wallet_registry.get_wallet(owner) is None  # noqa: SLF001
 
     def test_reconcile_owner_checkout_sessions_reports_failure_without_blocking_others(
         self,

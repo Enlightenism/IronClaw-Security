@@ -48,6 +48,7 @@ def evaluate_install(request: InstallGateRequest, auth_ctx: AuthContext | Instal
         agent_id=request.agent_id,
         client_id=request.client_id,
         owner_key=_resolve_owner_key(request.platform, auth_ctx),
+        install_key_id=auth_ctx.key_id if isinstance(auth_ctx, InstallKeyAuthContext) else None,
     )
     return InstallGateResponse(
         verdict=decision.verdict,

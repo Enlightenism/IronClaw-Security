@@ -24,7 +24,7 @@ from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
 from app.dependencies.hybrid_auth import HybridAuthResult
 from app.main import app as _app
 from app.routes.dashboard import _build_install_key_slots, _resolve_dashboard_owner
-from app.services.audit_store import reset_security_audit_store
+from app.services.audit_store import get_security_audit_store, reset_security_audit_store
 from app.services.incident_store import get_incident_store, reset_incident_store
 from app.services.install_key_provisioning import provision_install_key_service
 
@@ -1007,4 +1007,55 @@ class TestDashboardOverviewKpis:
         finally:
             _clear_registry_overrides()
             reset_incident_store()
+            reset_security_audit_store()
+
+    def test_blocked_attacks_kpi_counts_owner_blocks_behind_other_tenant_volume(self, dashboard_client: TestClient) -> None:
+        mock_wallet = _make_unit_wallet_registry(_OWNER_KEY)
+        mock_wallet.list_ledger_entries.return_value = []
+        _apply_registry_overrides(_make_install_key_registry(), mock_wallet, _make_billing_registry(_OWNER_KEY))
+        audit_store = get_security_audit_store()
+
+        try:
+            for _ in range(500):
+                audit_store.create_event(
+                    event_type="install_gate",
+                    severity="high",
+                    summary="Other tenant block",
+                    verdict="block",
+                    metadata={"owner_key": "other-owner-key"},
+                )
+            audit_store.create_event(
+                event_type="install_gate",
+                severity="high",
+                summary="Owner block",
+                verdict="block",
+                metadata={"owner_key": _OWNER_KEY},
+            )
+            body = dashboard_client.get("/dashboard/overview", params={"owner_key": _OWNER_KEY}).json()
+            blocked = next(kpi["value"] for kpi in body["kpis"] if kpi["key"] == "blocked_attacks")
+            assert blocked == 1
+        finally:
+            _clear_registry_overrides()
+            reset_security_audit_store()
+
+    def test_blocked_attacks_kpi_is_not_capped_by_attack_feed_window(self, dashboard_client: TestClient) -> None:
+        mock_wallet = _make_unit_wallet_registry(_OWNER_KEY)
+        mock_wallet.list_ledger_entries.return_value = []
+        _apply_registry_overrides(_make_install_key_registry(), mock_wallet, _make_billing_registry(_OWNER_KEY))
+        audit_store = get_security_audit_store()
+
+        try:
+            for _ in range(510):
+                audit_store.create_event(
+                    event_type="install_gate",
+                    severity="high",
+                    summary="Owner block",
+                    verdict="block",
+                    metadata={"owner_key": _OWNER_KEY},
+                )
+            body = dashboard_client.get("/dashboard/overview", params={"owner_key": _OWNER_KEY}).json()
+            blocked = next(kpi["value"] for kpi in body["kpis"] if kpi["key"] == "blocked_attacks")
+            assert blocked == 510
+        finally:
+            _clear_registry_overrides()
             reset_security_audit_store()

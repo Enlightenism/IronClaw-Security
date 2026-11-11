@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ const FIELD_CLASS =
   "border-white/15 bg-white/5 text-white placeholder:text-white/40 focus-visible:border-[#FFD700]/60 focus-visible:ring-2 focus-visible:ring-[#FFD700]/25";
 const LABEL_CLASS =
   "text-[11px] font-semibold uppercase tracking-[0.18em] text-[#FFD700]/80";
+const MOBILE_QUERY = "(max-width: 639px)";
 
 const getErrorMessage = (error) => {
   const apiMessage =
@@ -39,6 +40,32 @@ const ContactModal = ({ open, onOpenChange }) => {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const closeRef = useRef(null);
+  const historyEntryRef = useRef(false);
+
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return undefined;
+    const isMobile =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia(MOBILE_QUERY).matches;
+    if (!isMobile) return undefined;
+
+    window.history.pushState({ ...window.history.state }, "");
+    historyEntryRef.current = true;
+
+    const handlePopState = () => {
+      historyEntryRef.current = false;
+      closeRef.current(false);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      if (historyEntryRef.current) {
+        historyEntryRef.current = false;
+        window.history.back();
+      }
+    };
+  }, [open]);
 
   const handleChange = (field) => (event) => {
     setForm((prev) => ({ ...prev, [field]: event.target.value }));
@@ -52,6 +79,7 @@ const ContactModal = ({ open, onOpenChange }) => {
     }
     onOpenChange(nextOpen);
   };
+  closeRef.current = handleOpenChange;
 
   const validate = () => {
     const nextErrors = {};
@@ -94,7 +122,7 @@ const ContactModal = ({ open, onOpenChange }) => {
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="overflow-hidden rounded-2xl border-[#FFD700]/25 bg-[#0B0B0F]/95 p-7 text-white shadow-[0_0_60px_rgba(255,215,0,0.12)] backdrop-blur-xl sm:max-w-lg sm:rounded-2xl">
+      <DialogContent className="max-sm:left-0 max-sm:top-0 max-sm:h-[100dvh] max-sm:max-h-none max-sm:w-screen max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:overflow-y-auto max-sm:rounded-none max-sm:p-5 overflow-hidden rounded-2xl border-[#FFD700]/25 bg-[#0B0B0F]/95 p-7 text-white shadow-[0_0_60px_rgba(255,215,0,0.12)] backdrop-blur-xl sm:max-w-lg sm:rounded-2xl">
         <span
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#FFD700] to-transparent"
@@ -216,6 +244,13 @@ const ContactModal = ({ open, onOpenChange }) => {
             {sending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {sending ? "Sending..." : "Submit"}
           </Button>
+          <button
+            type="button"
+            onClick={() => handleOpenChange(false)}
+            className="h-11 w-full rounded-md border border-white/15 bg-white/5 text-sm font-semibold text-white transition hover:bg-white/10 sm:hidden"
+          >
+            Close
+          </button>
         </form>
       </DialogContent>
     </Dialog>

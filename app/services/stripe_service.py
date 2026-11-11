@@ -53,6 +53,7 @@ _METERED_USAGE_BUFFER_MAX = 500
 _CHECKOUT_SESSION_TTL_SECONDS = 1800  # 30 min
 _CHECKOUT_RECONCILE_PAGE_SIZE = 100
 _CHECKOUT_RECONCILE_MAX_PAGES = 5
+_CHECKOUT_EXPIRED_LOOKBACK_SECONDS = 24 * 60 * 60  # matches Stripe's default checkout expiry
 
 
 def _customer_link_persistence_required() -> bool:
@@ -850,6 +851,12 @@ class StripeIdempotencyError(StripeServiceError):
     def __init__(self, idempotency_key: str, detail: str = "") -> None:
         super().__init__(f"idempotency key conflict for key={idempotency_key}" + (f": {detail}" if detail else ""))
         self.idempotency_key = idempotency_key
+
+
+class StripeInstallKeyProvisioningError(StripeServiceError):
+    """
+    Raised when install-key issuance fails after the checkout's units were already credited.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -2154,6 +2161,16 @@ class StripeService:
                 try:
                     if not isinstance(session_id, str) or not _STRIPE_CHECKOUT_SESSION_ID_PATTERN.fullmatch(session_id):
                         raise StripeServiceError("Stripe returned an invalid checkout session ID.")
+                    org_id = metadata.get("org_id")
+                    if not isinstance(org_id, str) or not org_id.strip():
+                        raise StripeServiceError("Checkout session is missing its trusted organization identity.")
+                    integrity = self._verify_checkout_integrity_metadata(metadata, mode=row.get("mode"))
+                    expected_units = int(integrity["unit_credits"])
+                    units_before = self.get_checkout_units_credited(
+                        session_id,
+                        org_id,
+                        owner_key=normalized_owner,
+                    )
                     fulfillment = self._handle_checkout_completed(row, {})
                     if fulfillment.get("fulfillment_status") == "refunded":
                         sessions.append(
@@ -2171,11 +2188,6 @@ class StripeService:
                     if fulfillment.get("payment_confirmed") is not True:
                         raise StripeServiceError("Stripe has not confirmed payment for this checkout session.")
 
-                    org_id = metadata.get("org_id")
-                    if not isinstance(org_id, str) or not org_id.strip():
-                        raise StripeServiceError("Checkout session is missing its trusted organization identity.")
-                    integrity = self._verify_checkout_integrity_metadata(metadata, mode=row.get("mode"))
-                    expected_units = int(integrity["unit_credits"])
                     credited_units = self.get_checkout_units_credited(
                         session_id,
                         org_id,
@@ -2189,6 +2201,7 @@ class StripeService:
                             "status": "fulfilled",
                             "fulfillment_status": "fulfilled",
                             "units_credited": credited_units,
+                            "newly_credited_units": max(0, credited_units - units_before),
                             "action": "none",
                             "support_reference": session_id,
                         },
@@ -2236,6 +2249,12 @@ class StripeService:
             seen_cursors.add(next_cursor)
             cursor = next_cursor
 
+        try:
+            # Expired-session reporting is informational; a failure here must not block wallet reconciliation.
+            expired_checkouts = self._list_owner_expired_checkouts(normalized_owner)
+        except StripeServiceError:
+            logger.warning("stripe.expired_checkout_scan_failed")
+            expired_checkouts = []
         successful_sessions = [session for session in sessions if session["status"] == "fulfilled"]
         failed_sessions = [session for session in sessions if session["status"] != "fulfilled"]
         status_value = "partial" if failed_sessions or has_more else "complete"
@@ -2248,9 +2267,63 @@ class StripeService:
             "sessions_matched": sessions_matched,
             "sessions_reconciled": len(successful_sessions),
             "units_credited": sum(int(session["units_credited"]) for session in successful_sessions),
+            "newly_credited_units": sum(int(session["newly_credited_units"]) for session in successful_sessions),
             "sessions": sessions,
+            "expired_checkouts": expired_checkouts,
             "truncated": has_more,
         }
+
+    def _list_owner_expired_checkouts(self, owner_key: str) -> list[dict[str, Any]]:
+        expired_checkouts: list[dict[str, Any]] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+
+        for _ in range(_CHECKOUT_RECONCILE_MAX_PAGES):
+            params: dict[str, Any] = {
+                "limit": _CHECKOUT_RECONCILE_PAGE_SIZE,
+                "status": "expired",
+                "created[gte]": int(time.time()) - _CHECKOUT_EXPIRED_LOOKBACK_SECONDS,
+            }
+            if cursor:
+                params["starting_after"] = cursor
+
+            payload = self._get_client().get("/checkout/sessions", params=params)
+            rows = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(rows, list):
+                raise StripeServiceError("Stripe returned an invalid checkout session list.")
+            has_more = payload.get("has_more", False)
+            if not isinstance(has_more, bool):
+                raise StripeServiceError("Stripe returned an invalid checkout session page status.")
+
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                if row.get("mode") != StripeCheckoutMode.PAYMENT.value or row.get("payment_status") == "paid":
+                    continue
+                metadata = row.get("metadata")
+                if not isinstance(metadata, dict) or str(metadata.get("owner_key") or "").strip().lower() != owner_key:
+                    continue
+                session_id = row.get("id")
+                if not isinstance(session_id, str) or not _STRIPE_CHECKOUT_SESSION_ID_PATTERN.fullmatch(session_id):
+                    continue
+                expired_checkouts.append(
+                    {
+                        "session_id": session_id,
+                        "status": "expired",
+                        "units_credited": 0,
+                        "action": "none",
+                    },
+                )
+
+            if not has_more:
+                break
+            next_cursor = rows[-1].get("id") if rows and isinstance(rows[-1], dict) else None
+            if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
+                raise StripeServiceError("Stripe returned an invalid checkout pagination cursor.")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+
+        return expired_checkouts
 
     def retrieve_checkout_session(self, session_id: str) -> dict[str, Any]:
         normalized_session_id = str(session_id).strip()
@@ -3223,9 +3296,7 @@ class StripeService:
                     units_credited=True,
                     last_error="install_key_provisioning_failed",
                 )
-                raise
-
-            self._attach_payment_intent_to_purchase(session_id, payment_intent)
+                raise StripeInstallKeyProvisioningError("Install-key provisioning failed after units were credited.") from exc
 
             if self._wallet_registry.is_payment_refunded(payment_intent):
                 revocation = self._revoke_checkout_entitlements_for_refund(
