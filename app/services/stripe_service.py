@@ -2119,6 +2119,25 @@ class StripeService:
                             "support_reference": session_id,
                         },
                     )
+                except StripeInstallKeyProvisioningError:
+                    # Units are credited before install keys are issued, so a key failure is retryable, not a payment failure.
+                    logger.error("stripe.checkout_reconcile_install_keys_pending session=%s", session_id or "")
+                    sessions.append(
+                        {
+                            "session_id": session_id,
+                            "status": "install_keys_pending",
+                            "fulfillment_status": "install_keys_pending",
+                            "units_credited": self.get_checkout_units_credited(
+                                session_id,
+                                org_id,
+                                owner_key=normalized_owner,
+                            ),
+                            "newly_credited_units": 0,
+                            "error": "install_key_provisioning_failed",
+                            "action": "retry_sync",
+                            "support_reference": session_id,
+                        },
+                    )
                 except StripeServiceError as exc:
                     logger.warning(
                         "stripe.checkout_reconcile_failed session=%s error_type=%s",
@@ -3069,7 +3088,7 @@ class StripeService:
             fulfillment_record = self._record_checkout_fulfillment(
                 session_id=session_id,
                 org_id=org_id,
-                owner_key=owner_key or "",
+                owner_key=self._resolve_wallet_owner_key(org_id, owner_key),
                 package_id=integrity["package_id"],
                 units=unit_credits,
                 payment_intent=payment_intent,

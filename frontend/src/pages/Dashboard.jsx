@@ -682,12 +682,40 @@ const Dashboard = () => {
       const failures = sessions.filter(
         (session) => session?.status === "failed",
       );
-      const incomplete = sessions.filter(
-        (session) => session?.status !== "fulfilled",
+      const keysPending = sessions.filter(
+        (session) => session?.status === "install_keys_pending",
       );
+      const incomplete = sessions.filter(
+        (session) =>
+          session?.status !== "fulfilled" &&
+          session?.status !== "install_keys_pending",
+      );
+      const installKeysReady = INSTALL_KEY_PROGRAMS.every(({ program }) => {
+        const slug = program.replace(/_/g, "-");
+        const key = snapshot.tokens?.install_metadata?.[slug];
+        return (
+          key?.available === true &&
+          key.program === program &&
+          key.slug === slug &&
+          typeof key.key_id === "string" &&
+          key.key_id.length > 0
+        );
+      });
       if (reconciliation?.truncated === true) {
         toast.error(
           "Payment sync is incomplete because the Stripe session scan reached its limit. Retry or contact support.",
+        );
+      } else if (
+        keysPending.length > 0 &&
+        failures.length === 0 &&
+        incomplete.length === 0
+      ) {
+        const pendingUnits = keysPending.reduce(
+          (total, session) => total + Number(session?.units_credited ?? 0),
+          0,
+        );
+        toast.warning(
+          `${pendingUnits.toLocaleString()} units were added to your wallet, but install keys are still being prepared. Press Refresh again shortly.`,
         );
       } else if (
         failures.length > 0 ||
@@ -715,24 +743,11 @@ const Dashboard = () => {
         toast.info(
           "No completed checkout payment was found for this account, so no units were added.",
         );
+      } else if (!installKeysReady) {
+        toast.warning(
+          "Your wallet is up to date, but one or more platform install keys are still being prepared. Press Refresh again shortly.",
+        );
       } else {
-        const installKeysReady = INSTALL_KEY_PROGRAMS.every(({ program }) => {
-          const slug = program.replace(/_/g, "-");
-          const key = snapshot.tokens?.install_metadata?.[slug];
-          return (
-            key?.available === true &&
-            key.program === program &&
-            key.slug === slug &&
-            typeof key.key_id === "string" &&
-            key.key_id.length > 0
-          );
-        });
-        if (!installKeysReady) {
-          throw new Error(
-            "One or more paid platform keys are not available yet.",
-          );
-        }
-
         const sessionsReconciled = Number(reconciliation?.sessions_reconciled);
         const unitsCredited = Number(reconciliation?.units_credited);
         if (

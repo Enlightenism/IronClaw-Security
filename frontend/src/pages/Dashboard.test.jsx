@@ -1738,6 +1738,47 @@ describe("refresh behavior", () => {
     expect(mockToastSuccess).not.toHaveBeenCalled();
   });
 
+  it("reports credited units with pending install keys instead of a sync error on Refresh", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/reconcile-recent") {
+        return Promise.resolve({
+          data: {
+            status: "partial",
+            sessions_matched: 1,
+            sessions_reconciled: 0,
+            units_credited: 0,
+            sessions: [
+              {
+                session_id: "cs_live_keys_001",
+                status: "install_keys_pending",
+                fulfillment_status: "install_keys_pending",
+                units_credited: 50,
+                newly_credited_units: 0,
+                error: "install_key_provisioning_failed",
+                action: "retry_sync",
+                support_reference: "cs_live_keys_001",
+              },
+            ],
+            truncated: false,
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDashboard();
+    await user.click(screen.getByTestId("refresh-btn"));
+
+    await waitFor(() => {
+      expect(mockToastWarning).toHaveBeenCalledWith(
+        expect.stringContaining("50 units were added to your wallet"),
+      );
+    });
+    expect(mockToastError).not.toHaveBeenCalled();
+    expect(mockToastSuccess).not.toHaveBeenCalled();
+  });
+
   it("directs refunded checkout outcomes to support without claiming wallet credit", async () => {
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
     mockApiPost.mockImplementation((url) => {

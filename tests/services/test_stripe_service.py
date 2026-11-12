@@ -29,6 +29,7 @@ from app.services.stripe_service import (
     StripeAPIError,
     StripeBillingInterval,
     StripeIdempotencyError,
+    StripeInstallKeyProvisioningError,
     StripeInsufficientUnitsError,
     StripePaymentMethodNotFoundError,
     StripePersistenceError,
@@ -2512,6 +2513,34 @@ class TestReconcileCheckoutSession:
         assert reconciliation["units_credited"] == 2500
         assert reconciliation["sessions"][0]["status"] == "failed"
         assert reconciliation["sessions"][1]["status"] == "fulfilled"
+
+    def test_reconcile_owner_checkout_sessions_reports_install_key_failure_as_pending(
+        self,
+        svc_wired: StripeService,
+        mock_client: MagicMock,
+    ) -> None:
+        owner = "buyer@ironclaw.test"
+        event = _build_checkout_completed_event(
+            unit_credits=5000,
+            session_id="cs_owner_005",
+            owner_key=owner,
+        )[
+            "data"
+        ]["object"]
+        mock_client.get.return_value = {"object": "list", "data": [event], "has_more": False}
+
+        with patch.object(
+            svc_wired,
+            "_handle_checkout_completed",
+            side_effect=StripeInstallKeyProvisioningError("Install-key provisioning failed after units were credited."),
+        ):
+            reconciliation = svc_wired.reconcile_owner_checkout_sessions(owner)
+
+        session = reconciliation["sessions"][0]
+        assert session["status"] == "install_keys_pending"
+        assert session["fulfillment_status"] == "install_keys_pending"
+        assert session["error"] == "install_key_provisioning_failed"
+        assert reconciliation["status"] == "partial"
 
 
 # ===========================================================================

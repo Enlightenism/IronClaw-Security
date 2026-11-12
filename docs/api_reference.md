@@ -531,6 +531,7 @@ relying on durable wallet fulfillment and saved-card records:
 - [`019_atomic_unit_wallet_credits.sql`](../supabase/migrations/019_atomic_unit_wallet_credits.sql) — atomic, retry-safe wallet credits.
 - [`020_refund_revocation.sql`](../supabase/migrations/020_refund_revocation.sql) — wallet and install-key revocation on refunds.
 - [`021_stripe_checkout_fulfillment.sql`](../supabase/migrations/021_stripe_checkout_fulfillment.sql) — durable checkout ownership, idempotent fulfillment state, and refund-before-credit enforcement.
+- [`023_fix_unit_wallet_credit_function.sql`](../supabase/migrations/023_fix_unit_wallet_credit_function.sql) — corrects the atomic wallet credit function's column ambiguity and checkout event id.
 
 Check the Supabase migration history for all seven before enabling this workflow
 in production; repository presence alone does not confirm deployment. Configure
