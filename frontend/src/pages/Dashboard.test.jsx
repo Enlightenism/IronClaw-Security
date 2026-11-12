@@ -528,15 +528,15 @@ describe("loading spinner", () => {
 });
 
 // =============================================================================
-// WalletCard organizationId prop
+// WalletCard balance props
 // =============================================================================
 
-describe("WalletCard billing owner and wallet history props", () => {
-  it("passes organizationId from dashboard API response to WalletCard", async () => {
+describe("WalletCard balance props", () => {
+  it("passes wallet_units from the dashboard API as the WalletCard balance", async () => {
     mockApiGet.mockImplementation((url) => {
       if (url === "/dashboard/overview") {
         return Promise.resolve({
-          data: { ...DEFAULT_DASH, organization_id: "org-abc" },
+          data: { ...DEFAULT_DASH, wallet_units: 1234 },
         });
       }
       if (url === "/integrations/token") {
@@ -551,10 +551,10 @@ describe("WalletCard billing owner and wallet history props", () => {
       expect(mockCapturedWalletProps).not.toBeNull();
     });
 
-    expect(mockCapturedWalletProps.organizationId).toBe("org-abc");
+    expect(mockCapturedWalletProps.balance).toBe(1234);
   });
 
-  it("updates WalletCard organizationId when refreshed dashboard data changes", async () => {
+  it("updates the WalletCard balance when refresh is clicked", async () => {
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
     let overviewRequests = 0;
     mockApiGet.mockImplementation((url) => {
@@ -563,8 +563,7 @@ describe("WalletCard billing owner and wallet history props", () => {
         return Promise.resolve({
           data: {
             ...DEFAULT_DASH,
-            organization_id:
-              overviewRequests === 1 ? "org-initial" : "org-refreshed",
+            wallet_units: overviewRequests === 1 ? 1000 : 6000,
           },
         });
       }
@@ -576,91 +575,14 @@ describe("WalletCard billing owner and wallet history props", () => {
 
     await renderDashboard();
     await waitFor(() => {
-      expect(mockCapturedWalletProps.organizationId).toBe("org-initial");
+      expect(mockCapturedWalletProps.balance).toBe(1000);
     });
 
     await user.click(screen.getByTestId("refresh-btn"));
 
     await waitFor(() => {
-      expect(mockCapturedWalletProps.organizationId).toBe("org-refreshed");
+      expect(mockCapturedWalletProps.balance).toBe(6000);
     });
-  });
-
-  it("uses the verified wallet owner from dashboard metadata", async () => {
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({
-          data: {
-            ...DEFAULT_DASH,
-            organization_id: "placeholder",
-            metadata: {
-              ...DEFAULT_DASH.metadata,
-              owner_key: "buyer@ironclaw.test",
-            },
-            wallet_history: [{ entry_type: "credit", units: 5000 }],
-          },
-        });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({ data: DEFAULT_TOKENS });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(mockCapturedWalletProps).not.toBeNull();
-    });
-
-    expect(mockCapturedWalletProps.organizationId).toBe("buyer@ironclaw.test");
-    expect(mockCapturedWalletProps.walletHistory).toEqual([
-      { entry_type: "credit", units: 5000 },
-    ]);
-  });
-
-  it("passes an empty organizationId when the API response has no owner", async () => {
-    const { organization_id: _unused, ...dashWithoutOrg } = DEFAULT_DASH;
-
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({ data: dashWithoutOrg });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({ data: DEFAULT_TOKENS });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(mockCapturedWalletProps).not.toBeNull();
-    });
-
-    expect(mockCapturedWalletProps.organizationId).toBe("");
-  });
-
-  it("passes an empty organizationId when organization_id is null", async () => {
-    mockApiGet.mockImplementation((url) => {
-      if (url === "/dashboard/overview") {
-        return Promise.resolve({
-          data: { ...DEFAULT_DASH, organization_id: null },
-        });
-      }
-      if (url === "/integrations/token") {
-        return Promise.resolve({ data: DEFAULT_TOKENS });
-      }
-      return Promise.reject(new Error(`Unexpected GET ${url}`));
-    });
-
-    await renderDashboard();
-
-    await waitFor(() => {
-      expect(mockCapturedWalletProps).not.toBeNull();
-    });
-
-    expect(mockCapturedWalletProps.organizationId).toBe("");
   });
 });
 

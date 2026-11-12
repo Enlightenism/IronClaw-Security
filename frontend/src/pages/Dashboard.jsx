@@ -164,7 +164,6 @@ const Dashboard = () => {
   const [loadingData, setLoadingData] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [purchasingId, setPurchasingId] = useState(null);
-  const [paymentMethodsRefreshKey, setPaymentMethodsRefreshKey] = useState(0);
   const [pointerGlow, setPointerGlow] = useState({ x: 50, y: 25 });
   const [scrollShift, setScrollShift] = useState(0);
   const [_paymentState, setPaymentState] = useState("idle");
@@ -444,7 +443,6 @@ const Dashboard = () => {
             }
 
             setPaymentState("paid");
-            setPaymentMethodsRefreshKey((key) => key + 1);
             toast.dismiss("pay");
             toast.success(
               `Payment confirmed — ${credited.toLocaleString()} units added and install keys refreshed!`,
@@ -666,7 +664,6 @@ const Dashboard = () => {
     }
     refreshInFlightRef.current = true;
     setRefreshing(true);
-    setPaymentMethodsRefreshKey((key) => key + 1);
     try {
       const { data: reconciliation } = await payments.reconcileRecent();
       const snapshot = await fetchDashboard({ silent: true });
@@ -780,28 +777,10 @@ const Dashboard = () => {
     () => ({
       balance: data?.wallet_units ?? 0,
       walletStatus: data?.wallet_status ?? "unavailable",
-      lastPayment: data?.last_payment,
-      walletHistory: Array.isArray(data?.wallet_history)
-        ? data.wallet_history
-        : [],
-      hasPaid: data?.has_paid,
       onPurchase: handlePurchase,
       purchasingId,
-      organizationId: data?.metadata?.owner_key ?? data?.organization_id ?? "",
-      paymentMethodsRefreshKey,
     }),
-    [
-      paymentMethodsRefreshKey,
-      data?.has_paid,
-      data?.last_payment,
-      data?.metadata?.owner_key,
-      data?.organization_id,
-      data?.wallet_units,
-      data?.wallet_status,
-      data?.wallet_history,
-      handlePurchase,
-      purchasingId,
-    ],
+    [data?.wallet_units, data?.wallet_status, handlePurchase, purchasingId],
   );
 
   const installKeyDashboard = useMemo(
@@ -980,11 +959,6 @@ const Dashboard = () => {
               data-testid="signout-btn"
               className="flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-white/90 transition hover:border-[#EF4444]/50 hover:text-[#EF4444]"
             >
-              <img
-                src="/images/Golden%20Knight%20Logo128.png"
-                alt=""
-                className="action-button-logo"
-              />
               Sign Out
             </button>
           </div>

@@ -175,12 +175,19 @@ svg {
 }
 
 .footer-brand-logo {
-    width: 1.5rem;
-    height: 1.5rem;
+    width: 3.5rem;
+    height: 3.5rem;
     object-fit: contain;
     border-radius: 0.5rem;
     display: block;
     flex-shrink: 0;
+}
+
+@media (min-width: 640px) {
+    .footer-brand-logo {
+        width: 4rem;
+        height: 4rem;
+    }
 }
 
 .modal-brand-logo {
@@ -206,14 +213,6 @@ svg {
     object-fit: contain;
     border-radius: 0;
     filter: drop-shadow(0 0 18px rgba(255, 215, 0, 0.18));
-}
-
-.action-button-logo {
-    width: 1rem;
-    height: 1rem;
-    object-fit: contain;
-    display: block;
-    flex-shrink: 0;
 }
 
 /* ---------- Buttons ---------- */
@@ -242,54 +241,7 @@ svg {
     animation: btn-sheen 0.9s ease;
 }
 
-/* wallet flip: the balance flap folds over its left spine to reveal the history page beneath; no overflow hidden or backdrop-filter */
-.wallet-flip {
-    perspective: 1600px;
-}
-.wallet-flip-inner {
-    display: grid;
-    transform-style: preserve-3d;
-}
-.wallet-face {
-    position: relative;
-    grid-area: 1 / 1;
-    backface-visibility: hidden;
-    -webkit-backface-visibility: hidden;
-}
-.wallet-face-back {
-    transform: translateZ(-1px);
-}
-.wallet-face-front {
-    transform-origin: left center;
-    transition: transform 900ms cubic-bezier(0.3, 0.7, 0.2, 1);
-}
-.wallet-flip-inner.is-flipped .wallet-face-front {
-    transform: rotateY(-180deg);
-}
-.wallet-face::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    transition: opacity 900ms ease;
-}
-.wallet-face-front::after {
-    background: linear-gradient(90deg, rgba(2, 6, 18, 0) 0%, rgba(2, 6, 18, 0) 60%, rgba(2, 6, 18, 0.45) 100%);
-    opacity: 0;
-}
-.wallet-flip-inner.is-flipped .wallet-face-front::after {
-    opacity: 1;
-}
-.wallet-face-back::after {
-    background: linear-gradient(90deg, rgba(2, 6, 18, 0.55) 0%, rgba(2, 6, 18, 0) 40%);
-    opacity: 1;
-}
-.wallet-flip-inner.is-flipped .wallet-face-back::after {
-    opacity: 0;
-}
-
-/* genuine light-brown leather: pebbled grain, light crack tile, and a shaded spine; shared by the container, flap faces, and package pages */
+/* genuine light-brown leather: pebbled grain, light crack tile, and a shaded spine; shared by the container and package pages */
 .wallet-body,
 .wallet-leather,
 .wallet-deck-page {
@@ -305,6 +257,7 @@ svg {
 /* wallet body: 3D leather case; stacked edge shadows give thickness and the stitched inset marks the seam */
 .wallet-body {
     position: relative;
+    zoom: 0.9;
     border-radius: 1.25rem;
     padding: 1.25rem;
     border: 1px solid rgba(2, 6, 18, 0.85);
@@ -600,11 +553,6 @@ canvas[data-testid="particle-field"] {
         height: 2rem;
     }
 
-    .footer-brand-logo {
-        width: 1.25rem;
-        height: 1.25rem;
-    }
-
     .animate-float-glow {
         opacity: 0.32;
         animation-duration: 10s;
@@ -621,13 +569,6 @@ canvas[data-testid="particle-field"] {
     .wallet-deck-tab svg {
         width: 0.6rem;
         height: 0.6rem;
-    }
-
-    .stripe-mode-tag {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        line-height: 1;
     }
 }
 
