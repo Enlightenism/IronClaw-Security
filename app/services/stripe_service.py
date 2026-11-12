@@ -1228,11 +1228,12 @@ class StripeService:
             except Exception as exc:  # noqa: BLE001
                 failed_programs.append(program)
                 logger.error(
-                    "stripe.checkout_install_key_program_failed org=%s session=%s program=%s error_type=%s",
+                    "stripe.checkout_install_key_program_failed org=%s session=%s program=%s error_type=%s error=%s",
                     org_id,
                     session_id,
                     program,
                     type(exc).__name__,
+                    str(exc)[:500],
                 )
                 continue
             record = issued.record
@@ -2156,9 +2157,10 @@ class StripeService:
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.exception(
-                        "stripe.checkout_reconcile_unexpected_error session=%s error_type=%s",
+                        "stripe.checkout_reconcile_unexpected_error session=%s error_type=%s error=%s",
                         session_id or "",
                         type(exc).__name__,
+                        str(exc)[:500],
                     )
                     sessions.append(
                         {

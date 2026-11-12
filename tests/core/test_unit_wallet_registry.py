@@ -193,22 +193,14 @@ def test_production_rejects_explicit_memory_wallet_repository(monkeypatch: pytes
 def test_supabase_credit_repository_uses_atomic_rpc() -> None:
     import app.core.unit_wallet as wallet_module
 
-    class _FakeRpc:
-        def __init__(self) -> None:
-            self.name = None
-            self.parameters = None
-
-        def execute(self):
-            return SimpleNamespace(data=[{"wallet_id": "wallet_001"}])
-
     class _FakeClient:
         def __init__(self) -> None:
-            self.rpc_call = _FakeRpc()
+            self.rpc_call = SimpleNamespace(name=None, parameters=None)
 
         def rpc(self, name: str, parameters: dict[str, object]):
             self.rpc_call.name = name
             self.rpc_call.parameters = parameters
-            return self.rpc_call
+            return [{"applied": True, "wallet_id": "wallet_001"}]
 
     client = _FakeClient()
     repository = wallet_module.SupabaseUnitWalletRepository.__new__(wallet_module.SupabaseUnitWalletRepository)
@@ -233,6 +225,32 @@ def test_supabase_credit_repository_uses_atomic_rpc() -> None:
     assert client.rpc_call.parameters["p_units"] == 5_000
 
 
+def test_atomic_credit_fails_when_rpc_returns_no_wallet_record() -> None:
+    import app.core.unit_wallet as wallet_module
+
+    class _EmptyClient:
+        def rpc(self, name: str, parameters: dict[str, object]):
+            return []
+
+    repository = wallet_module.SupabaseUnitWalletRepository.__new__(wallet_module.SupabaseUnitWalletRepository)
+    repository._client = _EmptyClient()
+    entry = wallet_module.RegistryUnitLedgerEntry(
+        entry_id="ledger_empty_001",
+        wallet_id="wallet_001",
+        owner_key="buyer@ironclaw.test",
+        entry_type="credit",
+        units=5_000,
+        balance_after=5_000,
+        purchase_id="purchase_001",
+        checkout_session_id="cs_empty_001",
+        event_id="stripe:checkout.complete:cs_empty_001",
+        metadata={"package_id": "pkg_5000"},
+    )
+
+    with pytest.raises(RuntimeError, match="returned no wallet record"):
+        repository.credit_units_once(entry)
+
+
 def test_atomic_credit_replay_after_repository_restart_does_not_double_credit() -> None:
     import app.core.unit_wallet as wallet_module
 
@@ -244,29 +262,18 @@ def test_atomic_credit_replay_after_repository_restart_does_not_double_credit() 
 
     state = _WalletState()
 
-    class _StatefulRpc:
-        def __init__(self, parameters: dict[str, object]) -> None:
-            self.parameters = parameters
-
-        def execute(self):
-            state.calls += 1
-            event_id = str(self.parameters["p_event_id"])
-            if event_id not in state.events:
-                state.balance += int(self.parameters["p_units"])
-                state.events.add(event_id)
-            return SimpleNamespace(
-                data=[
-                    {
-                        "wallet_id": self.parameters["p_wallet_id"],
-                        "balance_units": state.balance,
-                    }
-                ]
-            )
+    def _stateful_credit(parameters: dict[str, object]) -> list[dict[str, object]]:
+        state.calls += 1
+        event_id = str(parameters["p_event_id"])
+        if event_id not in state.events:
+            state.balance += int(parameters["p_units"])
+            state.events.add(event_id)
+        return [{"wallet_id": parameters["p_wallet_id"], "balance_units": state.balance}]
 
     class _PersistentFakeClient:
         def rpc(self, name: str, parameters: dict[str, object]):
             assert name == "credit_unit_wallet_once"
-            return _StatefulRpc(parameters)
+            return _stateful_credit(parameters)
 
     entry = wallet_module.RegistryUnitLedgerEntry(
         entry_id="ledger_restart_001",
@@ -297,22 +304,14 @@ def test_atomic_credit_replay_after_repository_restart_does_not_double_credit() 
 def test_supabase_refund_marker_uses_durable_rpc() -> None:
     import app.core.unit_wallet as wallet_module
 
-    class _FakeRpc:
-        def __init__(self) -> None:
-            self.name = ""
-            self.parameters: dict[str, object] = {}
-
-        def execute(self):
-            return SimpleNamespace(data=None)
-
     class _FakeClient:
         def __init__(self) -> None:
-            self.rpc_call = _FakeRpc()
+            self.rpc_call = SimpleNamespace(name="", parameters={})
 
         def rpc(self, name: str, parameters: dict[str, object]):
             self.rpc_call.name = name
             self.rpc_call.parameters = parameters
-            return self.rpc_call
+            return None
 
     client = _FakeClient()
     repository = wallet_module.SupabaseUnitWalletRepository.__new__(

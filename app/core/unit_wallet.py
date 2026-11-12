@@ -655,8 +655,9 @@ class SupabaseUnitWalletRepository:
                 "p_metadata": entry.metadata,
                 "p_created_at": entry.created_at.isoformat(),
             },
-        ).execute()
-        if result is None or not hasattr(result, "data") or not result.data:
+        )
+        rows = result if isinstance(result, list) else []
+        if not rows or not isinstance(rows[0], dict) or not rows[0].get("wallet_id"):
             raise RuntimeError("unit_wallet: atomic Supabase wallet credit returned no wallet record")
 
     def record_payment_refund_marker(
@@ -671,7 +672,7 @@ class SupabaseUnitWalletRepository:
         rpc = getattr(self._client, "rpc", None)
         if not callable(rpc):
             raise RuntimeError("unit_wallet: Supabase client does not support durable refund markers")
-        result = rpc(
+        rpc(
             "record_stripe_payment_refund",
             {
                 "p_payment_intent": payment_intent,
@@ -681,9 +682,7 @@ class SupabaseUnitWalletRepository:
                 "p_refunded_at": datetime.now(UTC).isoformat(),
                 "p_metadata": metadata or {},
             },
-        ).execute()
-        if result is None:
-            raise RuntimeError("unit_wallet: durable refund marker write returned no result")
+        )
 
     def has_payment_refund_marker(self, payment_intent: str) -> bool:
         result = self._client.table("stripe_payment_refund_markers").select("payment_intent").eq("payment_intent", payment_intent).limit(1).execute()
