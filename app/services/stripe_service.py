@@ -2087,15 +2087,19 @@ class StripeService:
                     )
                     fulfillment = self._handle_checkout_completed(row, {})
                     if fulfillment.get("fulfillment_status") == "refunded":
+                        units_revoked = int(fulfillment.get("units_revoked", 0) or 0)
+                        install_keys_revoked = int(fulfillment.get("install_keys_revoked", 0) or 0)
                         sessions.append(
                             {
                                 "session_id": session_id,
                                 "status": "refunded",
                                 "fulfillment_status": "refunded",
                                 "units_credited": 0,
+                                "units_revoked": units_revoked,
+                                "install_keys_revoked": install_keys_revoked,
                                 "action": "contact_support",
                                 "support_reference": session_id,
-                                "error": ("Stripe confirms this checkout payment was refunded; no active wallet credit or install keys remain."),
+                                "error": (f"Stripe confirms this checkout payment was refunded. Revoked {units_revoked} units and {install_keys_revoked} install keys for this payment."),
                             },
                         )
                         continue
@@ -2190,16 +2194,26 @@ class StripeService:
             logger.warning("stripe.expired_checkout_scan_failed")
             expired_checkouts = []
         successful_sessions = [session for session in sessions if session["status"] == "fulfilled"]
-        failed_sessions = [session for session in sessions if session["status"] != "fulfilled"]
-        status_value = "partial" if failed_sessions or has_more else "complete"
-        if sessions_matched == 0 and not has_more:
+        refunded_sessions = [session for session in sessions if session["status"] == "refunded"]
+        pending_sessions = [session for session in sessions if session["status"] == "install_keys_pending"]
+        failed_sessions = [session for session in sessions if session["status"] == "failed"]
+        if has_more or failed_sessions:
+            status_value = "partial"
+        elif pending_sessions:
+            status_value = "install_keys_pending"
+        elif sessions_matched == 0:
             status_value = "no_paid_sessions_found"
+        elif not successful_sessions and refunded_sessions:
+            status_value = "refunded"
+        else:
+            status_value = "complete"
         return {
             "status": status_value,
             "pages_scanned": pages_scanned,
             "sessions_scanned": sessions_scanned,
             "sessions_matched": sessions_matched,
             "sessions_reconciled": len(successful_sessions),
+            "sessions_refunded": len(refunded_sessions),
             "units_credited": sum(int(session["units_credited"]) for session in successful_sessions),
             "newly_credited_units": sum(int(session["newly_credited_units"]) for session in successful_sessions),
             "sessions": sessions,
@@ -3139,10 +3153,17 @@ class StripeService:
                 status="refunded",
                 last_error="stripe_payment_refunded",
             )
+            revocation = self._revoke_checkout_entitlements_for_refund(
+                session_id=session_id,
+                payment_intent=payment_intent,
+                owner_key=owner_key or "",
+            )
             result.update(
                 {
                     "fulfillment_status": "refunded",
                     "units_credited": 0,
+                    "units_revoked": revocation["units_revoked"],
+                    "install_keys_revoked": revocation["install_keys_revoked"],
                     "tokens_covered": 0,
                     "action": "contact_support",
                     "support_reference": session_id,
@@ -3157,10 +3178,17 @@ class StripeService:
                 status="payment_confirmed",
             )
             if payment_state.get("fulfillment_status") == "refunded":
+                revocation = self._revoke_checkout_entitlements_for_refund(
+                    session_id=session_id,
+                    payment_intent=payment_intent,
+                    owner_key=owner_key or "",
+                )
                 result.update(
                     {
                         "fulfillment_status": "refunded",
                         "units_credited": 0,
+                        "units_revoked": revocation["units_revoked"],
+                        "install_keys_revoked": revocation["install_keys_revoked"],
                         "tokens_covered": 0,
                         "action": "contact_support",
                         "support_reference": session_id,
@@ -3196,6 +3224,7 @@ class StripeService:
                         "fulfillment_status": "refunded",
                         "units_credited": 0,
                         "units_revoked": revocation["units_revoked"],
+                        "install_keys_revoked": revocation["install_keys_revoked"],
                         "tokens_covered": 0,
                         "action": "contact_support",
                         "support_reference": session_id,

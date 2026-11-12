@@ -831,6 +831,33 @@ class TestHandleCheckoutCompleted:
         assert svc.get_unit_balance(_ORG).balance == 0
         provisioning_service.provision_for_program.assert_not_called()
 
+    def test_refund_after_credit_revokes_units_and_reports_counts(
+        self,
+        svc: StripeService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(svc, "_is_payment_intent_refunded", lambda _: False)
+        monkeypatch.setattr(
+            "app.services.stripe_service.provision_install_key_service",
+            lambda *args, **kwargs: MagicMock(),
+        )
+        obj = _build_checkout_completed_event(
+            unit_credits=5_000,
+            session_id="cs_refund_after_credit_001",
+            payment_intent="pi_refund_after_credit_001",
+        )[
+            "data"
+        ]["object"]
+        svc._handle_checkout_completed(obj, {})  # noqa: SLF001
+        assert svc.get_unit_balance(_ORG).balance == 5_000
+
+        monkeypatch.setattr(svc, "_is_payment_intent_refunded", lambda _: True)
+        result = svc._handle_checkout_completed(obj, {})  # noqa: SLF001
+
+        assert result["fulfillment_status"] == "refunded"
+        assert result["units_revoked"] == 5_000
+        assert svc.get_unit_balance(_ORG).balance == 0
+
     def test_paid_checkout_without_payment_intent_fails_closed(self, svc: StripeService) -> None:
         result = svc.handle_webhook_event(
             _build_checkout_completed_event(unit_credits=5_000, payment_intent=None),
@@ -2395,8 +2422,9 @@ class TestReconcileCheckoutSession:
 
         reconciliation = svc_wired.reconcile_owner_checkout_sessions(owner)
 
-        assert reconciliation["status"] == "partial"
+        assert reconciliation["status"] == "refunded"
         assert reconciliation["sessions_reconciled"] == 0
+        assert reconciliation["sessions_refunded"] == 1
         assert reconciliation["units_credited"] == 0
         assert reconciliation["sessions"][0]["status"] == "refunded"
         assert reconciliation["sessions"][0]["action"] == "contact_support"
@@ -2540,7 +2568,7 @@ class TestReconcileCheckoutSession:
         assert session["status"] == "install_keys_pending"
         assert session["fulfillment_status"] == "install_keys_pending"
         assert session["error"] == "install_key_provisioning_failed"
-        assert reconciliation["status"] == "partial"
+        assert reconciliation["status"] == "install_keys_pending"
 
 
 # ===========================================================================

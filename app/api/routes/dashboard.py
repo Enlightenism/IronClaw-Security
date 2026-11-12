@@ -433,7 +433,7 @@ def _build_install_key_views(
             by_program[program] = candidate
             continue
 
-        preference = {"refunded": 3, "revoked": 3, "active": 2, "locked": 1}
+        preference = {"active": 3, "refunded": 2, "revoked": 2, "locked": 1}
         if preference.get(candidate.status, 0) > preference.get(existing.status, 0):
             by_program[program] = candidate
         elif preference.get(candidate.status, 0) == preference.get(existing.status, 0) and candidate.last_used_at and (existing.last_used_at is None or candidate.last_used_at > existing.last_used_at):

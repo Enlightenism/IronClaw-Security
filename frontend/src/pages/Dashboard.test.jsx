@@ -1744,7 +1744,7 @@ describe("refresh behavior", () => {
       if (url === "/billing/checkout/reconcile-recent") {
         return Promise.resolve({
           data: {
-            status: "partial",
+            status: "install_keys_pending",
             sessions_matched: 1,
             sessions_reconciled: 0,
             units_credited: 0,
@@ -1779,15 +1779,16 @@ describe("refresh behavior", () => {
     expect(mockToastSuccess).not.toHaveBeenCalled();
   });
 
-  it("directs refunded checkout outcomes to support without claiming wallet credit", async () => {
+  it("reports a refunded checkout as a refund notice without claiming wallet credit", async () => {
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
     mockApiPost.mockImplementation((url) => {
       if (url === "/billing/checkout/reconcile-recent") {
         return Promise.resolve({
           data: {
-            status: "partial",
+            status: "refunded",
             sessions_matched: 1,
             sessions_reconciled: 0,
+            sessions_refunded: 1,
             units_credited: 0,
             sessions: [
               {
@@ -1814,13 +1815,11 @@ describe("refresh behavior", () => {
     await user.click(screen.getByTestId("refresh-btn"));
 
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith(
-        expect.stringContaining("Support reference: cs_refunded_001"),
-      );
-      expect(mockToastError).toHaveBeenCalledWith(
-        expect.stringContaining("Contact support."),
+      expect(mockToastWarning).toHaveBeenCalledWith(
+        expect.stringContaining("was refunded"),
       );
     });
+    expect(mockToastError).not.toHaveBeenCalled();
     expect(mockToastSuccess).not.toHaveBeenCalled();
   });
 

@@ -521,8 +521,8 @@ class TestDashboardInstallKeySlotLogic:
             body = response.json()
             install_keys = body.get("install_keys", [])
             statuses = {k.get("status") for k in install_keys}
-            assert statuses == {"locked", "revoked"}
-            assert any(k.get("program") == "openclaw" and k.get("status") == "revoked" for k in install_keys)
+            assert statuses == {"locked", "active"}
+            assert any(k.get("program") == "openclaw" and k.get("status") == "active" for k in install_keys)
         finally:
             _clear_registry_overrides()
 

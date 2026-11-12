@@ -685,11 +685,6 @@ const Dashboard = () => {
       const keysPending = sessions.filter(
         (session) => session?.status === "install_keys_pending",
       );
-      const incomplete = sessions.filter(
-        (session) =>
-          session?.status !== "fulfilled" &&
-          session?.status !== "install_keys_pending",
-      );
       const installKeysReady = INSTALL_KEY_PROGRAMS.every(({ program }) => {
         const slug = program.replace(/_/g, "-");
         const key = snapshot.tokens?.install_metadata?.[slug];
@@ -708,7 +703,7 @@ const Dashboard = () => {
       } else if (
         keysPending.length > 0 &&
         failures.length === 0 &&
-        incomplete.length === 0
+        reconciliation?.status !== "partial"
       ) {
         const pendingUnits = keysPending.reduce(
           (total, session) => total + Number(session?.units_credited ?? 0),
@@ -717,12 +712,8 @@ const Dashboard = () => {
         toast.warning(
           `${pendingUnits.toLocaleString()} units were added to your wallet, but install keys are still being prepared. Press Refresh again shortly.`,
         );
-      } else if (
-        failures.length > 0 ||
-        incomplete.length > 0 ||
-        reconciliation?.status === "partial"
-      ) {
-        const failedSession = incomplete.find((session) => session?.error);
+      } else if (failures.length > 0 || reconciliation?.status === "partial") {
+        const failedSession = failures.find((session) => session?.error);
         const detail = failedSession?.error;
         const reference = failedSession?.support_reference;
         const nextStep =
@@ -735,6 +726,10 @@ const Dashboard = () => {
                 reference ? ` Support reference: ${reference}.` : ""
               } ${nextStep}.`
             : "Payment sync is incomplete. Retry or contact support.",
+        );
+      } else if (reconciliation?.status === "refunded") {
+        toast.warning(
+          "Stripe confirms a checkout payment on this account was refunded. Refunded payments are not credited, so no units were added.",
         );
       } else if (
         reconciliation?.status === "no_paid_sessions_found" ||
