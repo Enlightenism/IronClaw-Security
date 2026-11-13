@@ -269,7 +269,7 @@ def _write_event_ledger_record(*, event_id: str, event_type: str, session_id: st
     record = {
         "event_id": event_id,
         "event_type": event_type,
-        "source": "billing_checkout_session_completed",
+        "source": "stripe",
         "checkout_session_id": session_id,
         "purchase_id": purchase_id,
         "payload_hash": payload_hash,

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 import app.api.stripe_webhooks as stripe_webhooks
+from app.persistencebootstrap import InMemoryPersistenceStore
 from app.services import stripe_service as stripe_service_mod
 
 _APP = FastAPI()
@@ -18,13 +21,6 @@ def _make_service() -> MagicMock:
     service = MagicMock()
     service._get_webhook_secret.return_value = "whsec_test"
     service.resolve_org_from_customer.return_value = "org_123"
-    service.get_active_subscription_for_org.return_value = SimpleNamespace(
-        to_dict=lambda: {
-            "id": "sub_123",
-            "org_id": "org_123",
-            "status": "active",
-        }
-    )
     service._issue_paid_install_keys_for_checkout.return_value = {
         "openclaw": {
             "key_id": "ik_openclaw_001",
@@ -80,6 +76,13 @@ def _post_event(event_data: dict[str, object], *, signature: str = "t=1,v1=test"
     client = TestClient(_APP, raise_server_exceptions=False)
     headers = {"stripe-signature": signature, "content-type": "application/json"}
     return client.post("/stripe/webhook", content=json.dumps(event_data).encode("utf-8"), headers=headers)
+
+
+@pytest.fixture(autouse=True)
+def durable_store() -> Iterator[InMemoryPersistenceStore]:
+    store = InMemoryPersistenceStore()
+    with patch("app.api.stripe_webhooks._durable_store", return_value=store):
+        yield store
 
 
 def test_checkout_completed_paid_event_credits_units_and_issues_install_keys() -> None:
@@ -144,6 +147,88 @@ def test_checkout_session_completed_skips_when_purchase_already_fulfilled() -> N
     service._issue_paid_install_keys_for_checkout.assert_not_called()
 
 
+def test_checkout_completed_writes_purchase_ledger_credit_and_keys(durable_store: InMemoryPersistenceStore) -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"), patch("app.api.stripe_webhooks.get_usage_metering_service", return_value=MagicMock()):
+        response = _post_event(_event_payload(event_type="checkout.session.completed", event_id="evt_store_1"))
+
+    assert response.status_code == 200
+    purchase = durable_store.select("billing_purchases", limit=1, filters={"checkout_session_id": "cs_123"})[0]
+    assert purchase["purchase_id"] == "cs_123"
+    assert purchase["owner_key"] == stripe_webhooks._owner_key_for_org("org_123")
+    assert purchase["payment_status"] == "paid"
+    assert purchase["granted_units"] == 50
+    assert purchase["units_credited"] is True
+    assert purchase["install_keys_provisioned"] is True
+    assert purchase["fulfillment_status"] == "fulfilled"
+    ledger = durable_store.select("event_idempotency_ledger", limit=1, filters={"event_id": "evt_store_1"})[0]
+    assert ledger["source"] == "stripe"
+    assert ledger["event_type"] == "checkout.session.completed"
+    assert ledger["checkout_session_id"] == "cs_123"
+    service.credit_units.assert_called_once()
+    service._issue_paid_install_keys_for_checkout.assert_called_once()
+
+
+def test_repeated_checkout_webhook_does_not_double_credit_or_duplicate_keys(durable_store: InMemoryPersistenceStore) -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"), patch("app.api.stripe_webhooks.get_usage_metering_service", return_value=MagicMock()):
+        first = _post_event(_event_payload(event_type="checkout.session.completed", event_id="evt_repeat_1"))
+        second = _post_event(_event_payload(event_type="checkout.session.completed", event_id="evt_repeat_2"))
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["processed"] is True
+    service.credit_units.assert_called_once()
+    service._issue_paid_install_keys_for_checkout.assert_called_once()
+    assert len(durable_store.select("billing_purchases", filters={"checkout_session_id": "cs_123"})) == 1
+    assert len(durable_store.select("event_idempotency_ledger", filters={"checkout_session_id": "cs_123"})) == 1
+
+
+def test_checkout_keys_issue_without_active_subscription(durable_store: InMemoryPersistenceStore) -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+    service.get_active_subscription_for_org.return_value = None
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"), patch("app.api.stripe_webhooks.get_usage_metering_service", return_value=MagicMock()):
+        response = _post_event(_event_payload(event_type="checkout.session.completed", event_id="evt_no_sub_1"))
+
+    assert response.status_code == 200
+    service._issue_paid_install_keys_for_checkout.assert_called_once()
+    purchase = durable_store.select("billing_purchases", limit=1, filters={"checkout_session_id": "cs_123"})[0]
+    assert purchase["fulfillment_status"] == "fulfilled"
+
+
+def test_checkout_key_failure_leaves_purchase_retrying_and_unfulfilled(durable_store: InMemoryPersistenceStore) -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+    service._issue_paid_install_keys_for_checkout.side_effect = RuntimeError("program issuance failed")
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"):
+        response = _post_event(_event_payload(event_type="checkout.session.completed", event_id="evt_key_fail_1"))
+
+    assert response.status_code == 200
+    service.credit_units.assert_called_once()
+    purchase = durable_store.select("billing_purchases", limit=1, filters={"checkout_session_id": "cs_123"})[0]
+    assert purchase["units_credited"] is True
+    assert purchase["install_keys_provisioned"] is False
+    assert purchase["fulfillment_status"] == "retrying"
+
+
+def test_pending_checkout_writes_no_purchase_or_ledger(durable_store: InMemoryPersistenceStore) -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"):
+        _post_event(_event_payload(event_type="checkout.session.completed", event_id="evt_pending_store", payment_status="pending"))
+
+    assert durable_store.select("billing_purchases") == []
+    assert durable_store.select("event_idempotency_ledger") == []
+
+
 def test_invoice_paid_success_triggers_entitlement_orchestration() -> None:
     stripe_webhooks.reset_processed_events()
     service = _make_service()
@@ -190,7 +275,6 @@ def test_invoice_payment_failed_does_not_issue_install_keys() -> None:
 def test_install_key_orchestration_rejects_owner_key_mismatch() -> None:
     service = _make_service()
     service.resolve_org_from_customer.return_value = "org_123"
-    service.get_active_subscription_for_org.return_value = SimpleNamespace(to_dict=lambda: {"id": "sub_123", "org_id": "org_123", "status": "active"})
 
     result = stripe_webhooks._issue_paid_install_key_orchestration(
         svc=service,

@@ -3,13 +3,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import hashlib
 import hmac
+import json
 import logging
+import os
 import time
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel
 
+from app.persistencebootstrap import build_store
 from app.services.stripe_service import (
     StripeBillingInterval,
     StripeSubscriptionStatus,
@@ -214,6 +217,10 @@ def _resolve_event_context(event_data: dict[str, Any], org_id: str | None, svc: 
     if not _is_successful_payment_status(payment_status):
         payment_status = str(data_obj.get("status") or "").strip().lower()
 
+    customer_details = data_obj.get("customer_details") or {}
+    detail_email = customer_details.get("email") if isinstance(customer_details, dict) else None
+    buyer_email = str(detail_email or metadata.get("buyer_email") or "").strip().lower() or None
+
     return {
         "session_id": data_obj.get("id") or event_data.get("id"),
         "org_id": resolved_org,
@@ -224,6 +231,8 @@ def _resolve_event_context(event_data: dict[str, Any], org_id: str | None, svc: 
         "metadata": metadata,
         "amount_total": int(data_obj.get("amount_total") or 0),
         "currency": str(data_obj.get("currency") or metadata.get("currency") or "usd").lower(),
+        "buyer_email": buyer_email,
+        "payment_intent": _coerce_stripe_id(data_obj.get("payment_intent")),
     }
 
 
@@ -307,23 +316,6 @@ def _issue_paid_install_key_orchestration(
             )
             return {}
 
-    if not hasattr(svc, "get_active_subscription_for_org"):
-        logger.info(
-            "stripe_webhooks: install_key_orchestration_skipped event=%s org=%s reason=no_active_subscription_lookup",
-            event_id,
-            org_id,
-        )
-        return {}
-
-    active_subscription = svc.get_active_subscription_for_org(org_id)
-    if active_subscription is None:
-        logger.info(
-            "stripe_webhooks: install_key_orchestration_skipped event=%s org=%s reason=no_active_subscription",
-            event_id,
-            org_id,
-        )
-        return {}
-
     result: dict[str, Any] = {
         "event_type": event_type,
         "event_id": event_id,
@@ -331,7 +323,6 @@ def _issue_paid_install_key_orchestration(
         "owner_key": owner_key,
         "customer_id": customer_id,
         "payment_status": payment_status,
-        "active_subscription": active_subscription.to_dict() if hasattr(active_subscription, "to_dict") else active_subscription,
         "usage_telemetry": {},
         "dashboard_payload": {
             "owner_key": owner_key,
@@ -753,6 +744,105 @@ def _svc_handle_customer_updated(
 # ---------------------------------------------------------------------------
 
 
+_PURCHASE_TABLE = "billing_purchases"
+_EVENT_LEDGER_TABLE = "event_idempotency_ledger"
+_CHECKOUT_COMPLETED_EVENT_TYPE = "checkout.session.completed"
+
+
+def _durable_store() -> Any:
+    return build_store(mode=os.getenv("IRONCLAW_PERSISTENCE_MODE", "auto"), allow_fallback=True)
+
+
+def _select_first(store: Any, table: str, filters: dict[str, Any]) -> dict[str, Any] | None:
+    rows = store.select(table, limit=1, filters=filters)
+    return dict(rows[0]) if rows else None
+
+
+def _coerce_stripe_id(value: Any) -> str | None:
+    if isinstance(value, dict):
+        value = value.get("id")
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _is_checkout_fulfilled(row: dict[str, Any]) -> bool:
+    return str(row.get("fulfillment_status") or "") == "fulfilled" and bool(row.get("units_credited")) and bool(row.get("install_keys_provisioned"))
+
+
+def _record_checkout_purchase(
+    store: Any,
+    *,
+    session_id: str,
+    context: dict[str, Any],
+    unit_credits: int,
+) -> dict[str, Any]:
+    existing = _select_first(store, _PURCHASE_TABLE, {"checkout_session_id": session_id})
+    if existing is not None:
+        return existing
+
+    metadata: dict[str, Any] = context["metadata"]
+    now = _utc_now_iso()
+    record: dict[str, Any] = {
+        "purchase_id": session_id,
+        "owner_key": context["owner_key"],
+        "customer_id": context["customer_id"],
+        "buyer_email": context["buyer_email"],
+        "package_id": str(metadata.get("package_id") or ""),
+        "package_name": str(metadata.get("package_name") or metadata.get("package_id") or ""),
+        "checkout_session_id": session_id,
+        "stripe_payment_intent_id": context["payment_intent"],
+        "price_usd": context["amount_total"] / 100,
+        "amount_total": context["amount_total"] / 100,
+        "currency": context["currency"],
+        "payment_status": "paid",
+        "fulfillment_status": "pending",
+        "granted_units": unit_credits,
+        "units_credited": False,
+        "install_keys_provisioned": False,
+        "raw_metadata": metadata,
+        "created_at": now,
+        "updated_at": now,
+    }
+    store.insert(_PURCHASE_TABLE, record)
+    return record
+
+
+def _record_event_ledger(
+    store: Any,
+    *,
+    event_id: str,
+    event_data: dict[str, Any],
+    context: dict[str, Any],
+    session_id: str,
+) -> None:
+    if _select_first(store, _EVENT_LEDGER_TABLE, {"event_id": event_id}) is not None:
+        return
+    serialized = json.dumps(event_data, sort_keys=True, separators=(",", ":"), default=str)
+    store.insert(
+        _EVENT_LEDGER_TABLE,
+        {
+            "event_id": event_id,
+            "source": "stripe",
+            "event_type": _CHECKOUT_COMPLETED_EVENT_TYPE,
+            "purchase_id": session_id,
+            "checkout_session_id": session_id,
+            "owner_key": context["owner_key"],
+            "customer_id": context["customer_id"],
+            "payload_hash": hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+            "processed_at": _utc_now_iso(),
+            "metadata": {"mode": context["mode"], "payment_intent": context["payment_intent"]},
+        },
+    )
+
+
+def _update_checkout_purchase(store: Any, session_id: str, changes: dict[str, Any]) -> None:
+    store.update(
+        _PURCHASE_TABLE,
+        {**changes, "updated_at": _utc_now_iso()},
+        filters={"checkout_session_id": session_id},
+    )
+
+
 def _handle_checkout_session_completed(
     event_id: str,
     event_data: dict[str, Any],
@@ -778,6 +868,15 @@ def _handle_checkout_session_completed(
         )
         return False
 
+    store = _durable_store()
+    durable_row = _select_first(store, _PURCHASE_TABLE, {"checkout_session_id": session_id})
+    if durable_row is not None and _is_checkout_fulfilled(durable_row):
+        logger.info(
+            "stripe_webhooks: checkout.session.completed duplicate fulfillment suppressed (durable) — session=%s",
+            session_id,
+        )
+        return True
+
     durable_purchase = _find_matching_purchase_for_checkout(
         session_id=session_id,
         owner_key=context.get("owner_key"),
@@ -796,21 +895,40 @@ def _handle_checkout_session_completed(
             )
             return True
 
+    purchase: dict[str, Any] | None = None
+    if context.get("owner_key"):
+        purchase = _record_checkout_purchase(store, session_id=session_id, context=context, unit_credits=unit_credits)
+        _record_event_ledger(
+            store,
+            event_id=event_id,
+            event_data=event_data,
+            context=context,
+            session_id=session_id,
+        )
+    else:
+        logger.warning(
+            "stripe_webhooks: checkout.session.completed has no owner_key; purchase row not written session=%s",
+            session_id,
+        )
+
     if context.get("org_id"):
         if context.get("customer_id"):
             svc.register_customer_mapping(context["org_id"], context["customer_id"])
 
-    _svc_handle_checkout_completed(
-        svc,
-        session_id=session_id,
-        org_id=context["org_id"],
-        amount_total=context["amount_total"],
-        currency=context["currency"],
-        mode=mode,
-        unit_credits=unit_credits,
-        metadata=metadata,
-        raw_event_id=event_id,
-    )
+    if purchase is None or not purchase.get("units_credited"):
+        _svc_handle_checkout_completed(
+            svc,
+            session_id=session_id,
+            org_id=context["org_id"],
+            amount_total=context["amount_total"],
+            currency=context["currency"],
+            mode=mode,
+            unit_credits=unit_credits,
+            metadata=metadata,
+            raw_event_id=event_id,
+        )
+        if purchase is not None:
+            _update_checkout_purchase(store, session_id, {"units_credited": True})
 
     orchestration = _issue_paid_install_key_orchestration(
         svc=svc,
@@ -830,12 +948,31 @@ def _handle_checkout_session_completed(
         },
     )
 
+    keys_issued = bool(orchestration.get("install_key_issuance"))
+    if purchase is not None:
+        if keys_issued:
+            _update_checkout_purchase(
+                store,
+                session_id,
+                {
+                    "install_keys_provisioned": True,
+                    "fulfillment_status": "fulfilled",
+                    "fulfilled_at": _utc_now_iso(),
+                },
+            )
+        else:
+            _update_checkout_purchase(store, session_id, {"fulfillment_status": "retrying"})
+            logger.error(
+                "stripe_webhooks: checkout.session.completed install keys not issued; purchase left retrying session=%s",
+                session_id,
+            )
+
     logger.info(
         "stripe_webhooks: checkout.session.completed processed — session=%s org=%s units=%d install_keys=%s",
         session_id,
         context["org_id"],
         unit_credits,
-        bool(orchestration.get("install_key_issuance")),
+        keys_issued,
     )
     return True
 
