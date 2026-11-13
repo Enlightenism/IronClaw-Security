@@ -901,61 +901,18 @@ class InstallKeyRegistry:
         program: ProgramCode,
         purchase_reference: str | None,
         checkout_session_id: str | None,
-        subscription_id: str | None,
     ) -> bool:
+        # The record table is the replay authority. The issue ledger row is written only after a verified persist, so a ledger row without a record is an orphan and must not block reissue.
         if purchase_reference is None and checkout_session_id is None:
             return False
 
-        payload = _canonical_install_key_issue_payload(
-            owner_key=owner_key,
-            program=program,
-            purchase_reference=purchase_reference,
-            checkout_session_id=checkout_session_id,
-            subscription_id=subscription_id,
-            customer_id=None,
-        )
-        event_id = _canonical_install_key_event_id(
-            owner_key=owner_key,
-            program=program,
-            purchase_reference=purchase_reference,
-            checkout_session_id=checkout_session_id,
-        )
-        existing = _read_event_ledger_record(
-            event_id=event_id,
-            purchase_reference=purchase_reference,
-            checkout_session_id=checkout_session_id,
-            owner_key=owner_key,
-            program=program,
-            event_type="install_key_issued",
-        )
-        if existing is not None:
-            return True
-
-        if purchase_reference is not None:
-            for record in self._records_by_id.values():
-                if str(record.purchase_reference or "").strip() == str(purchase_reference).strip() and record.program == program and record.owner_key == owner_key:
-                    return True
-
-        if checkout_session_id is not None:
-            for record in self._records_by_id.values():
-                if str(record.checkout_session_id or "").strip() == str(checkout_session_id).strip() and record.program == program and record.owner_key == owner_key:
-                    return True
-
-        event_payload = {
-            "source": "install_key",
-            "event_type": "install_key_issued",
-            **payload,
-        }
-        _write_event_ledger_record(
-            event_id=event_id,
-            event_type="install_key_issued",
-            purchase_reference=purchase_reference,
-            checkout_session_id=checkout_session_id,
-            owner_key=owner_key,
-            customer_id=None,
-            program=program,
-            payload=event_payload,
-        )
+        for record in self._records_by_id.values():
+            if record.owner_key != owner_key or record.program != program:
+                continue
+            if purchase_reference is not None and str(record.purchase_reference or "").strip() == str(purchase_reference).strip():
+                return True
+            if checkout_session_id is not None and str(record.checkout_session_id or "").strip() == str(checkout_session_id).strip():
+                return True
         return False
 
     def _lock_inactive_key(self, record: InstallKeyRecord, *, reason: str) -> InstallKeyRecord:
@@ -1075,7 +1032,6 @@ class InstallKeyRegistry:
                 program=normalized_program,
                 purchase_reference=purchase_reference,
                 checkout_session_id=checkout_session_id,
-                subscription_id=subscription_id,
             ):
                 raise InstallKeyAlreadyExistsError(normalized_owner, normalized_program)
 

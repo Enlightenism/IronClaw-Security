@@ -47,46 +47,46 @@ def _resolve_install_owner(auth: Any) -> str | None:
     return owner.strip().lower() if owner else None
 
 
-def _is_valid_install_key_record(record: Any, *, owner_key: str, program: str) -> bool:
+def _install_key_rejection_reason(record: Any, *, owner_key: str, program: str) -> str | None:
     if record is None:
-        return False
+        return "missing_record"
 
     record_owner = str(getattr(record, "owner_key", "") or "").strip().lower()
     if record_owner != owner_key:
-        return False
+        return "owner_mismatch"
 
     canonical_program = InstallKeyFormatRegistry.normalize_program(str(getattr(record, "program", "") or "").strip())
     if canonical_program is None or canonical_program not in _RUNTIME_PROGRAMS:
-        return False
+        return "unknown_program"
 
     expected_program = InstallKeyFormatRegistry.normalize_program(program)
     if expected_program is None or expected_program != canonical_program:
-        return False
+        return "program_mismatch"
 
     if not bool(getattr(record, "active", False)):
-        return False
+        return "inactive"
 
     payment_status = str(getattr(record, "payment_status", "") or "").strip().lower()
     if payment_status not in _PAID_PAYMENT_STATUSES:
-        return False
+        return "unpaid"
 
     entitlements_status = str(getattr(record, "entitlements_status", "") or "").strip().lower()
     if entitlements_status not in _ACTIVE_ENTITLEMENT_STATUSES:
-        return False
+        return "entitlements_inactive"
 
     if not bool(getattr(record, "issued_after_payment", False)):
-        return False
+        return "not_issued_after_payment"
 
     if not str(getattr(record, "key_id", "") or "").strip():
-        return False
+        return "missing_key_id"
 
     masked_key = str(getattr(record, "masked_key", "") or "").strip()
     if not masked_key:
-        return False
+        return "missing_masked_key"
     if not masked_key.startswith("ic_install_"):
-        return False
+        return "invalid_masked_key_prefix"
 
-    return True
+    return None
 
 
 def _select_paid_install_key_records(owner_key: str) -> dict[str, Any]:
@@ -94,11 +94,17 @@ def _select_paid_install_key_records(owner_key: str) -> dict[str, Any]:
     try:
         records = registry.get_keys_for_owner(owner_key)
     except Exception as exc:
+        logger.error(
+            "integrations.install_key_read_failed error_type=%s error=%s",
+            type(exc).__name__,
+            str(exc)[:500],
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Install-key records are temporarily unavailable.",
         ) from exc
     if not isinstance(records, list | tuple):
+        logger.error("integrations.install_key_read_invalid type=%s", type(records).__name__)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Install-key records returned an invalid response.",
@@ -109,11 +115,16 @@ def _select_paid_install_key_records(owner_key: str) -> dict[str, Any]:
         canonical_program = InstallKeyFormatRegistry.normalize_program(str(getattr(record, "program", "") or ""))
         if canonical_program is None or canonical_program not in _RUNTIME_PROGRAMS:
             continue
-        if canonical_program in selected or not _is_valid_install_key_record(
-            record,
-            owner_key=owner_key,
-            program=canonical_program,
-        ):
+        if canonical_program in selected:
+            continue
+        reason = _install_key_rejection_reason(record, owner_key=owner_key, program=canonical_program)
+        if reason is not None:
+            logger.warning(
+                "integrations.install_key_rejected program=%s key_id=%s check=%s",
+                canonical_program,
+                getattr(record, "key_id", None),
+                reason,
+            )
             continue
         selected[canonical_program] = record
     return selected

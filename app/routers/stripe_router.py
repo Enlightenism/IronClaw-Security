@@ -1318,13 +1318,14 @@ async def reconcile_checkout_session(
             code="checkout_session_not_found",
             extra={"session_id": session_id},
         ) from exc
-    except StripeInstallKeyProvisioningError:
+    except StripeInstallKeyProvisioningError as exc:
         logger.error("stripe.reconcile_install_keys_pending session=%s", session_id)
         result = {
             "payment_status": "paid",
             "payment_confirmed": True,
             "fulfillment_status": "install_keys_pending",
             "error": "install_key_provisioning_failed",
+            "install_key_errors": dict(exc.program_errors),
         }
     except StripeServiceError as exc:
         raise HTTPException(
@@ -1341,6 +1342,7 @@ async def reconcile_checkout_session(
             "fulfillment_status": result.get("fulfillment_status") or ("payment_pending" if not result.get("payment_confirmed") else "incomplete"),
             "units_credited": _units_credited_for_checkout(svc, session_id, record, auth),
             "error": result.get("error"),
+            "install_key_errors": result.get("install_key_errors") or {},
             "action": result.get("action"),
             "support_reference": result.get("support_reference") or session_id,
         },

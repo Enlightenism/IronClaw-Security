@@ -561,6 +561,10 @@ class SupabaseClient:
                 detail = body.get("message") or body.get("error_description") or body.get("error") or response.text
                 code = body.get("code")
                 postgrest_code = str(code) if code else None
+                for extra_key in ("details", "hint"):
+                    extra_value = body.get(extra_key)
+                    if extra_value:
+                        detail = f"{detail} ({extra_key}: {extra_value})"
             else:
                 detail = response.text
 

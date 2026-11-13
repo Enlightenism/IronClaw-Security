@@ -1774,6 +1774,52 @@ describe("refresh behavior", () => {
     expect(mockToastSuccess).not.toHaveBeenCalled();
   });
 
+  it("shows the per-program install-key error in the Refresh toast when issuance fails", async () => {
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+    mockApiPost.mockImplementation((url) => {
+      if (url === "/billing/checkout/reconcile-recent") {
+        return Promise.resolve({
+          data: {
+            status: "install_keys_pending",
+            sessions_matched: 1,
+            sessions_reconciled: 0,
+            units_credited: 0,
+            sessions: [
+              {
+                session_id: "cs_live_keys_002",
+                status: "install_keys_pending",
+                fulfillment_status: "install_keys_pending",
+                units_credited: 5000,
+                newly_credited_units: 0,
+                error: "install_key_provisioning_failed",
+                install_key_errors: {
+                  copilot:
+                    "StripeInstallKeyProvisioningError: foreign key violation",
+                },
+                action: "retry_sync",
+                support_reference: "cs_live_keys_002",
+              },
+            ],
+            truncated: false,
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDashboard();
+    await user.click(screen.getByTestId("refresh-btn"));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "copilot: StripeInstallKeyProvisioningError: foreign key violation",
+        ),
+      );
+    });
+    expect(mockToastWarning).not.toHaveBeenCalled();
+  });
+
   it("reports a refunded checkout as a refund notice without claiming wallet credit", async () => {
     const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
     mockApiPost.mockImplementation((url) => {

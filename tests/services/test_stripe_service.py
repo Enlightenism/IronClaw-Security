@@ -1126,17 +1126,20 @@ class TestHandleCheckoutCompleted:
         provisioning_service.provision_for_program.side_effect = fake_provision
         monkeypatch.setattr("app.services.stripe_service.provision_install_key_service", lambda *args, **kwargs: provisioning_service)
 
+        failure_details: dict[str, str] = {}
         result = svc._issue_paid_install_keys_for_checkout(  # noqa: SLF001
             org_id="org-partial-program",
             customer_id=_CUSTOMER_ID,
             session_id="cs_partial_program_001",
             unit_credits=500,
             metadata={"payment_status": "paid"},
+            failure_details=failure_details,
         )
 
         assert set(result) == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "hermes"}
         assert "copilot" not in result
         assert provisioning_service.provision_for_program.call_count == 7
+        assert failure_details == {"copilot": "RuntimeError: persistence write-order failure"}
 
     def test_issue_paid_install_keys_requires_successful_payment_confirmation(self, svc: StripeService) -> None:
         result = svc._issue_paid_install_keys_for_checkout(  # noqa: SLF001

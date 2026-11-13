@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass, field
 import hashlib
+import logging
 import secrets
 from threading import RLock
 from typing import Any
@@ -15,7 +16,9 @@ from app.core.install_key_formats import RUNTIME_INSTALL_KEY_PROGRAMS, InstallKe
 from app.core.install_keys import InstallKeyRecord, InstallKeyRegistry, get_install_key_registry
 from app.core.settings import get_settings
 from app.persistencebootstrap import InMemoryPersistenceStore, SupabasePersistenceStore, get_persistence_store
+from app.supabaseclient import SupabaseClientError
 
+logger = logging.getLogger(__name__)
 _KEY_VERSION = "v1"
 _MEMORY_LOCK = RLock()
 
@@ -204,15 +207,26 @@ class InstallKeyHandoffService:
             return
 
         encrypted_key = self._encrypt_key(program, record.raw_key)
-        persisted = store.rpc(
-            "issue_install_key_record_with_secret",
-            {
-                "p_install_key_record": record.to_db_row(),
-                "p_encrypted_key_base64": base64.b64encode(encrypted_key).decode("ascii"),
-                "p_key_version": _KEY_VERSION,
-            },
-            schema="public",
-        )
+        try:
+            persisted = store.rpc(
+                "issue_install_key_record_with_secret",
+                {
+                    "p_install_key_record": record.to_db_row(),
+                    "p_encrypted_key_base64": base64.b64encode(encrypted_key).decode("ascii"),
+                    "p_key_version": _KEY_VERSION,
+                },
+                schema="public",
+            )
+        except SupabaseClientError as exc:
+            logger.error(
+                "install_key.persist_failed program=%s key_id=%s status=%s postgrest_code=%s error=%s",
+                program,
+                key_id,
+                getattr(exc, "status_code", None),
+                getattr(exc, "postgrest_code", None),
+                exc,
+            )
+            raise
         if not self._rpc_boolean(persisted, "record and secret persistence"):
             raise InstallKeySecretUnavailableError("Install-key record and secret could not be stored atomically for secure delivery.")
 

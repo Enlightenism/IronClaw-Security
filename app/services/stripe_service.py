@@ -858,6 +858,10 @@ class StripeInstallKeyProvisioningError(StripeServiceError):
     Raised when install-key issuance fails after the checkout's units were already credited.
     """
 
+    def __init__(self, message: str, *, program_errors: dict[str, str] | None = None) -> None:
+        super().__init__(message)
+        self.program_errors: dict[str, str] = dict(program_errors or {})
+
 
 # ---------------------------------------------------------------------------
 # StripeService
@@ -1155,6 +1159,7 @@ class StripeService:
         unit_credits: int,
         metadata: dict[str, Any] | None = None,
         payment_intent: str | None = None,
+        failure_details: dict[str, str] | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Issue the paid install-key entitlement only after a successful payment confirmation.
 
@@ -1224,6 +1229,8 @@ class StripeService:
                 )
             except Exception as exc:  # noqa: BLE001
                 failed_programs.append(program)
+                if failure_details is not None:
+                    failure_details[program] = f"{type(exc).__name__}: {str(exc)[:500]}"
                 logger.error(
                     "stripe.checkout_install_key_program_failed org=%s session=%s program=%s error_type=%s error=%s",
                     org_id,
@@ -2127,7 +2134,7 @@ class StripeService:
                             "support_reference": session_id,
                         },
                     )
-                except StripeInstallKeyProvisioningError:
+                except StripeInstallKeyProvisioningError as exc:
                     # Units are credited before install keys are issued, so a key failure is retryable, not a payment failure.
                     logger.error("stripe.checkout_reconcile_install_keys_pending session=%s", session_id or "")
                     sessions.append(
@@ -2142,6 +2149,7 @@ class StripeService:
                             ),
                             "newly_credited_units": 0,
                             "error": "install_key_provisioning_failed",
+                            "install_key_errors": dict(exc.program_errors),
                             "action": "retry_sync",
                             "support_reference": session_id,
                         },
@@ -3235,6 +3243,7 @@ class StripeService:
                 )
                 return result
 
+            failure_details: dict[str, str] = {}
             try:
                 install_key_issuance = self._issue_paid_install_keys_for_checkout(
                     org_id=org_id,
@@ -3247,6 +3256,7 @@ class StripeService:
                         "payment_status": payment_status,
                     },
                     payment_intent=payment_intent,
+                    failure_details=failure_details,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.error(
@@ -3271,7 +3281,10 @@ class StripeService:
                     units_credited=True,
                     last_error="install_key_partial_issuance",
                 )
-                raise StripeInstallKeyProvisioningError(f"Install keys missing for programs: {', '.join(missing_programs)}.")
+                raise StripeInstallKeyProvisioningError(
+                    f"Install keys missing for programs: {', '.join(missing_programs)}.",
+                    program_errors={program: failure_details.get(program, "not issued") for program in missing_programs},
+                )
 
             if self._wallet_registry.is_payment_refunded(payment_intent):
                 revocation = self._revoke_checkout_entitlements_for_refund(

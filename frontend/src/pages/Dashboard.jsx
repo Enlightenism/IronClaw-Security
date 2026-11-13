@@ -76,6 +76,18 @@ const normalizePackageId = (packageId) => {
   return typeof packageId === "string" ? packageId.trim() : "";
 };
 
+const formatInstallKeyErrors = (sessions) => {
+  const entries = [];
+  for (const session of sessions) {
+    const errors = session?.install_key_errors;
+    if (!errors || typeof errors !== "object") continue;
+    for (const [program, message] of Object.entries(errors)) {
+      entries.push(`${program}: ${message}`);
+    }
+  }
+  return entries;
+};
+
 const CHECKOUT_ERROR_MESSAGES = {
   verified_billing_identity_required:
     "Your account needs a verified email before you can buy a package. Sign out, sign back in, then try again.",
@@ -393,15 +405,23 @@ const Dashboard = () => {
               toast.dismiss("pay");
               setPaymentState("fulfillment_error");
               setPurchasingId(null);
-              toast.warning(
-                `${credited.toLocaleString()} units were added to your wallet, but install keys are still being prepared. Contact support with checkout session ${sessionId} if they do not appear shortly.`,
-                {
-                  action: {
-                    label: "Retry sync",
-                    onClick: () => pollPayment(sessionId, 0),
-                  },
+              const keyErrors = formatInstallKeyErrors([reconciled]);
+              const pendingDetail =
+                keyErrors.length > 0
+                  ? `install key issuance failed: ${keyErrors.join("; ")}.`
+                  : "install keys are still being prepared.";
+              const pendingMessage = `${credited.toLocaleString()} units were added to your wallet, but ${pendingDetail} Contact support with checkout session ${sessionId} if they do not appear shortly.`;
+              const retryAction = {
+                action: {
+                  label: "Retry sync",
+                  onClick: () => pollPayment(sessionId, 0),
                 },
-              );
+              };
+              if (keyErrors.length > 0) {
+                toast.error(pendingMessage, retryAction);
+              } else {
+                toast.warning(pendingMessage, retryAction);
+              }
               return;
             }
             if (
@@ -713,9 +733,16 @@ const Dashboard = () => {
           (total, session) => total + Number(session?.units_credited ?? 0),
           0,
         );
-        toast.warning(
-          `${pendingUnits.toLocaleString()} units were added to your wallet, but install keys are still being prepared. Press Refresh again shortly.`,
-        );
+        const keyErrors = formatInstallKeyErrors(keysPending);
+        if (keyErrors.length > 0) {
+          toast.error(
+            `${pendingUnits.toLocaleString()} units were added to your wallet, but install key issuance failed: ${keyErrors.join("; ")}. Press Refresh again after the cause is fixed.`,
+          );
+        } else {
+          toast.warning(
+            `${pendingUnits.toLocaleString()} units were added to your wallet, but install keys are still being prepared. Press Refresh again shortly.`,
+          );
+        }
       } else if (failures.length > 0 || reconciliation?.status === "partial") {
         const failedSession = failures.find((session) => session?.error);
         const detail = failedSession?.error;

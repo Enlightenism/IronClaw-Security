@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -1321,6 +1322,35 @@ class TestEventLedgerReplayScoping(unittest.TestCase):
             )
         assert found is not None
         assert found["event_id"] == "evt_openclaw"
+
+
+class TestReplayGateUsesRecordTable(unittest.TestCase):
+    def _registry_with(self, records):
+        reg = InstallKeyRegistry()
+        reg._records_by_id = {str(index): rec for index, rec in enumerate(records)}
+        return reg
+
+    def _blocks(self, reg, program="openclaw"):
+        return reg._has_replay_issue_for_purchase(
+            owner_key=_OWNER,
+            program=program,
+            purchase_reference=_CHECKOUT_SESSION_ID,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+        )
+
+    def _record(self, **overrides):
+        base = {"owner_key": _OWNER, "program": "openclaw", "purchase_reference": _CHECKOUT_SESSION_ID, "checkout_session_id": _CHECKOUT_SESSION_ID}
+        base.update(overrides)
+        return SimpleNamespace(**base)
+
+    def test_orphan_ledger_without_record_does_not_block_reissue(self):
+        assert self._blocks(self._registry_with([])) is False
+
+    def test_existing_record_for_same_purchase_blocks_reissue(self):
+        assert self._blocks(self._registry_with([self._record()])) is True
+
+    def test_record_for_other_program_does_not_block(self):
+        assert self._blocks(self._registry_with([self._record(program="claude_code")])) is False
 
 
 class TestInstallKeyDurableStorageGuard(unittest.TestCase):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -16,6 +17,7 @@ from app.services.install_key_handoff import (
     InvalidInstallKeyClaimError,
     reset_install_key_handoff_service,
 )
+from app.supabaseclient import SupabaseAPIError
 
 _OWNER_KEY = "buyer@ironclaw.test"
 _PROGRAM = "openclaw"
@@ -121,6 +123,29 @@ def test_atomic_record_persistence_failure_is_reported() -> None:
 
     with pytest.raises(InstallKeySecretUnavailableError, match="stored atomically"):
         service.persist_new_record(record)
+
+
+def test_persist_rpc_error_is_logged_with_postgrest_context_and_reraised(caplog: pytest.LogCaptureFixture) -> None:
+    record = _make_record()
+    client = MagicMock()
+    client.rpc.side_effect = SupabaseAPIError(
+        "supabase request failed with status 409: insert or update violates foreign key constraint (details: Key (key_id)=(x) is not present) (hint: check install_key_secrets)",
+        status_code=409,
+        postgrest_code="23503",
+    )
+    service = InstallKeyHandoffService(
+        persistence_store=SupabasePersistenceStore(client=client),
+        install_key_registry=MagicMock(spec=InstallKeyRegistry),
+        encryption_secret="test-install-key-encryption-secret",
+    )
+
+    with caplog.at_level(logging.ERROR, logger="app.services.install_key_handoff"), pytest.raises(SupabaseAPIError):
+        service.persist_new_record(record)
+
+    assert "install_key.persist_failed" in caplog.text
+    assert "status=409" in caplog.text
+    assert "postgrest_code=23503" in caplog.text
+    assert _RAW_KEY not in caplog.text
 
 
 def test_new_claim_invalidates_previous_claim() -> None:
