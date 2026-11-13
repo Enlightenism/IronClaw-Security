@@ -532,6 +532,7 @@ relying on durable wallet fulfillment and saved-card records:
 - [`020_refund_revocation.sql`](../supabase/migrations/020_refund_revocation.sql) — wallet and install-key revocation on refunds.
 - [`021_stripe_checkout_fulfillment.sql`](../supabase/migrations/021_stripe_checkout_fulfillment.sql) — durable checkout ownership, idempotent fulfillment state, and refund-before-credit enforcement.
 - [`023_fix_unit_wallet_credit_function.sql`](../supabase/migrations/023_fix_unit_wallet_credit_function.sql) — corrects the atomic wallet credit function's column ambiguity and checkout event id.
+- [`024_repoint_install_key_secrets_fk.sql`](../supabase/migrations/024_repoint_install_key_secrets_fk.sql) — repoints the install-key secret foreign key to `public.install_key_records`.
 
 Check the Supabase migration history for all seven before enabling this workflow
 in production; repository presence alone does not confirm deployment. Configure
