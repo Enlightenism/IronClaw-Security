@@ -13,6 +13,7 @@ from app.core.install_keys import (
     InstallKeyUsageError,
     _assert_durable_install_key_storage,
     _mask_key,
+    _read_event_ledger_record,
     _reset_install_key_registry_for_testing,
 )
 from app.core.settings import get_settings
@@ -1243,6 +1244,83 @@ class TestSummary(unittest.TestCase):
         s = reg.summary()
         for key in ("total", "active", "revoked", "openclaw_keys", "claude_code_keys"):
             assert key in s
+
+
+class TestEventLedgerReplayScoping(unittest.TestCase):
+    def _ledger_rows(self, rows):
+        stub = MagicMock()
+        stub.table.return_value.select.return_value.execute.return_value.data = rows
+        return patch(_PATCH_TARGET, return_value=stub)
+
+    def test_checkout_completed_row_does_not_match_install_key_issued_lookup(self):
+        rows = [
+            {
+                "event_id": "evt_1",
+                "event_type": "checkout.session.completed",
+                "checkout_session_id": _CHECKOUT_SESSION_ID,
+                "purchase_id": _CHECKOUT_SESSION_ID,
+                "owner_key": _OWNER,
+                "metadata": {},
+            }
+        ]
+        with (
+            self._ledger_rows(rows),
+            patch("app.core.install_keys._should_use_memory_fallback", return_value=False),
+        ):
+            found = _read_event_ledger_record(
+                checkout_session_id=_CHECKOUT_SESSION_ID,
+                owner_key=_OWNER,
+                program="openclaw",
+                event_type="install_key_issued",
+            )
+        assert found is None
+
+    def test_other_program_issuance_row_does_not_block_program(self):
+        rows = [
+            {
+                "event_id": "evt_claude",
+                "event_type": "install_key_issued",
+                "checkout_session_id": _CHECKOUT_SESSION_ID,
+                "purchase_id": _CHECKOUT_SESSION_ID,
+                "owner_key": _OWNER,
+                "metadata": {"program": "claude_code"},
+            }
+        ]
+        with (
+            self._ledger_rows(rows),
+            patch("app.core.install_keys._should_use_memory_fallback", return_value=False),
+        ):
+            found = _read_event_ledger_record(
+                checkout_session_id=_CHECKOUT_SESSION_ID,
+                owner_key=_OWNER,
+                program="openclaw",
+                event_type="install_key_issued",
+            )
+        assert found is None
+
+    def test_matching_program_issuance_row_is_found(self):
+        rows = [
+            {
+                "event_id": "evt_openclaw",
+                "event_type": "install_key_issued",
+                "checkout_session_id": _CHECKOUT_SESSION_ID,
+                "purchase_id": _CHECKOUT_SESSION_ID,
+                "owner_key": _OWNER,
+                "metadata": {"program": "openclaw"},
+            }
+        ]
+        with (
+            self._ledger_rows(rows),
+            patch("app.core.install_keys._should_use_memory_fallback", return_value=False),
+        ):
+            found = _read_event_ledger_record(
+                checkout_session_id=_CHECKOUT_SESSION_ID,
+                owner_key=_OWNER,
+                program="openclaw",
+                event_type="install_key_issued",
+            )
+        assert found is not None
+        assert found["event_id"] == "evt_openclaw"
 
 
 class TestInstallKeyDurableStorageGuard(unittest.TestCase):

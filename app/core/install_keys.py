@@ -611,7 +611,16 @@ def _canonical_install_key_issue_payload(*, owner_key: str, program: ProgramCode
     }
 
 
-def _read_event_ledger_record(*, event_id: str | None = None, purchase_reference: str | None = None, checkout_session_id: str | None = None, owner_key: str | None = None, program: ProgramCode | str | None = None) -> dict[str, Any] | None:
+def _read_event_ledger_record(
+    *,
+    event_id: str | None = None,
+    purchase_reference: str | None = None,
+    checkout_session_id: str | None = None,
+    owner_key: str | None = None,
+    program: ProgramCode | str | None = None,
+    event_type: str | None = None,
+) -> dict[str, Any] | None:
+    """Return a ledger row matching a reference; owner, program, and event_type scope the match when given."""
     if _should_use_memory_fallback():
         return None
     try:
@@ -622,16 +631,18 @@ def _read_event_ledger_record(*, event_id: str | None = None, purchase_reference
             rows = [rows]
         for row in rows:
             row = dict(row)
+            if event_type and str(row.get("event_type") or "").strip() != event_type:
+                continue
+            if owner_key and str(row.get("owner_key") or "").strip().lower() != str(owner_key).strip().lower():
+                continue
+            if program and str((row.get("metadata") or {}).get("program") or "").strip().lower() != str(program).strip().lower():
+                continue
             if event_id and str(row.get("event_id") or "").strip() == event_id:
                 return row
             if purchase_reference and str(row.get("purchase_id") or row.get("purchase_reference") or "").strip() == str(purchase_reference).strip():
                 return row
             if checkout_session_id and str(row.get("checkout_session_id") or "").strip() == str(checkout_session_id).strip():
                 return row
-            if owner_key and str(row.get("owner_key") or "").strip().lower() == str(owner_key).strip().lower():
-                metadata = row.get("metadata") or {}
-                if program and str(metadata.get("program") or "").strip().lower() == str(program).strip().lower():
-                    return row
         return None
     except (SupabaseAPIError, SupabaseClientError, Exception):
         _logger.exception("install_keys: failed to read event ledger")
@@ -915,6 +926,7 @@ class InstallKeyRegistry:
             checkout_session_id=checkout_session_id,
             owner_key=owner_key,
             program=program,
+            event_type="install_key_issued",
         )
         if existing is not None:
             return True

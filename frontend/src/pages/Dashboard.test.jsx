@@ -759,7 +759,7 @@ describe("session_id payment polling", () => {
     expect(reconcileAttempts).toBe(2);
   });
 
-  it("warns and stops polling when units are credited but install keys are pending", async () => {
+  it("keeps polling when units are credited but install keys are still pending", async () => {
     mockLocation.search = "?session_id=cs_test_abc&package_id=pkg_5000";
     setupPaidCheckoutApis("cs_test_abc");
     let reconcileAttempts = 0;
@@ -779,23 +779,18 @@ describe("session_id payment polling", () => {
 
     await renderDashboard();
     await waitFor(() => {
-      expect(mockToastWarning).toHaveBeenCalledWith(
-        expect.stringContaining("5,000 units were added"),
-        expect.objectContaining({
-          action: expect.objectContaining({ label: "Retry sync" }),
-        }),
-      );
+      expect(reconcileAttempts).toBe(1);
     });
 
     await act(async () => {
-      jest.advanceTimersByTime(4000);
+      jest.advanceTimersByTime(2000);
       await Promise.resolve();
     });
 
-    expect(reconcileAttempts).toBe(1);
-    expect(mockToastSuccess).not.toHaveBeenCalledWith(
-      expect.stringContaining("Payment confirmed"),
-    );
+    await waitFor(() => {
+      expect(reconcileAttempts).toBe(2);
+    });
+    expect(mockToastWarning).not.toHaveBeenCalled();
   });
 
   it("does not mark checkout as paid when Stripe's session ID is missing", async () => {

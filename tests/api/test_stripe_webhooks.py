@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 import app.api.stripe_webhooks as stripe_webhooks
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.persistencebootstrap import InMemoryPersistenceStore
 from app.services import stripe_service as stripe_service_mod
 
@@ -22,18 +23,13 @@ def _make_service() -> MagicMock:
     service._get_webhook_secret.return_value = "whsec_test"
     service.resolve_org_from_customer.return_value = "org_123"
     service._issue_paid_install_keys_for_checkout.return_value = {
-        "openclaw": {
-            "key_id": "ik_openclaw_001",
+        program: {
+            "key_id": f"ik_{program}_001",
             "owner_key": "ic_org_org_123",
-            "program": "openclaw",
-            "masked_key": "ic_install_openclaw_...abcd",
-        },
-        "claude_code": {
-            "key_id": "ik_claude_001",
-            "owner_key": "ic_org_org_123",
-            "program": "claude_code",
-            "masked_key": "ic_install_claude_code_...wxyz",
-        },
+            "program": program,
+            "masked_key": f"ic_install_{program}_...abcd",
+        }
+        for program in InstallKeyFormatRegistry.list_programs()
     }
     return service
 
@@ -214,6 +210,21 @@ def test_checkout_key_failure_leaves_purchase_retrying_and_unfulfilled(durable_s
     service.credit_units.assert_called_once()
     purchase = durable_store.select("billing_purchases", limit=1, filters={"checkout_session_id": "cs_123"})[0]
     assert purchase["units_credited"] is True
+    assert purchase["install_keys_provisioned"] is False
+    assert purchase["fulfillment_status"] == "retrying"
+
+
+def test_checkout_partial_key_issuance_leaves_purchase_retrying(durable_store: InMemoryPersistenceStore) -> None:
+    stripe_webhooks.reset_processed_events()
+    service = _make_service()
+    issued = service._issue_paid_install_keys_for_checkout.return_value
+    service._issue_paid_install_keys_for_checkout.return_value = {program: record for program, record in issued.items() if program != "goose"}
+
+    with patch("app.api.stripe_webhooks.get_stripe_service", return_value=service), patch("app.api.stripe_webhooks._verify_stripe_signature"):
+        response = _post_event(_event_payload(event_type="checkout.session.completed", event_id="evt_partial_keys_1"))
+
+    assert response.status_code == 200
+    purchase = durable_store.select("billing_purchases", limit=1, filters={"checkout_session_id": "cs_123"})[0]
     assert purchase["install_keys_provisioned"] is False
     assert purchase["fulfillment_status"] == "retrying"
 

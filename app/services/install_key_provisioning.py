@@ -162,7 +162,13 @@ class InstallKeyProvisioningService:
 
     @staticmethod
     def _has_valid_paid_entitlement(record: InstallKeyRecord) -> bool:
-        return bool(getattr(record, "active", False)) and str(getattr(record, "payment_status", "")).strip().lower() == "paid" and str(getattr(record, "entitlements_status", "")).strip().lower() == "active" and bool(getattr(record, "issued_after_payment", False))
+        return (
+            getattr(record, "revoked_at", None) is None
+            and bool(getattr(record, "active", False))
+            and str(getattr(record, "payment_status", "")).strip().lower() == "paid"
+            and str(getattr(record, "entitlements_status", "")).strip().lower() == "active"
+            and bool(getattr(record, "issued_after_payment", False))
+        )
 
     def resolve_owner_key(
         self,

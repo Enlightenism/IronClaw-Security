@@ -386,6 +386,10 @@ const Dashboard = () => {
               credited > 0
             ) {
               fetchDashboard({ silent: true });
+              if (attempts + 1 < maxAttempts) {
+                scheduleRetry();
+                return;
+              }
               toast.dismiss("pay");
               setPaymentState("fulfillment_error");
               setPurchasingId(null);
@@ -820,7 +824,11 @@ const Dashboard = () => {
     const statuses = {};
     if (Array.isArray(data?.install_keys)) {
       for (const key of data.install_keys) {
-        if (typeof key?.program === "string" && key.program) {
+        if (
+          typeof key?.program === "string" &&
+          key.program &&
+          statuses[key.program] !== "active"
+        ) {
           statuses[key.program] = key.status;
         }
       }

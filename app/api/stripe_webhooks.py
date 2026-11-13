@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import BaseModel
 
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.persistencebootstrap import build_store
 from app.services.stripe_service import (
     StripeBillingInterval,
@@ -162,12 +163,15 @@ def _extract_org_id(event_data: dict[str, Any]) -> str | None:
 
 
 def _owner_key_for_org(org_id: str | None) -> str | None:
+    """Return the wallet owner key; billing owners (email or supabase_user_<sub>) pass through unchanged."""
     if org_id is None:
         return None
-    normalized = str(org_id).strip()
+    normalized = str(org_id).strip().lower()
     if not normalized:
         return None
-    return f"ic_org_{normalized.lower()}"
+    if "@" in normalized or normalized.startswith(("supabase_user_", "ic_org_")):
+        return normalized
+    return f"ic_org_{normalized}"
 
 
 def _safe_event_type(raw: Any) -> str | None:
@@ -360,6 +364,9 @@ def _issue_paid_install_key_orchestration(
         )
         install_key_issuance = {}
 
+    supported_programs = set(InstallKeyFormatRegistry.list_programs())
+    result["install_key_failed_programs"] = sorted(supported_programs - set(install_key_issuance))
+    result["install_key_complete"] = not result["install_key_failed_programs"]
     if install_key_issuance:
         result["install_key_issuance"] = install_key_issuance
         usage_service = get_usage_metering_service()
@@ -948,7 +955,7 @@ def _handle_checkout_session_completed(
         },
     )
 
-    keys_issued = bool(orchestration.get("install_key_issuance"))
+    keys_issued = bool(orchestration.get("install_key_complete"))
     if purchase is not None:
         if keys_issued:
             _update_checkout_purchase(

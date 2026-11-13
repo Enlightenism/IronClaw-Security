@@ -1172,10 +1172,7 @@ class StripeService:
             )
             return {}
 
-        candidate_owner_key = (metadata or {}).get("owner_key")
-        owner_key = str(candidate_owner_key).strip() if candidate_owner_key else self._resolve_owner_key_for_org(org_id)
-        if not owner_key:
-            raise StripeServiceError("A verified billing owner is required to provision install keys.")
+        owner_key = self._resolve_wallet_owner_key(org_id, (metadata or {}).get("owner_key") or None)
 
         class _CheckoutEntitlementGuard:
             def has_active_subscription(self, candidate_owner_key: str) -> bool:
@@ -1247,7 +1244,13 @@ class StripeService:
             }
 
         if failed_programs:
-            raise StripeServiceError(f"Install key issuance failed for programs: {', '.join(failed_programs)}.")
+            logger.error(
+                "stripe.checkout_install_keys_partial org=%s session=%s issued=%s failed=%s",
+                org_id,
+                session_id,
+                sorted(results),
+                failed_programs,
+            )
 
         return results
 
@@ -3259,6 +3262,16 @@ class StripeService:
                     last_error="install_key_provisioning_failed",
                 )
                 raise StripeInstallKeyProvisioningError("Install-key provisioning failed after units were credited.") from exc
+
+            missing_programs = sorted(set(InstallKeyFormatRegistry.list_programs()) - set(install_key_issuance))
+            if missing_programs:
+                self._mark_checkout_fulfillment(
+                    session_id,
+                    status="failed",
+                    units_credited=True,
+                    last_error="install_key_partial_issuance",
+                )
+                raise StripeInstallKeyProvisioningError(f"Install keys missing for programs: {', '.join(missing_programs)}.")
 
             if self._wallet_registry.is_payment_refunded(payment_intent):
                 revocation = self._revoke_checkout_entitlements_for_refund(
