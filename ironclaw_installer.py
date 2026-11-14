@@ -75,6 +75,9 @@ _GENERIC_INSTALL_KEY_PREFIXES: Final[tuple[str, ...]] = (
     "x-api-key",
 )
 _SUBPROCESS_TIMEOUT: Final[int] = 300
+# Claude Code only honours hook "onFailure": "block" from this version; older builds would fail open.
+_CLAUDE_CODE_MIN_VERSION: Final[tuple[int, int, int]] = (2, 1, 295)
+_VERSION_PATTERN: Final[re.Pattern[str]] = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
 class IronClawInstallerError(RuntimeError):
@@ -138,6 +141,7 @@ class BootstrapResult:
     program: str
     config_file: Path
     skill_name: str
+    warnings: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -641,6 +645,65 @@ def _runtime_skill_install_command(program: str) -> list[str]:
     ]
 
 
+def _check_claude_code_version() -> str | None:
+    # A missing Claude Code binary stops the install before redeeming, since there is nothing to protect.
+    # Any version is accepted; an old, unknown, or unreadable version returns a warning instead of blocking.
+    claude_path = shutil.which("claude")
+    if claude_path is None:
+        raise IronClawInstallerError(
+            "Required installer 'claude' was not found. Install Claude Code and run the same command again; the claim was not redeemed.",
+        )
+    required = ".".join(str(part) for part in _CLAUDE_CODE_MIN_VERSION)
+    try:
+        result = subprocess.run(
+            [claude_path, "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=_SUBPROCESS_TIMEOUT,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return f"Could not read the Claude Code version. The fail-closed hook needs Claude Code {required} or newer; on older builds a hook crash or timeout fails open."
+    match = _VERSION_PATTERN.search(result.stdout)
+    if match is None:
+        return f"Could not read the Claude Code version. The fail-closed hook needs Claude Code {required} or newer; on older builds a hook crash or timeout fails open."
+    if tuple(int(part) for part in match.groups()) < _CLAUDE_CODE_MIN_VERSION:
+        return f"Claude Code {'.'.join(match.groups())} is older than {required}. Update Claude Code so the fail-closed hook applies; until then a hook crash or timeout fails open."
+    return None
+
+
+def _preflight_claude_code_environment() -> None:
+    # Checked before redeeming so an unwritable settings folder or a broken package does not consume the single-use claim.
+    from ironclaw_sdk import runtime_hooks
+
+    claude_dir = Path.home() / ".claude"
+    probe = claude_dir / ".ironclaw-write-probe"
+    try:
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError as exc:
+        raise IronClawInstallerError(f"Cannot write to {claude_dir}. The claim was not redeemed.") from exc
+    if runtime_hooks.self_protection_reason("Write", {"file_path": str(claude_dir / "settings.json")}) is None:
+        raise IronClawInstallerError("The enforcement hook self-test failed. The claim was not redeemed.")
+
+
+def _install_claude_code_skill() -> Path:
+    # Claude Code loads skills from ~/.claude/skills, so the packaged SKILL.md is copied directly and gh is not needed.
+    skill_dir = Path.home() / ".claude" / "skills" / SECURITY_GUARDIAN_SKILL_NAME
+    if skill_dir.is_symlink():
+        raise IronClawInstallerError(f"Refusing to install the Claude Code skill through a symbolic link: {skill_dir}")
+    try:
+        _ensure_directory(skill_dir)
+        source = resources.files("ironclaw_sdk").joinpath("skills").joinpath(SECURITY_GUARDIAN_SKILL_NAME).joinpath("SKILL.md")
+        if not source.is_file():
+            raise FileNotFoundError("SKILL.md")
+        _write_text_file(skill_dir / "SKILL.md", source.read_text(encoding="utf-8"), overwrite=True)
+    except OSError as exc:
+        raise IronClawInstallerError(f"Could not install the Claude Code skill into {skill_dir}.") from exc
+    return skill_dir / "SKILL.md"
+
+
 def _stage_openclaw_plugin(config_dir: Path) -> Path:
     plugin_dir = config_dir / "openclaw-plugin"
     if plugin_dir.is_symlink():
@@ -792,7 +855,12 @@ def run_bootstrap(
     on_key_saved: Callable[[], None] | None = None,
 ) -> BootstrapResult:
     installer_program = _canonical_program_name(program)
-    if installer_program is not None and installer_program in _CANONICAL_RUNTIME_TARGETS:
+    version_warning: str | None = None
+    if installer_program == "claude_code":
+        # Checked before redeeming so a missing Claude Code does not consume the single-use claim.
+        version_warning = _check_claude_code_version()
+        _preflight_claude_code_environment()
+    elif installer_program is not None and installer_program in _CANONICAL_RUNTIME_TARGETS:
         # Checked before redeeming so a missing installer does not consume the single-use claim.
         preflight_command = _runtime_skill_install_command(installer_program)
         if shutil.which(preflight_command[0]) is None:
@@ -808,6 +876,18 @@ def run_bootstrap(
     )
     if on_key_saved is not None:
         on_key_saved()
+
+    if runtime_program == "claude_code":
+        try:
+            _install_claude_code_skill()
+        except IronClawInstallerError as exc:
+            raise IronClawInstallerError(f"{exc} The paid key was securely saved to {config_file}.") from exc
+        return BootstrapResult(
+            program=runtime_program,
+            config_file=config_file,
+            skill_name=SECURITY_GUARDIAN_SKILL_NAME,
+            warnings=((version_warning,) if version_warning else ()),
+        )
 
     command = _runtime_skill_install_command(runtime_program)
     try:
@@ -1319,6 +1399,28 @@ def _runtime_hook_plan(program: str, enable: bool) -> list[tuple[Path, dict[str,
     return None if plan is None else [plan]
 
 
+def _verify_claude_code_hook(target: Path) -> None:
+    from ironclaw_sdk import runtime_hooks
+
+    try:
+        written = runtime_hooks.load_hook_config(target)
+    except (OSError, ValueError) as exc:
+        raise IronClawInstallerError(f"{target} could not be read back after writing.") from exc
+    if runtime_hooks.HOOK_MARKER not in json.dumps(written):
+        raise IronClawInstallerError(f"{target} does not contain the enforcement hook after writing.")
+
+
+def _restore_runtime_hooks(snapshots: list[tuple[Path, bytes | None]]) -> None:
+    for target, original in snapshots:
+        try:
+            if original is None:
+                target.unlink(missing_ok=True)
+            else:
+                target.write_bytes(original)
+        except OSError:
+            print(f"[ironclaw-installer] could not restore {target}; restore it from your backup.", file=sys.stderr)
+
+
 def _report_runtime_hook(program: str, enable: bool, plan: list[tuple[Path, dict[str, Any]]] | None) -> int:
     from ironclaw_sdk import runtime_hooks
 
@@ -1336,13 +1438,19 @@ def _report_runtime_hook(program: str, enable: bool, plan: list[tuple[Path, dict
         print(f"[ironclaw-installer] enforcement hook not written. Re-run without --no-enable-runtime-hooks, or add this to {target}:")
         print(json.dumps(runtime_hooks.merge_hook_config(program, {}), indent=2))
         return 0
+    snapshots: list[tuple[Path, bytes | None]] = []
     try:
         if program == "hermes":
             plugin_dir = _install_hermes_plugin()
             print(f"[ironclaw-installer] enforcement hook written: {plugin_dir}")
             return 0
+        snapshots = [(target, target.read_bytes() if target.is_file() else None) for target, _ in plan]
         written_paths = [runtime_hooks.write_runtime_hook(target, merged) for target, merged in plan]
+        if program == "claude_code":
+            _verify_claude_code_hook(plan[0][0])
     except (OSError, IronClawInstallerError) as exc:
+        # Restores the previous settings so a partial or unreadable write cannot leave Claude Code with a broken hook.
+        _restore_runtime_hooks(snapshots)
         print(f"[ironclaw-installer] install key saved, but the enforcement hook could not be written: {exc}", file=sys.stderr)
         return 1
     for written in written_paths:
@@ -1382,6 +1490,10 @@ def _bootstrap_main(argv: list[str]) -> int:
     print("[ironclaw-installer] shared skill installed")
     print(f"[ironclaw-installer] program: {result.program}")
     print(f"[ironclaw-installer] config: {result.config_file}")
+    for warning in result.warnings:
+        print(f"[ironclaw-installer] warning: {warning}", file=sys.stderr)
+    if result.program == "claude_code":
+        print("[ironclaw-installer] restart Claude Code if it was already open so it loads the skill")
     return hook_exit_code
 
 

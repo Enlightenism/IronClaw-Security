@@ -240,9 +240,8 @@ def test_install_key_registry_exposes_canonical_command_metadata_and_supported_p
     spec = InstallKeyFormatRegistry.get_spec("claude_code")
 
     assert spec.canonical_slug == "claude-code"
-    assert spec.agent_cli_id == "claude-code"
-    assert "--program {program} --claim-token {claim_token}" in spec.command_template
-    assert spec.generic_command == "gh skill install Enlightenism/IronClaw-Security skills/ironclaw-security --agent claude-code --scope user"
+    assert spec.agent_cli_id is None
+    assert spec.generic_command == ""
     assert spec.format_command("ic_claim_0123456789abcdefghij") == ("python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ic_claim_0123456789abcdefghij")
     assert InstallKeyFormatRegistry.supported_platforms() == (
         "openclaw",

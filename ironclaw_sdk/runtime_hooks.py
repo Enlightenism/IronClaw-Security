@@ -211,11 +211,47 @@ def _decision_block_reason(decision: Any) -> str:
     return "IronClaw did not authorize this action. The action was blocked."
 
 
+SELF_PROTECTION_REASON = "IronClaw protects its own hook configuration and package files; this change was blocked."
+# Lowercase substrings of normalized paths. Matching is deliberately broad: a speed bump, not a sandbox.
+_PROTECTED_PATH_TOKENS = (".claude/settings", "ironclaw_sdk/", "ironclaw_installer.py")
+_PROTECTED_WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
+_SHELL_WRITE_PATTERN = re.compile(
+    r">|\btee\b|\bsed\b[^|;&]*-i|\b(?:rm|mv|cp|truncate|chmod|unlink|ln|dd)\b" r"|\b(?:set|add|out|remove|move|copy|clear)-(?:content|item)\b|\bwrite|\bopen\s*\(",
+    re.IGNORECASE,
+)
+
+
+def _touches_protected(text: str) -> bool:
+    normalized = text.replace("\\", "/").lower()
+    return any(token in normalized for token in _PROTECTED_PATH_TOKENS)
+
+
+def self_protection_reason(tool_name: str, params: Any) -> str | None:
+    """Return a block reason when a Claude Code call would change IronClaw's hook settings or package files."""
+    if not isinstance(params, dict):
+        return None
+    if tool_name in _PROTECTED_WRITE_TOOLS:
+        for key in ("file_path", "notebook_path", "path"):
+            target = params.get(key)
+            if isinstance(target, str) and _touches_protected(os.path.abspath(os.path.expanduser(target))):
+                return SELF_PROTECTION_REASON
+        return None
+    if tool_name == "Bash":
+        command = params.get("command")
+        if isinstance(command, str) and _SHELL_WRITE_PATTERN.search(command) and _touches_protected(command):
+            return SELF_PROTECTION_REASON
+    return None
+
+
 def authorize(raw_event: str, program: str, config_file: Path | None) -> str | None:
     """Return None to allow the tool call, or a block reason to deny it."""
     try:
         path = config_file or Path.home().joinpath(*DEFAULT_CONFIG_PARTS)
         _, tool_name, params, _ = _parse_tool_event(raw_event)
+        if program == "claude_code":
+            protection_reason = self_protection_reason(tool_name, params)
+            if protection_reason is not None:
+                return protection_reason
         command = install_command_text(tool_name, params)
         if command is not None:
             install_reason = authorize_install(command, program, config_file)
@@ -352,10 +388,16 @@ def runtime_hook_config_path(program: str, home: Path | None = None) -> Path:
     raise ValueError(f"Unsupported runtime hook program: {program}")
 
 
+def _hook_args(program: str, phase: str) -> list[str]:
+    args = ["-m", HOOK_MARKER, "--program", program]
+    return args if phase == "pre" else [*args, "--phase", phase]
+
+
 def _hook_entry(program: str, phase: str = "pre") -> dict[str, Any]:
     command = hook_command(program, phase)
     if program == "claude_code":
-        entry: dict[str, Any] = {"type": "command", "command": command}
+        # Exec form runs the interpreter that pip installed into, with an args list, so no shell parses the path.
+        entry: dict[str, Any] = {"type": "command", "command": sys.executable, "args": _hook_args(program, phase)}
         # onFailure requires Claude Code v2.1.295 or later; older versions ignore it.
         if phase in ("pre", "post"):
             entry["onFailure"] = "block"
@@ -580,7 +622,8 @@ def _emit_return(program: str, replacement: str | None) -> int:
         return 0
     output: dict[str, Any]
     if program == "claude_code":
-        output = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": replacement, "additionalContext": RETURN_CONTEXT}}
+        # PostToolUse output replacement must match each built-in tool's output shape, so the replacement is delivered as a block reason instead.
+        output = {"decision": "block", "reason": replacement, "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": RETURN_CONTEXT}}
     elif program == "copilot":
         output = {"modifiedResult": {"resultType": "success", "textResultForLlm": replacement}}
     elif program == "gemini_cli":

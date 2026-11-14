@@ -36,7 +36,6 @@ def _post_gate_raising(error: Exception) -> Any:
 @pytest.mark.parametrize(
     ("program", "event"),
     [
-        ("claude_code", "PostToolUse"),
         ("gemini_cli", "AfterTool"),
         ("cursor", "postToolUse"),
         ("copilot", "postToolUse"),
@@ -48,6 +47,17 @@ def test_merge_hook_config_registers_post_event_with_phase_post(program: str, ev
     assert POST_HOOK_EVENTS[program] == event
     assert len(config["hooks"][event]) == 1
     assert "--phase post" in json.dumps(config["hooks"][event][0])
+
+
+def test_claude_hooks_use_exec_form_with_interpreter_and_phase() -> None:
+    config = runtime_hooks.merge_hook_config("claude_code", {})
+
+    pre_entry = config["hooks"]["PreToolUse"][0]["hooks"][0]
+    post_entry = config["hooks"]["PostToolUse"][0]["hooks"][0]
+    assert pre_entry["command"] == sys.executable
+    assert pre_entry["args"] == ["-m", runtime_hooks.HOOK_MARKER, "--program", "claude_code"]
+    assert post_entry["command"] == sys.executable
+    assert post_entry["args"][-2:] == ["--phase", "post"]
 
 
 def test_merge_hook_config_keeps_pre_and_post_entries_idempotent() -> None:
@@ -96,17 +106,47 @@ def test_supported_programs_include_goose_and_hermes() -> None:
     assert {"goose", "hermes"} <= runtime_hooks.SUPPORTED_PROGRAMS
 
 
-def test_emit_return_claude_code_replaces_updated_tool_output(capsys: pytest.CaptureFixture[str]) -> None:
+def test_emit_return_claude_code_blocks_with_replacement_reason(capsys: pytest.CaptureFixture[str]) -> None:
     assert runtime_hooks._emit_return("claude_code", "safe text") == 0
 
     output = json.loads(capsys.readouterr().out)
     assert output == {
+        "decision": "block",
+        "reason": "safe text",
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
-            "updatedToolOutput": "safe text",
             "additionalContext": RETURN_CONTEXT,
         },
     }
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "tool_input", "blocked"),
+    [
+        ("Edit", {"file_path": "~/.claude/settings.json", "old_string": "a", "new_string": "b"}, True),
+        ("Write", {"file_path": "C:\\Users\\me\\.claude\\settings.local.json", "content": "{}"}, True),
+        ("Edit", {"file_path": "ironclaw_sdk/runtime_hooks.py"}, True),
+        ("Bash", {"command": "echo '{}' > ~/.claude/settings.json"}, True),
+        ("Bash", {"command": "sed -i 's/x/y/' ironclaw_sdk/runtime_hooks.py"}, True),
+        ("Bash", {"command": "cat ~/.claude/settings.json"}, False),
+        ("Edit", {"file_path": "src/app.py"}, False),
+        ("Bash", {"command": "python -m pytest tests/sdk"}, False),
+    ],
+)
+def test_self_protection_denies_hook_config_and_package_writes(tool_name: str, tool_input: dict[str, str], blocked: bool) -> None:
+    reason = runtime_hooks.self_protection_reason(tool_name, tool_input)
+
+    assert (reason == runtime_hooks.SELF_PROTECTION_REASON) is blocked
+
+
+def test_authorize_blocks_claude_settings_edit_before_any_gate_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_if_called(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("the enforcement gate must not be called for a self-protection block")
+
+    monkeypatch.setattr(runtime_hooks, "request_decision", fail_if_called)
+    raw_event = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": "~/.claude/settings.json"}})
+
+    assert runtime_hooks.authorize(raw_event, "claude_code", None) == runtime_hooks.SELF_PROTECTION_REASON
 
 
 def test_emit_return_copilot_uses_modified_result(capsys: pytest.CaptureFixture[str]) -> None:

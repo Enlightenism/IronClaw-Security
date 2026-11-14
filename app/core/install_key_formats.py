@@ -208,7 +208,6 @@ class InstallKeyFormatRegistry:
                 "claude code cli",
                 "anthropic",
             ),
-            agent_cli_id="claude-code",
         ),
         "cursor": InstallKeyFormatSpec(
             family="cursor",

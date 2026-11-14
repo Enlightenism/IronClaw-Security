@@ -473,14 +473,16 @@ def test_run_bootstrap_redeems_once_persists_privately_and_installs_the_shared_s
             ).encode("utf-8"),
         )
 
-    def fake_subprocess_run(command: list[str], **kwargs: Any) -> None:
+    def fake_subprocess_run(command: list[str], **kwargs: Any) -> install_module.subprocess.CompletedProcess[str]:
         commands.append(command)
-        assert kwargs == {"check": True, "timeout": install_module._SUBPROCESS_TIMEOUT}
+        assert kwargs == {"check": True, "capture_output": True, "text": True, "timeout": install_module._SUBPROCESS_TIMEOUT}
+        return install_module.subprocess.CompletedProcess(command, 0, stdout="2.1.295 (Claude Code)\n", stderr="")
 
     monkeypatch.setattr(install_module, "_open_install_claim_request", fake_open_claim_request)
     monkeypatch.setattr(install_module, "_restrict_private_file_permissions", protected_paths.append)
     monkeypatch.setattr(install_module.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(install_module.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
 
     config_dir = tmp_path / "user-config"
     result = install_module.run_bootstrap(
@@ -493,19 +495,10 @@ def test_run_bootstrap_redeems_once_persists_privately_and_installs_the_shared_s
     assert request.get_method() == "POST"
     assert request.full_url == ("https://ironclaw-security.onrender.com/integrations/install-claims/redeem")
     assert json.loads(request.data) == {"claim_token": claim_token}
-    assert commands == [
-        [
-            "gh",
-            "skill",
-            "install",
-            "Enlightenism/IronClaw-Security",
-            "skills/ironclaw-security",
-            "--agent",
-            "claude-code",
-            "--scope",
-            "user",
-        ],
-    ]
+    assert commands == [["/usr/bin/claude", "--version"]]
+    installed_skill = tmp_path / "home" / ".claude" / "skills" / "ironclaw-security" / "SKILL.md"
+    bundled_skill = Path(__file__).resolve().parents[1] / "ironclaw_sdk" / "skills" / "ironclaw-security" / "SKILL.md"
+    assert installed_skill.read_text(encoding="utf-8") == bundled_skill.read_text(encoding="utf-8")
     assert protected_paths == [config_dir / install_module.DEFAULT_CONFIG_FILENAME]
 
     saved_config = json.loads(result.config_file.read_text(encoding="utf-8"))
@@ -724,7 +717,7 @@ def test_run_bootstrap_missing_installer_does_not_redeem_claim(
     monkeypatch.setattr(install_module.shutil, "which", lambda name: None)
     monkeypatch.setattr(install_module, "_open_install_claim_request", lambda request, *, timeout: requests.append(request))
 
-    with pytest.raises(install_module.IronClawInstallerError, match="'gh' was not found"):
+    with pytest.raises(install_module.IronClawInstallerError, match="'claude' was not found"):
         install_module.run_bootstrap(
             program="claude_code",
             claim_token="ic_claim_0123456789abcdefghij",
@@ -735,7 +728,7 @@ def test_run_bootstrap_missing_installer_does_not_redeem_claim(
     assert not (tmp_path / "user-config" / install_module.DEFAULT_CONFIG_FILENAME).exists()
 
 
-def test_run_bootstrap_runs_on_key_saved_before_skill_install_failure(
+def test_run_bootstrap_keeps_key_saved_when_claude_code_skill_copy_fails(
     install_module: Any,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -748,17 +741,18 @@ def test_run_bootstrap_runs_on_key_saved_before_skill_install_failure(
             json.dumps({"key_id": "ik_claude_bootstrap_002", "program": "claude_code", "install_key": install_key}).encode("utf-8"),
         )
 
-    def fake_subprocess_run(command: list[str], **kwargs: Any) -> None:
-        events.append("skill_install")
-        raise install_module.subprocess.CalledProcessError(1, command)
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".claude").write_text("not a directory", encoding="utf-8")
 
-    monkeypatch.setattr(install_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(install_module, "_check_claude_code_version", lambda: events.append("version_check"))
+    monkeypatch.setattr(install_module, "_preflight_claude_code_environment", lambda: None)
     monkeypatch.setattr(install_module, "_open_install_claim_request", fake_open_claim_request)
     monkeypatch.setattr(install_module, "_restrict_private_file_permissions", lambda _: None)
-    monkeypatch.setattr(install_module.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(Path, "home", lambda: home)
 
     config_dir = tmp_path / "user-config"
-    with pytest.raises(install_module.IronClawInstallerError, match="Shared skill installation failed"):
+    with pytest.raises(install_module.IronClawInstallerError, match="Could not install the Claude Code skill.*The paid key was securely saved"):
         install_module.run_bootstrap(
             program="claude_code",
             claim_token="ic_claim_0123456789abcdefghij",
@@ -766,9 +760,113 @@ def test_run_bootstrap_runs_on_key_saved_before_skill_install_failure(
             on_key_saved=lambda: events.append("key_saved"),
         )
 
-    assert events == ["key_saved", "skill_install"]
+    assert events == ["version_check", "key_saved"]
     saved_config = json.loads((config_dir / install_module.DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
     assert saved_config["install_keys"] == {"claude_code": install_key}
+
+
+def test_run_bootstrap_does_not_redeem_when_claude_code_preflight_fails(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[Any] = []
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".claude").write_text("not a directory", encoding="utf-8")
+
+    monkeypatch.setattr(install_module, "_check_claude_code_version", lambda: None)
+    monkeypatch.setattr(install_module, "_open_install_claim_request", lambda request, *, timeout: requests.append(request))
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    with pytest.raises(install_module.IronClawInstallerError, match="The claim was not redeemed"):
+        install_module.run_bootstrap(
+            program="claude_code",
+            claim_token="ic_claim_0123456789abcdefghij",
+            config_dir=tmp_path / "user-config",
+        )
+
+    assert requests == []
+
+
+def test_report_runtime_hook_restores_claude_code_settings_when_write_fails(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ironclaw_sdk import runtime_hooks
+
+    target = tmp_path / ".claude" / "settings.json"
+    target.parent.mkdir()
+    original = '{"keep": true}'
+    target.write_text(original, encoding="utf-8")
+
+    def corrupt_then_fail(path: Path, config: dict[str, Any]) -> Path:
+        path.write_text("{corrupt", encoding="utf-8")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(runtime_hooks, "write_runtime_hook", corrupt_then_fail)
+
+    plan = [(target, runtime_hooks.merge_hook_config("claude_code", {"keep": True}))]
+
+    assert install_module._report_runtime_hook("claude_code", True, plan) == 1
+    assert target.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize(
+    ("version_output", "message"),
+    [
+        ("2.1.294 (Claude Code)\n", "Claude Code 2.1.294 is older than 2.1.295"),
+        ("unknown\n", "Could not read the Claude Code version"),
+    ],
+)
+def test_run_bootstrap_warns_but_installs_on_unsupported_claude_code(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version_output: str,
+    message: str,
+) -> None:
+    install_key = "ik_claude_version_warning_001"
+    requests: list[Any] = []
+
+    def fake_open_claim_request(request: Any, *, timeout: float) -> io.BytesIO:
+        requests.append(request)
+        return io.BytesIO(
+            json.dumps({"key_id": "ik_claude_version_001", "program": "claude_code", "install_key": install_key}).encode("utf-8"),
+        )
+
+    monkeypatch.setattr(install_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        install_module.subprocess,
+        "run",
+        lambda command, **kwargs: install_module.subprocess.CompletedProcess(command, 0, stdout=version_output, stderr=""),
+    )
+    monkeypatch.setattr(install_module, "_open_install_claim_request", fake_open_claim_request)
+    monkeypatch.setattr(install_module, "_restrict_private_file_permissions", lambda _: None)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+
+    config_dir = tmp_path / "user-config"
+    result = install_module.run_bootstrap(
+        program="claude_code",
+        claim_token="ic_claim_0123456789abcdefghij",
+        config_dir=config_dir,
+    )
+
+    assert len(requests) == 1
+    assert len(result.warnings) == 1
+    assert message in result.warnings[0]
+    assert (tmp_path / "home" / ".claude" / "skills" / "ironclaw-security" / "SKILL.md").is_file()
+    saved_config = json.loads((config_dir / install_module.DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
+    assert saved_config["install_keys"] == {"claude_code": install_key}
+
+
+def test_bundled_claude_code_skill_matches_canonical_skill() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    canonical = (repo_root / "skills" / "ironclaw-security" / "SKILL.md").read_text(encoding="utf-8")
+    bundled = (repo_root / "ironclaw_sdk" / "skills" / "ironclaw-security" / "SKILL.md").read_text(encoding="utf-8")
+    assert " ".join(bundled.split()) == " ".join(canonical.split())
 
 
 def test_report_runtime_hook_goose_writes_pre_tool_block_plugin(
