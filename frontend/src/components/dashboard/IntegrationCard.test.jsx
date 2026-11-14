@@ -17,14 +17,12 @@ jest.mock("sonner", () => ({
 
 const INSTALLER_SOURCE_COMMAND =
   "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git";
-const CLAUDE_CODE_GENERIC_COMMAND =
-  "gh skill install Enlightenism/IronClaw-Security skills/ironclaw-security --agent claude-code --scope user";
 
 const makeClaim = (overrides = {}) => ({
   integration_id: "claude-code",
   program: "claude_code",
   claim_token: CLAIM_TOKEN,
-  command: `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer redeem --program claude_code --claim-token ${CLAIM_TOKEN}\n${CLAUDE_CODE_GENERIC_COMMAND}`,
+  command: `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ${CLAIM_TOKEN}`,
   ...overrides,
 });
 
@@ -34,7 +32,6 @@ const renderCard = (props = {}) =>
       title="Claude Code"
       program="claude_code"
       integrationId="claude-code"
-      agentId="claude-code"
       available
       onCreateClaim={jest.fn()}
       testid="claude-code-card"
@@ -119,17 +116,17 @@ describe("IntegrationCard", () => {
     );
   });
 
-  it("rejects the legacy pip bootstrap template and --key install commands", async () => {
+  it("rejects the retired redeem template and --key install commands", async () => {
     const user = userEvent.setup();
-    const legacyClaim = makeClaim({
-      command: `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ${CLAIM_TOKEN}`,
+    const retiredClaim = makeClaim({
+      command: `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer redeem --program claude_code --claim-token ${CLAIM_TOKEN}\ngh skill install Enlightenism/IronClaw-Security skills/ironclaw-security --agent claude-code --scope user`,
     });
     const keyClaim = makeClaim({
       command: `gh skill install Enlightenism/IronClaw-Security skills/ironclaw-security --agent claude-code --scope user --key ${CLAIM_TOKEN}`,
     });
     const onCreateClaim = jest
       .fn()
-      .mockResolvedValueOnce(legacyClaim)
+      .mockResolvedValueOnce(retiredClaim)
       .mockResolvedValueOnce(keyClaim);
 
     renderCard({ onCreateClaim });
@@ -138,7 +135,7 @@ describe("IntegrationCard", () => {
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledTimes(1);
     });
-    expect(screen.queryByText(legacyClaim.command)).not.toBeInTheDocument();
+    expect(screen.queryByText(retiredClaim.command)).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId("claude-code-card-generate"));
     await waitFor(() => {
@@ -148,10 +145,10 @@ describe("IntegrationCard", () => {
     expect(screen.getByTestId("claude-code-card-copy")).toBeDisabled();
   });
 
-  it("accepts the Hermes command contract without an agent id", async () => {
+  it("accepts the Hermes bootstrap command contract", async () => {
     const user = userEvent.setup();
     const hermesToken = `ic_claim_${"B".repeat(43)}`;
-    const hermesCommand = `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer redeem --program hermes --claim-token ${hermesToken}\nhermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security`;
+    const hermesCommand = `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer bootstrap --program hermes --claim-token ${hermesToken}`;
     const onCreateClaim = jest.fn().mockResolvedValue(
       makeClaim({
         integration_id: "hermes",
@@ -165,7 +162,6 @@ describe("IntegrationCard", () => {
       title: "Hermes",
       program: "hermes",
       integrationId: "hermes",
-      agentId: null,
       testid: "hermes-card",
       onCreateClaim,
     });

@@ -14,7 +14,7 @@ SECURITY_GUARDIAN_SKILL_FILE_PATH: Final[str] = f"{SECURITY_GUARDIAN_SKILL_REPOS
 SECURITY_GUARDIAN_SKILL_ROUTE: Final[str] = f"/{SECURITY_GUARDIAN_SKILL_FILE_PATH}"
 SECURITY_GUARDIAN_SKILL_URL: Final[str] = f"{IRONCLAW_PUBLIC_BASE_URL}{SECURITY_GUARDIAN_SKILL_ROUTE}"
 
-_INSTALL_CLAIM_PREFIX_TEMPLATE: Final[str] = f"python -m pip install --no-deps --upgrade {IRONCLAW_INSTALLER_SOURCE_URL}\npython -m ironclaw_installer redeem --program {{program}} --claim-token {{claim_token}}"
+_INSTALL_CLAIM_PREFIX_TEMPLATE: Final[str] = f"python -m pip install --no-deps --upgrade {IRONCLAW_INSTALLER_SOURCE_URL}\npython -m ironclaw_installer bootstrap --program {{program}} --claim-token {{claim_token}}"
 
 
 def _generic_install_command(agent_cli_id: str | None, program: str) -> str:
@@ -111,10 +111,7 @@ class InstallKeyFormatSpec:
             object.__setattr__(self, "command_template", self._default_command_template())
 
     def _default_command_template(self) -> str:
-        generic = self.generic_command
-        if not generic:
-            return _INSTALL_CLAIM_PREFIX_TEMPLATE
-        return f"{_INSTALL_CLAIM_PREFIX_TEMPLATE}\n{generic}"
+        return _INSTALL_CLAIM_PREFIX_TEMPLATE
 
     def format_command(self, install_key: str | None) -> str:
         normalized_key = str(install_key).strip() if install_key is not None else ""

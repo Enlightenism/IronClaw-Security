@@ -19,10 +19,6 @@ const RUNTIME_PROGRAM_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const COMMAND_MAX_LENGTH = 1024;
 const INSTALLER_SOURCE_COMMAND =
   "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git";
-const SKILL_REPOSITORY = "Enlightenism/IronClaw-Security";
-const SKILL_REPOSITORY_PATH = "skills/ironclaw-security";
-const HERMES_SKILL_URL =
-  "https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md";
 const PLACEHOLDER_TEXT = "Generate a one-time install command after purchase";
 const hashSeed = (text) => {
   let hash = 2166136261;
@@ -175,17 +171,7 @@ const impactStyle = (revealed) => ({
   transition: "opacity 0.6s ease-out 0.05s",
 });
 
-const buildGenericInstallCommand = (program, agentId) => {
-  if (program === "hermes") {
-    return `hermes skills install ${HERMES_SKILL_URL} --name ironclaw-security`;
-  }
-  if (typeof agentId !== "string" || !agentId) {
-    return null;
-  }
-  return `gh skill install ${SKILL_REPOSITORY} ${SKILL_REPOSITORY_PATH} --agent ${agentId} --scope user`;
-};
-
-const validateInstallClaim = (claim, program, integrationId, agentId) => {
+const validateInstallClaim = (claim, program, integrationId) => {
   if (
     !claim ||
     claim.program !== program ||
@@ -200,12 +186,7 @@ const validateInstallClaim = (claim, program, integrationId, agentId) => {
     return null;
   }
 
-  const genericCommand = buildGenericInstallCommand(program, agentId);
-  if (!genericCommand) {
-    return null;
-  }
-
-  const expectedCommand = `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer redeem --program ${program} --claim-token ${claim.claim_token}\n${genericCommand}`;
+  const expectedCommand = `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer bootstrap --program ${program} --claim-token ${claim.claim_token}`;
   if (claim.command !== expectedCommand) {
     return null;
   }
@@ -227,7 +208,6 @@ const IntegrationCard = ({
   title,
   program,
   integrationId,
-  agentId,
   available = false,
   revoked = false,
   revokedReason = "",
@@ -327,9 +307,8 @@ const IntegrationCard = ({
       },
       program,
       integrationId,
-      agentId,
     );
-  }, [savedCommand, program, integrationId, agentId]);
+  }, [savedCommand, program, integrationId]);
 
   useEffect(() => {
     if (!isAvailable || !restoredClaim) {
@@ -418,12 +397,7 @@ const IntegrationCard = ({
     setGenerating(true);
     try {
       const claim = await onCreateClaim(integrationId);
-      const validatedClaim = validateInstallClaim(
-        claim,
-        program,
-        integrationId,
-        agentId,
-      );
+      const validatedClaim = validateInstallClaim(claim, program, integrationId);
       if (!validatedClaim) {
         throw new Error("The install claim response is invalid.");
       }

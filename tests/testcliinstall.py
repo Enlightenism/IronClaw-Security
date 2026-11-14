@@ -197,13 +197,11 @@ def test_install_claims_use_canonical_runtime_names_and_commands(
     commands = install_module.build_install_claim_commands(config.install_claims)
     assert commands["claude_code"] == (
         "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\n"
-        "python -m ironclaw_installer redeem --program claude_code --claim-token ic_claim_0123456789abcdefghij\n"
-        "gh skill install Enlightenism/IronClaw-Security skills/ironclaw-security --agent claude-code --scope user"
+        "python -m ironclaw_installer bootstrap --program claude_code --claim-token ic_claim_0123456789abcdefghij"
     )
     assert commands["hermes"] == (
         "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\n"
-        "python -m ironclaw_installer redeem --program hermes --claim-token ic_claim_ABCDEFGHIJ0123456789\n"
-        "hermes skills install https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md --name ironclaw-security"
+        "python -m ironclaw_installer bootstrap --program hermes --claim-token ic_claim_ABCDEFGHIJ0123456789"
     )
     assert set(config.to_dict()["install_claims"].values()) == {"[REDACTED]"}
 
@@ -487,6 +485,7 @@ def test_run_bootstrap_redeems_once_persists_privately_and_installs_the_shared_s
 
     monkeypatch.setattr(install_module, "_open_install_claim_request", fake_open_claim_request)
     monkeypatch.setattr(install_module, "_restrict_private_file_permissions", protected_paths.append)
+    monkeypatch.setattr(install_module.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(install_module.subprocess, "run", fake_subprocess_run)
 
     config_dir = tmp_path / "user-config"
@@ -556,6 +555,7 @@ def test_run_bootstrap_installs_fail_closed_openclaw_plugin(
 
     monkeypatch.setattr(install_module, "_open_install_claim_request", fake_open_claim_request)
     monkeypatch.setattr(install_module, "_restrict_private_file_permissions", lambda _: None)
+    monkeypatch.setattr(install_module.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(install_module.subprocess, "run", fake_subprocess_run)
 
     config_dir = tmp_path / "user-config"
@@ -719,6 +719,62 @@ def test_main_returns_one_when_project_root_is_invalid(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "failed" in captured.err.lower()
+
+
+def test_run_bootstrap_missing_installer_does_not_redeem_claim(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[Any] = []
+    monkeypatch.setattr(install_module.shutil, "which", lambda name: None)
+    monkeypatch.setattr(install_module, "_open_install_claim_request", lambda request, *, timeout: requests.append(request))
+
+    with pytest.raises(install_module.IronClawInstallerError, match="'gh' was not found"):
+        install_module.run_bootstrap(
+            program="claude_code",
+            claim_token="ic_claim_0123456789abcdefghij",
+            config_dir=tmp_path / "user-config",
+        )
+
+    assert requests == []
+    assert not (tmp_path / "user-config" / install_module.DEFAULT_CONFIG_FILENAME).exists()
+
+
+def test_run_bootstrap_runs_on_key_saved_before_skill_install_failure(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_key = "ic_install_claude_code_abc123"
+    events: list[str] = []
+
+    def fake_open_claim_request(request: Any, *, timeout: float) -> io.BytesIO:
+        return io.BytesIO(
+            json.dumps({"key_id": "ik_claude_bootstrap_002", "program": "claude_code", "install_key": install_key}).encode("utf-8"),
+        )
+
+    def fake_subprocess_run(command: list[str], **kwargs: Any) -> None:
+        events.append("skill_install")
+        raise install_module.subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(install_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(install_module, "_open_install_claim_request", fake_open_claim_request)
+    monkeypatch.setattr(install_module, "_restrict_private_file_permissions", lambda _: None)
+    monkeypatch.setattr(install_module.subprocess, "run", fake_subprocess_run)
+
+    config_dir = tmp_path / "user-config"
+    with pytest.raises(install_module.IronClawInstallerError, match="Shared skill installation failed"):
+        install_module.run_bootstrap(
+            program="claude_code",
+            claim_token="ic_claim_0123456789abcdefghij",
+            config_dir=config_dir,
+            on_key_saved=lambda: events.append("key_saved"),
+        )
+
+    assert events == ["key_saved", "skill_install"]
+    saved_config = json.loads((config_dir / install_module.DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
+    assert saved_config["install_keys"] == {"claude_code": install_key}
 
 
 def test_report_runtime_hook_goose_writes_pre_tool_block_plugin(

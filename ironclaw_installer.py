@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import csv
 from dataclasses import asdict, dataclass, field
 from importlib import resources
@@ -9,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 from typing import Any, Final
@@ -787,13 +789,25 @@ def run_bootstrap(
     claim_token: str,
     config_dir: Path | None = None,
     base_url: str = DEFAULT_BOOTSTRAP_BASE_URL,
+    on_key_saved: Callable[[], None] | None = None,
 ) -> BootstrapResult:
+    installer_program = _canonical_program_name(program)
+    if installer_program is not None and installer_program in _CANONICAL_RUNTIME_TARGETS:
+        # Checked before redeeming so a missing installer does not consume the single-use claim.
+        preflight_command = _runtime_skill_install_command(installer_program)
+        if shutil.which(preflight_command[0]) is None:
+            raise IronClawInstallerError(
+                f"Required installer '{preflight_command[0]}' was not found. Install it and run the same command again; the claim was not redeemed.",
+            )
+
     runtime_program, target_config_dir, config_file = _redeem_claim_into_config(
         program=program,
         claim_token=claim_token,
         config_dir=config_dir,
         base_url=base_url,
     )
+    if on_key_saved is not None:
+        on_key_saved()
 
     command = _runtime_skill_install_command(runtime_program)
     try:
@@ -1345,12 +1359,21 @@ def _bootstrap_main(argv: list[str]) -> int:
     except (OSError, ValueError) as exc:
         print(f"[ironclaw-installer] failed: existing runtime hook configuration is invalid; no claim was redeemed: {exc}", file=sys.stderr)
         return 1
+
+    hook_exit_code = 0
+
+    def write_hook_after_key_saved() -> None:
+        # Runs before the skill install so enforcement is not skipped when that install fails.
+        nonlocal hook_exit_code
+        hook_exit_code = _report_runtime_hook(args.program, args.enable_runtime_hooks, hook_plan)
+
     try:
         result = run_bootstrap(
             program=args.program,
             claim_token=args.claim_token,
             config_dir=args.config_dir,
             base_url=args.base_url,
+            on_key_saved=write_hook_after_key_saved,
         )
     except IronClawInstallerError as exc:
         print(f"[ironclaw-installer] failed: {exc}", file=sys.stderr)
@@ -1359,7 +1382,7 @@ def _bootstrap_main(argv: list[str]) -> int:
     print("[ironclaw-installer] shared skill installed")
     print(f"[ironclaw-installer] program: {result.program}")
     print(f"[ironclaw-installer] config: {result.config_file}")
-    return _report_runtime_hook(args.program, args.enable_runtime_hooks, hook_plan)
+    return hook_exit_code
 
 
 def _redeem_main(argv: list[str]) -> int:

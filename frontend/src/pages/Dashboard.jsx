@@ -1058,7 +1058,6 @@ const Dashboard = () => {
                   title={card.title}
                   program={card.program}
                   integrationId={card.integrationId}
-                  agentId={card.agentId}
                   available={card.available}
                   revoked={card.revoked}
                   revokedReason={card.revokedReason}
