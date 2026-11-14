@@ -237,16 +237,13 @@ async def usage_reports(request: Request) -> HTMLResponse:
     sb_blocks = sb_usage.get("total_blocks", 0)
     sb_warnings = sb_usage.get("total_warnings", 0)
     sb_tokens = sb_usage.get("total_tokens_covered", 0)
-    pkg_rows = "".join(
-        f"""<tr>
+    pkg_rows = "".join(f"""<tr>
             <td>{_get_package_metadata(pid).get("name", pid)}</td>
             <td>{_get_package_metadata(pid).get("display_label", "")}</td>
             <td>{_get_package_metadata(pid).get("included_units", 0):,}</td>
             <td>${_get_package_metadata(pid).get("price_usd", 0):.2f}</td>
             <td>{_TOKENS_PER_UNIT:,}</td>
-        </tr>"""
-        for pid in _ORDERED_PACKAGE_IDS
-    )
+        </tr>""" for pid in _ORDERED_PACKAGE_IDS)
 
     html = _render_html(
         "Usage Reports",
