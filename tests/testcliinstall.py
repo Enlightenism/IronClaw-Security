@@ -195,14 +195,8 @@ def test_install_claims_use_canonical_runtime_names_and_commands(
     }
     assert config.provider_targets == install_module.DEFAULT_PROVIDER_TARGETS
     commands = install_module.build_install_claim_commands(config.install_claims)
-    assert commands["claude_code"] == (
-        "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\n"
-        "python -m ironclaw_installer bootstrap --program claude_code --claim-token ic_claim_0123456789abcdefghij"
-    )
-    assert commands["hermes"] == (
-        "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\n"
-        "python -m ironclaw_installer bootstrap --program hermes --claim-token ic_claim_ABCDEFGHIJ0123456789"
-    )
+    assert commands["claude_code"] == ("python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ic_claim_0123456789abcdefghij")
+    assert commands["hermes"] == ("python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\npython -m ironclaw_installer bootstrap --program hermes --claim-token ic_claim_ABCDEFGHIJ0123456789")
     assert set(config.to_dict()["install_claims"].values()) == {"[REDACTED]"}
 
     with pytest.raises(install_module.IronClawInstallerError, match="install key"):

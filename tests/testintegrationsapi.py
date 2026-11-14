@@ -772,10 +772,7 @@ def test_install_claim_is_owner_bound_short_lived_and_not_a_raw_key(client: Test
     payload = response.json()
     assert payload["key_id"] == record.key_id
     assert payload["claim_token"] == claim.claim_token
-    assert payload["command"] == (
-        "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\n"
-        f"python -m ironclaw_installer bootstrap --program openclaw --claim-token {claim.claim_token}"
-    )
+    assert payload["command"] == (f"python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git\npython -m ironclaw_installer bootstrap --program openclaw --claim-token {claim.claim_token}")
     assert "expires_at" not in payload
     assert "install_key" not in payload
     assert response.headers["cache-control"] == "no-store, private"

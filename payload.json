@@ -1,0 +1,1 @@
+{"action_type":"httpfetch","target":"https://example.com","content":"test request","risk_score":0,"client_id":"test-client","session_id":"test-session-003"}

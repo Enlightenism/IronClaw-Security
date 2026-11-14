@@ -34,13 +34,13 @@ def fingerprint_install_block(command: str) -> str:
 
 
 PINNED_INSTALL_BLOCKS: Final[tuple[PinnedInstallBlock, ...]] = (
-    PinnedInstallBlock(program="openclaw", fingerprint="b67aa82b1a8168049c35a5df5736ed3324a2c3d9cf363c245114fd5f2a349e66", source_urls=_INSTALLER_SOURCE_URLS),
-    PinnedInstallBlock(program="claude_code", fingerprint="11d1f701949fe7c717bf5112c893ae97ed24040eff8b71a9b7d88172797a24b5", source_urls=_INSTALLER_SOURCE_URLS),
-    PinnedInstallBlock(program="cursor", fingerprint="5bdd3e0293950a0f71d401f9f5cebe6dc566be1842df80251d51278f97b2feee", source_urls=_INSTALLER_SOURCE_URLS),
-    PinnedInstallBlock(program="goose", fingerprint="31a90ce4d3534f7ca10e888b04e3bca99c0187dacacf1e86f826cea3cb954963", source_urls=_INSTALLER_SOURCE_URLS),
-    PinnedInstallBlock(program="gemini_cli", fingerprint="f80cc652a395fd25a8632be65d99f2c7ff4711dd59760dc56ea9286b8dad50a2", source_urls=_INSTALLER_SOURCE_URLS),
-    PinnedInstallBlock(program="copilot", fingerprint="f3eff9e27b992278a86360d2c6a393daf13d4d4d4ce9f9ba34145b9370d06520", source_urls=_INSTALLER_SOURCE_URLS),
-    PinnedInstallBlock(program="hermes", fingerprint="641f55017d4bd0e41a654b39efce07e26f9dbc76d3e5c1d12c00b2edfa518225", source_urls=_INSTALLER_AND_SKILL_SOURCE_URLS),
+    PinnedInstallBlock(program="openclaw", fingerprint="5c6ae6d0db128f47a0c336e4af65cb3ae3674f6baccc2c9c14b95822cbb84c6e", source_urls=_INSTALLER_SOURCE_URLS),
+    PinnedInstallBlock(program="claude_code", fingerprint="57e72b37bb0df3c7381e363bd50ab0d91cb9609cd818b5ad2bb680cde0505534", source_urls=_INSTALLER_SOURCE_URLS),
+    PinnedInstallBlock(program="cursor", fingerprint="b4d7c9a36b2801cc725403c1433c34a093648bcd70e44057e8d8b68bcaeaedc8", source_urls=_INSTALLER_SOURCE_URLS),
+    PinnedInstallBlock(program="goose", fingerprint="1235904b43a79418d88870986789e158485cf5dcd2771a8bb292d3797aafd2c7", source_urls=_INSTALLER_SOURCE_URLS),
+    PinnedInstallBlock(program="gemini_cli", fingerprint="10d95a2b02dbd3b57544af00cb8f731d48a2ee5e3eb58d9aca8121c660870086", source_urls=_INSTALLER_SOURCE_URLS),
+    PinnedInstallBlock(program="copilot", fingerprint="c6386f0a47385828b42b20211cf715727af4b15920f45f6b735b1ca6a96a4341", source_urls=_INSTALLER_SOURCE_URLS),
+    PinnedInstallBlock(program="hermes", fingerprint="3da33cf6a833d32bd2a8d2c935fd76215fba464b3aba25f1085724d9b92ccd5b", source_urls=_INSTALLER_AND_SKILL_SOURCE_URLS),
 )
 
 

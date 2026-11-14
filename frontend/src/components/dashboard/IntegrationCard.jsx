@@ -397,7 +397,11 @@ const IntegrationCard = ({
     setGenerating(true);
     try {
       const claim = await onCreateClaim(integrationId);
-      const validatedClaim = validateInstallClaim(claim, program, integrationId);
+      const validatedClaim = validateInstallClaim(
+        claim,
+        program,
+        integrationId,
+      );
       if (!validatedClaim) {
         throw new Error("The install claim response is invalid.");
       }
