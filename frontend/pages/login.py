@@ -20,7 +20,8 @@ router = APIRouter(tags=["auth"])
 
 # ── Login page HTML (self-contained — no base.html shell) ─────────────────────
 
-_LOGIN_HTML = textwrap.dedent("""\
+_LOGIN_HTML = textwrap.dedent(
+    """\
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
@@ -1003,7 +1004,8 @@ _LOGIN_HTML = textwrap.dedent("""\
 
 </body>
 </html>
-""")
+"""
+)
 
 # ── Route handlers ────────────────────────────────────────────────────────────
 
