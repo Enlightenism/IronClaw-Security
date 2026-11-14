@@ -232,7 +232,7 @@ class TestListPatterns:
             "category": "custom",
             "severity": "low",
             "pattern": r"\btest_db_only\b",
-            "is_active": True,
+            "enabled": True,
             "version": 1,
             "description": "DB test",
         }
@@ -361,7 +361,7 @@ class TestDbPatternFiltering:
             "category": "custom",
             "severity": "medium",
             "pattern": r"\bironclaw_inactive_trigger_xyz\b",
-            "is_active": False,
+            "enabled": False,
             "version": 1,
             "description": "Should never match",
         }
@@ -379,7 +379,7 @@ class TestDbPatternFiltering:
             "category": "custom",
             "severity": "medium",
             "pattern": r"[invalid(regex",
-            "is_active": True,
+            "enabled": True,
             "version": 1,
             "description": "Bad regex — must be skipped silently",
         }

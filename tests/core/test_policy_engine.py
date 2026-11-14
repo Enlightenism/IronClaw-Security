@@ -67,14 +67,14 @@ def _mk_rule(
     *,
     rule_id: str = "test-rule-001",
     rule_name: str | None = None,
-    is_active: bool = True,
+    enabled: bool = True,
 ) -> dict:
     return {
         "id": rule_id,
         "rule_type": rule_type,
         "rule_name": rule_name or f"{rule_type}:{value[:30]}",
         "value": value,
-        "is_active": is_active,
+        "enabled": enabled,
     }
 
 

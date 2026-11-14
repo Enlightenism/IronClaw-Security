@@ -119,23 +119,23 @@ _RULE_ROWS: list[dict] = [
         "rule_key": "block_injection",
         "action": "block",
         "severity": "critical",
-        "is_active": True,
+        "enabled": True,
     },
     {
         "id": "rule-002",
         "rule_key": "warn_exfiltration",
         "action": "warn",
         "severity": "high",
-        "is_active": True,
+        "enabled": True,
     },
 ]
 
 _SCAN_PATTERN_ROW: dict = {
-    "id": "pat-001",
-    "pattern_key": "sql_injection",
+    "id": "5f0c2a7e-6b1d-4c8e-9a4f-1d2e3f4a5b6c",
+    "pattern_id": "sql_injection",
     "pattern_type": "regex",
-    "pattern_value": r"(?i)(select|insert|drop)\s",
-    "is_active": True,
+    "pattern": r"(?i)(select|insert|drop)\s",
+    "enabled": True,
     "created_at": "2026-06-01T00:00:00+00:00",
 }
 
@@ -536,9 +536,9 @@ class TestGetScanPatterns:
 
         assert isinstance(result, list)
         assert len(result) == 1
-        assert result[0]["pattern_key"] == "sql_injection"
+        assert result[0]["pattern_id"] == "sql_injection"
 
-    def test_default_is_active_true_filter_applied(self):
+    def test_default_enabled_true_filter_applied(self):
         qb = _make_qb([_SCAN_PATTERN_ROW])
         client = MagicMock()
         client.table.return_value = qb
@@ -546,7 +546,7 @@ class TestGetScanPatterns:
         with patch(_PATCH_TARGET, return_value=client):
             get_scan_patterns()
 
-        qb.eq.assert_any_call("is_active", True)
+        qb.eq.assert_any_call("enabled", True)
 
     def test_scan_patterns_table_queried(self):
         qb = _make_qb([_SCAN_PATTERN_ROW])
@@ -558,28 +558,26 @@ class TestGetScanPatterns:
 
         client.table.assert_called_once_with("scan_patterns")
 
-    def test_is_active_false_filter_applied_when_passed(self):
+    def test_enabled_false_filter_applied_when_passed(self):
         qb = _make_qb([])
         client = MagicMock()
         client.table.return_value = qb
 
         with patch(_PATCH_TARGET, return_value=client):
-            get_scan_patterns(is_active=False)
+            get_scan_patterns(enabled=False)
 
-        qb.eq.assert_any_call("is_active", False)
+        qb.eq.assert_any_call("enabled", False)
 
-    def test_is_active_none_skips_is_active_filter(self):
+    def test_enabled_none_skips_enabled_filter(self):
         qb = _make_qb([_SCAN_PATTERN_ROW])
         client = MagicMock()
         client.table.return_value = qb
 
         with patch(_PATCH_TARGET, return_value=client):
-            get_scan_patterns(is_active=None)
+            get_scan_patterns(enabled=None)
 
         called_args = [c.args for c in qb.eq.call_args_list]
-        assert ("is_active", True) not in called_args
-        assert ("is_active", False) not in called_args
-        assert ("is_active", None) not in called_args
+        assert all(a[0] != "enabled" for a in called_args)
 
     def test_pattern_type_filter_applied_when_passed(self):
         qb = _make_qb([_SCAN_PATTERN_ROW])
@@ -602,16 +600,16 @@ class TestGetScanPatterns:
         called_args = [c.args for c in qb.eq.call_args_list]
         assert all(a[0] != "pattern_type" for a in called_args)
 
-    def test_both_is_active_and_pattern_type_filters_applied(self):
+    def test_both_enabled_and_pattern_type_filters_applied(self):
         qb = _make_qb([_SCAN_PATTERN_ROW])
         client = MagicMock()
         client.table.return_value = qb
 
         with patch(_PATCH_TARGET, return_value=client):
-            get_scan_patterns(is_active=True, pattern_type="keyword")
+            get_scan_patterns(enabled=True, pattern_type="keyword")
 
         called_args = [c.args for c in qb.eq.call_args_list]
-        assert ("is_active", True) in called_args
+        assert ("enabled", True) in called_args
         assert ("pattern_type", "keyword") in called_args
 
     def test_empty_list_returned_when_no_patterns(self):
@@ -635,10 +633,10 @@ class TestGetScanPatterns:
 
         assert isinstance(result, list)
         assert len(result) == 1
-        assert result[0]["pattern_key"] == "sql_injection"
+        assert result[0]["pattern_id"] == "sql_injection"
 
     def test_multiple_patterns_returned(self):
-        second = {**_SCAN_PATTERN_ROW, "id": "pat-002", "pattern_key": "xss_basic"}
+        second = {**_SCAN_PATTERN_ROW, "id": "6a1d3b8f-7c2e-4d9f-8b5a-2e3f4a5b6c7d", "pattern_id": "xss_basic"}
         client = _make_client([_SCAN_PATTERN_ROW, second])
         with patch(_PATCH_TARGET, return_value=client):
             result = get_scan_patterns()

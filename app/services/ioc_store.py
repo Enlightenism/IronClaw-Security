@@ -7,6 +7,7 @@ import logging
 import os
 import threading
 from typing import Any, Protocol
+import uuid
 
 from app.core.supabase import get_supabase_service_client
 from app.services import mitre_utils as mu  # canonical MITRE helpers
@@ -15,7 +16,6 @@ from app.services.threat_feed_ingestion import FeedIngestResult, IOCFilterReques
 logger = logging.getLogger(__name__)
 
 MAX_BULK_UPSERT_BATCH = 500
-TTL_PRUNE_BATCH = 1000
 TABLE_IOCS = "ioc_records"
 TABLE_INGEST_LOG = "feed_ingest_log"
 STORE_LOCK = threading.Lock()
@@ -227,6 +227,105 @@ def _overwrite_record_update(record: IOCRecord) -> dict[str, Any]:
         "active": bool(_record_attr(record, "active", default=True)),
         "feed_ingest_id": _record_attr(record, "feed_ingest_id", "feedingestid", default=""),
         "extra": dict(_record_attr(record, "extra", default={}) or {}),
+    }
+
+
+_RAW_CONTEXT_FIELDS = ("description", "org_id", "mitre_technique_id", "mitre_tactic", "cve_id", "expiry", "feed_ingest_id", "extra")
+
+
+def _ioc_row_to_live(row: dict[str, Any]) -> dict[str, Any]:
+    """Translate a legacy-shaped IOC row into ioc_records columns. Fields without a live column go into raw_context."""
+    return {
+        "id": row.get("ioc_id", ""),
+        "ioc_type": row.get("ioc_type", "unknown"),
+        "ioc_value": row.get("value", ""),
+        "source_feed": row.get("source", "internal"),
+        "severity": row.get("severity", "medium"),
+        "confidence": float(row.get("confidence", 0.0) or 0.0),
+        "tags": _parse_tags(row.get("tags")),
+        "raw_context": {field: row.get(field) for field in _RAW_CONTEXT_FIELDS},
+        "first_seen_feed": row.get("first_seen") or _utcnow_iso(),
+        "last_seen_feed": row.get("last_seen") or _utcnow_iso(),
+        "last_synced_at": _utcnow_iso(),
+        "is_active": bool(row.get("active", True)),
+    }
+
+
+def _ioc_live_to_row(row: dict[str, Any]) -> dict[str, Any]:
+    raw = _parse_extra(row.get("raw_context"))
+    return {
+        "ioc_id": row.get("id", ""),
+        "ioc_type": row.get("ioc_type", "unknown"),
+        "value": row.get("ioc_value", ""),
+        "source": row.get("source_feed", "internal"),
+        "severity": row.get("severity", "medium"),
+        "confidence": row.get("confidence", 0.0),
+        "tags": _parse_tags(row.get("tags")),
+        "description": raw.get("description") or "",
+        "org_id": raw.get("org_id"),
+        "mitre_technique_id": raw.get("mitre_technique_id"),
+        "mitre_tactic": raw.get("mitre_tactic"),
+        "cve_id": raw.get("cve_id"),
+        "first_seen": row.get("first_seen_feed"),
+        "last_seen": row.get("last_seen_feed"),
+        "expiry": raw.get("expiry"),
+        "active": row.get("is_active", True),
+        "feed_ingest_id": raw.get("feed_ingest_id") or "",
+        "extra": _parse_extra(raw.get("extra")),
+    }
+
+
+def _in_org_scope(row: dict[str, Any], org_id: str | None) -> bool:
+    return org_id is None or row.get("org_id") in (None, org_id)
+
+
+def _live_rows_to_records(rows: list[dict[str, Any]] | None, *, org_id: str | None = None) -> list[IOCRecord]:
+    records: list[IOCRecord] = []
+    for live_row in rows or []:
+        legacy_row = _ioc_live_to_row(live_row)
+        if _in_org_scope(legacy_row, org_id):
+            records.append(_row_to_record(legacy_row))
+    return records
+
+
+_INGEST_LOG_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "ironclaw:feed_ingest_log")
+_INGEST_LOG_PAGE_SIZE = 100
+
+
+def _ingest_log_row_id(ingest_id: str) -> str:
+    # Ingest ids are not UUIDs, so the uuid primary key is derived from them deterministically.
+    return str(uuid.uuid5(_INGEST_LOG_NAMESPACE, ingest_id))
+
+
+def _ingest_result_to_live_row(result: FeedIngestResult) -> dict[str, Any]:
+    legacy = _ingest_result_to_row(result)
+    return {
+        "id": _ingest_log_row_id(legacy["ingest_id"]),
+        "run_started_at": legacy["started_at"],
+        "run_finished_at": legacy["completed_at"],
+        "overall_status": legacy["status"],
+        "total_iocs_upserted": legacy["iocs_inserted"] + legacy["iocs_updated"],
+        "feeds_processed": 1,
+        "feed_results": [legacy],
+    }
+
+
+def _ingest_live_to_row(row: dict[str, Any]) -> dict[str, Any]:
+    entries = row.get("feed_results") or []
+    entry = entries[0] if entries and isinstance(entries[0], dict) else {}
+    return {
+        "ingest_id": entry.get("ingest_id") or row.get("id", ""),
+        "source": entry.get("source", "internal"),
+        "status": entry.get("status") or row.get("overall_status", ""),
+        "iocs_parsed": int(entry.get("iocs_parsed", 0) or 0),
+        "iocs_inserted": int(entry.get("iocs_inserted", 0) or 0),
+        "iocs_updated": int(entry.get("iocs_updated", 0) or 0),
+        "iocs_skipped": int(entry.get("iocs_skipped", 0) or 0),
+        "errors": list(entry.get("errors") or []),
+        "started_at": row.get("run_started_at"),
+        "completed_at": row.get("run_finished_at"),
+        "org_id": entry.get("org_id"),
+        "metadata": dict(entry.get("metadata") or {}),
     }
 
 
@@ -685,16 +784,18 @@ class IOCStore:
                 row["mitre_technique_id"] = mu.normalize_mitre(row["mitre_technique_id"])
 
             table = runtime.table(TABLE_IOCS)
-            existing_resp = table.select("ioc_id,confidence,tags,description,extra,expiry,mitre_technique_id").eq("ioc_id", row["ioc_id"]).maybe_single().execute()
-            existing = existing_resp.data if existing_resp else None
+            existing_resp = table.select("*").eq("id", row["ioc_id"]).maybe_single().execute()
+            existing_live = existing_resp.data if existing_resp else None
 
-            if existing:
+            if existing_live:
                 # ensure existing mitre value normalized before merging
+                existing = _ioc_live_to_row(existing_live)
                 if existing.get("mitre_technique_id"):
                     existing["mitre_technique_id"] = mu.normalize_mitre(existing.get("mitre_technique_id"))
-                table.update(_merge_record_update(existing, record)).eq("ioc_id", row["ioc_id"]).execute()
+                payload = _merge_record_update(existing, record)
+                table.update(_ioc_row_to_live({**existing, **payload})).eq("id", row["ioc_id"]).execute()
             else:
-                table.insert(row).execute()
+                table.insert(_ioc_row_to_live(row)).execute()
             return True
         except IOCStoreConfigurationError:
             logger.warning("iocstore.upsert_ioc Supabase not configured")
@@ -728,17 +829,15 @@ class IOCStore:
                 batch_updated = 0
                 try:
                     table = runtime.table(TABLE_IOCS)
-                    existing_resp = table.select("ioc_id,confidence,tags,description,extra,expiry,mitre_technique_id").in_("ioc_id", ioc_ids).execute()
+                    existing_resp = table.select("*").in_("id", ioc_ids).execute()
                     existing_map: dict[str, dict[str, Any]] = {}
                     existing_data = existing_resp.data if existing_resp else []
-                    if isinstance(existing_data, dict):
-                        existing_map[existing_data["ioc_id"]] = existing_data
-                    else:
-                        for row in existing_data or []:
-                            # normalize existing mitre values for safe merges
-                            if row.get("mitre_technique_id"):
-                                row["mitre_technique_id"] = mu.normalize_mitre(row.get("mitre_technique_id"))
-                            existing_map[row["ioc_id"]] = row
+                    for live_row in existing_data or []:
+                        # normalize existing mitre values for safe merges
+                        row = _ioc_live_to_row(live_row)
+                        if row.get("mitre_technique_id"):
+                            row["mitre_technique_id"] = mu.normalize_mitre(row.get("mitre_technique_id"))
+                        existing_map[row["ioc_id"]] = row
 
                     rows_to_insert: list[dict[str, Any]] = []
                     rows_to_update: list[tuple[str, dict[str, Any]]] = []
@@ -749,15 +848,16 @@ class IOCStore:
                         if row.get("mitre_technique_id"):
                             row["mitre_technique_id"] = mu.normalize_mitre(row["mitre_technique_id"])
                         if row["ioc_id"] in existing_map:
-                            payload = _overwrite_record_update(record) if overwrite else _merge_record_update(existing_map[row["ioc_id"]], record)
+                            existing = existing_map[row["ioc_id"]]
+                            payload = _overwrite_record_update(record) if overwrite else _merge_record_update(existing, record)
                             # normalize payload mitre field if present
                             if payload.get("mitre_technique_id"):
                                 payload["mitre_technique_id"] = mu.normalize_mitre(payload.get("mitre_technique_id"))
-                            rows_to_update.append((row["ioc_id"], payload))
+                            rows_to_update.append((row["ioc_id"], _ioc_row_to_live({**existing, **payload})))
                             updated += 1
                             batch_updated += 1
                         else:
-                            rows_to_insert.append(row)
+                            rows_to_insert.append(_ioc_row_to_live(row))
                             inserted += 1
                             batch_inserted += 1
 
@@ -766,7 +866,7 @@ class IOCStore:
 
                     for ioc_id, payload in rows_to_update:
                         try:
-                            table.update(payload).eq("ioc_id", ioc_id).execute()
+                            table.update(payload).eq("id", ioc_id).execute()
                         except Exception as exc:
                             logger.error("iocstore.bulk_upsert.update_error ioc_id=%s %s", ioc_id, exc)
                             updated -= 1
@@ -788,9 +888,9 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.get_ioc(ioc_id)
 
-            resp = runtime.table(TABLE_IOCS).select("*").eq("ioc_id", ioc_id).maybe_single().execute()
+            resp = runtime.table(TABLE_IOCS).select("*").eq("id", ioc_id).maybe_single().execute()
             if resp and resp.data:
-                return _row_to_record(resp.data)
+                return _row_to_record(_ioc_live_to_row(resp.data))
             return None
         except IOCStoreConfigurationError:
             logger.warning("iocstore.get_ioc Supabase not configured")
@@ -806,13 +906,11 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.lookup_by_value(normalized, org_id=org_id, active_only=active_only)
 
-            q = runtime.table(TABLE_IOCS).select("*").eq("value", normalized)
+            q = runtime.table(TABLE_IOCS).select("*").eq("ioc_value", normalized)
             if active_only:
-                q = q.eq("active", True)
-            if org_id is not None:
-                q = q.or_(f"org_id.eq.{org_id},org_id.is.null")
+                q = q.eq("is_active", True)
             resp = q.execute()
-            return [_row_to_record(row) for row in (resp.data or [])] if resp else []
+            return _live_rows_to_records(resp.data if resp else None, org_id=org_id)
         except IOCStoreConfigurationError:
             logger.warning("iocstore.lookup_by_value Supabase not configured")
             return []
@@ -829,13 +927,11 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.lookup_by_values(normalized_values, org_id=org_id, active_only=active_only)
 
-            q = runtime.table(TABLE_IOCS).select("*").in_("value", normalized_values)
+            q = runtime.table(TABLE_IOCS).select("*").in_("ioc_value", normalized_values)
             if active_only:
-                q = q.eq("active", True)
-            if org_id is not None:
-                q = q.or_(f"org_id.eq.{org_id},org_id.is.null")
+                q = q.eq("is_active", True)
             resp = q.execute()
-            return [_row_to_record(row) for row in (resp.data or [])] if resp else []
+            return _live_rows_to_records(resp.data if resp else None, org_id=org_id)
         except IOCStoreConfigurationError:
             logger.warning("iocstore.lookup_by_values Supabase not configured")
             return []
@@ -850,13 +946,11 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.lookup_by_cve(normalized, org_id=org_id, active_only=active_only)
 
-            q = runtime.table(TABLE_IOCS).select("*").eq("cve_id", normalized)
+            q = runtime.table(TABLE_IOCS).select("*").eq("raw_context->>cve_id", normalized)
             if active_only:
-                q = q.eq("active", True)
-            if org_id is not None:
-                q = q.or_(f"org_id.eq.{org_id},org_id.is.null")
+                q = q.eq("is_active", True)
             resp = q.execute()
-            return [_row_to_record(row) for row in (resp.data or [])] if resp else []
+            return _live_rows_to_records(resp.data if resp else None, org_id=org_id)
         except IOCStoreConfigurationError:
             logger.warning("iocstore.lookup_by_cve Supabase not configured")
             return []
@@ -877,13 +971,11 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.lookup_by_mitre_technique(normalized, org_id=org_id, active_only=active_only)
 
-            q = runtime.table(TABLE_IOCS).select("*").eq("mitre_technique_id", normalized)
+            q = runtime.table(TABLE_IOCS).select("*").eq("raw_context->>mitre_technique_id", normalized)
             if active_only:
-                q = q.eq("active", True)
-            if org_id is not None:
-                q = q.or_(f"org_id.eq.{org_id},org_id.is.null")
+                q = q.eq("is_active", True)
             resp = q.execute()
-            return [_row_to_record(row) for row in (resp.data or [])] if resp else []
+            return _live_rows_to_records(resp.data if resp else None, org_id=org_id)
         except IOCStoreConfigurationError:
             logger.warning("iocstore.lookup_by_mitre_technique Supabase not configured")
             return []
@@ -915,27 +1007,25 @@ class IOCStore:
             offset = int(_filter_attr(req, "offset", default=0) or 0)
 
             if source is not None:
-                q = q.eq("source", source)
+                q = q.eq("source_feed", source)
             if ioc_type is not None:
                 q = q.eq("ioc_type", ioc_type)
             if severity is not None:
                 q = q.eq("severity", severity)
-            if org_id is not None:
-                q = q.or_(f"org_id.eq.{org_id},org_id.is.null")
             if active is not None:
-                q = q.eq("active", active)
+                q = q.eq("is_active", active)
             if technique_id is not None:
                 technique_id = mu.normalize_mitre(technique_id)
-                q = q.eq("mitre_technique_id", technique_id)
+                q = q.eq("raw_context->>mitre_technique_id", technique_id)
             if cve_id is not None:
-                q = q.eq("cve_id", cve_id)
+                q = q.eq("raw_context->>cve_id", cve_id)
             if value_contains is not None:
-                q = q.ilike("value", f"%{value_contains}%")
+                q = q.ilike("ioc_value", f"%{value_contains}%")
             if tag is not None:
                 q = q.contains("tags", [tag])
             q = q.range(offset, offset + limit - 1)
             resp = q.execute()
-            return [_row_to_record(row) for row in (resp.data or [])] if resp else []
+            return _live_rows_to_records(resp.data if resp else None, org_id=org_id)
         except IOCStoreConfigurationError:
             logger.warning("iocstore.filter_iocs Supabase not configured")
             return []
@@ -949,7 +1039,7 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.deactivate_ioc(ioc_id)
 
-            resp = runtime.table(TABLE_IOCS).update({"active": False, "last_seen": _utcnow_iso()}).eq("ioc_id", ioc_id).execute()
+            resp = runtime.table(TABLE_IOCS).update({"is_active": False, "last_seen_feed": _utcnow_iso()}).eq("id", ioc_id).execute()
             return bool(resp and resp.data)
         except IOCStoreConfigurationError:
             logger.warning("iocstore.deactivate_ioc Supabase not configured")
@@ -964,7 +1054,7 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.delete_ioc(ioc_id)
 
-            resp = runtime.table(TABLE_IOCS).delete().eq("ioc_id", ioc_id).execute()
+            resp = runtime.table(TABLE_IOCS).delete().eq("id", ioc_id).execute()
             return bool(resp and resp.data)
         except IOCStoreConfigurationError:
             logger.warning("iocstore.delete_ioc Supabase not configured")
@@ -979,7 +1069,7 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.delete_by_ingest_id(feed_ingest_id)
 
-            resp = runtime.table(TABLE_IOCS).delete().eq("feed_ingest_id", feed_ingest_id).execute()
+            resp = runtime.table(TABLE_IOCS).delete().eq("raw_context->>feed_ingest_id", feed_ingest_id).execute()
             return len(resp.data) if resp and resp.data else 0
         except IOCStoreConfigurationError:
             logger.warning("iocstore.delete_by_ingest_id Supabase not configured")
@@ -989,14 +1079,12 @@ class IOCStore:
             return 0
 
     def prune_expired(self) -> int:
-        now_iso = _utcnow_iso()
         try:
             runtime_type, runtime = self._resolve_runtime()
             if runtime_type == "backend":
                 return runtime.prune_expired()
-
-            resp = runtime.table(TABLE_IOCS).update({"active": False, "last_seen": now_iso}).eq("active", True).lt("expiry", now_iso).not_.is_("expiry", "null").execute()
-            return len(resp.data) if resp and resp.data else 0
+            # TTL pruning is skipped on the live Supabase schema, where expiry is stored in raw_context.
+            return 0
         except IOCStoreConfigurationError:
             logger.warning("iocstore.prune_expired Supabase not configured")
             return 0
@@ -1010,14 +1098,16 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.count_iocs(source=source, active=active, org_id=org_id)
 
-            q = runtime.table(TABLE_IOCS).select("ioc_id", count="exact")
+            columns = "id,raw_context" if org_id is not None else "id"
+            q = runtime.table(TABLE_IOCS).select(columns, count="exact")
             if source is not None:
-                q = q.eq("source", source)
+                q = q.eq("source_feed", source)
             if active is not None:
-                q = q.eq("active", active)
-            if org_id is not None:
-                q = q.or_(f"org_id.eq.{org_id},org_id.is.null")
+                q = q.eq("is_active", active)
             resp = q.execute()
+            rows = (resp.data or []) if resp else []
+            if org_id is not None:
+                return sum(1 for live_row in rows if _in_org_scope(_ioc_live_to_row(live_row), org_id))
             return resp.count if resp and resp.count is not None else 0
         except IOCStoreConfigurationError:
             logger.warning("iocstore.count_iocs Supabase not configured")
@@ -1032,10 +1122,10 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.persist_ingest_result(result)
 
-            row = _ingest_result_to_row(result)
+            row = _ingest_result_to_live_row(result)
             table = runtime.table(TABLE_INGEST_LOG)
             try:
-                table.upsert(row, on_conflict="ingest_id").execute()
+                table.upsert(row, on_conflict="id").execute()
             except Exception:
                 try:
                     table.insert(row).execute()
@@ -1058,8 +1148,8 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.get_ingest_result(ingest_id)
 
-            resp = runtime.table(TABLE_INGEST_LOG).select("*").eq("ingest_id", ingest_id).maybe_single().execute()
-            return resp.data if resp and resp.data else None
+            resp = runtime.table(TABLE_INGEST_LOG).select("*").eq("id", _ingest_log_row_id(ingest_id)).maybe_single().execute()
+            return _ingest_live_to_row(resp.data) if resp and resp.data else None
         except IOCStoreConfigurationError:
             logger.warning("iocstore.get_ingest_result Supabase not configured")
             return None
@@ -1080,14 +1170,29 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.list_ingest_history(source=source, org_id=org_id, limit=limit, offset=offset)
 
-            q = runtime.table(TABLE_INGEST_LOG).select("*").order("started_at", desc=True)
-            if source is not None:
-                q = q.eq("source", source)
-            if org_id is not None:
-                q = q.or_(f"org_id.eq.{org_id},org_id.is.null")
-            q = q.range(offset, offset + limit - 1)
-            resp = q.execute()
-            return resp.data if resp and resp.data else []
+            # source and org_id live inside feed_results, so they are filtered here. Pages are scanned until
+            # offset + limit matches are collected, which keeps pagination correct when filters are applied.
+            history: list[dict[str, Any]] = []
+            to_skip = offset
+            page_start = 0
+            while len(history) < limit:
+                q = runtime.table(TABLE_INGEST_LOG).select("*").order("run_started_at", desc=True)
+                resp = q.range(page_start, page_start + _INGEST_LOG_PAGE_SIZE - 1).execute()
+                page = resp.data if resp and resp.data else []
+                for live_row in page:
+                    legacy = _ingest_live_to_row(live_row)
+                    if (source is not None and legacy["source"] != source) or not _in_org_scope(legacy, org_id):
+                        continue
+                    if to_skip > 0:
+                        to_skip -= 1
+                        continue
+                    history.append(legacy)
+                    if len(history) >= limit:
+                        break
+                if len(page) < _INGEST_LOG_PAGE_SIZE:
+                    break
+                page_start += _INGEST_LOG_PAGE_SIZE
+            return history
         except IOCStoreConfigurationError:
             logger.warning("iocstore.list_ingest_history Supabase not configured")
             return []
@@ -1101,7 +1206,7 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.delete_ingest_log(ingest_id)
 
-            resp = runtime.table(TABLE_INGEST_LOG).delete().eq("ingest_id", ingest_id).execute()
+            resp = runtime.table(TABLE_INGEST_LOG).delete().eq("id", _ingest_log_row_id(ingest_id)).execute()
             return bool(resp and resp.data)
         except IOCStoreConfigurationError:
             logger.warning("iocstore.delete_ingest_log Supabase not configured")
@@ -1116,7 +1221,7 @@ class IOCStore:
             if runtime_type == "backend":
                 return runtime.health_check()
 
-            resp = runtime.table(TABLE_IOCS).select("ioc_id", count="exact").limit(1).execute()
+            resp = runtime.table(TABLE_IOCS).select("id", count="exact").limit(1).execute()
             return {
                 "status": "ok",
                 "backend": "supabase",
@@ -1235,63 +1340,7 @@ def getiocstore() -> IOCStore:
     return get_ioc_store()
 
 
-IOC_STORE_MIGRATION_SQL = """
-CREATE TABLE IF NOT EXISTS ioc_records (
-    ioc_id TEXT PRIMARY KEY,
-    ioc_type TEXT NOT NULL,
-    value TEXT NOT NULL,
-    source TEXT NOT NULL,
-    severity TEXT NOT NULL DEFAULT 'medium',
-    confidence DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-    tags JSONB NOT NULL DEFAULT '[]'::jsonb,
-    description TEXT NOT NULL DEFAULT '',
-    org_id TEXT,
-    mitre_technique_id TEXT,
-    mitre_tactic TEXT,
-    cve_id TEXT,
-    first_seen TIMESTAMPTZ NOT NULL,
-    last_seen TIMESTAMPTZ NOT NULL,
-    expiry TIMESTAMPTZ,
-    active BOOLEAN NOT NULL DEFAULT TRUE,
-    feed_ingest_id TEXT NOT NULL,
-    extra JSONB NOT NULL DEFAULT '{}'::jsonb
-);
-
-CREATE INDEX IF NOT EXISTS idx_ioc_records_value ON ioc_records (value);
-CREATE INDEX IF NOT EXISTS idx_ioc_records_ioc_type ON ioc_records (ioc_type);
-CREATE INDEX IF NOT EXISTS idx_ioc_records_source ON ioc_records (source);
-CREATE INDEX IF NOT EXISTS idx_ioc_records_severity ON ioc_records (severity);
-CREATE INDEX IF NOT EXISTS idx_ioc_records_active ON ioc_records (active);
-CREATE INDEX IF NOT EXISTS idx_ioc_records_org_id ON ioc_records (org_id);
-CREATE INDEX IF NOT EXISTS idx_ioc_records_mitre_technique_id ON ioc_records (mitre_technique_id);
-CREATE INDEX IF NOT EXISTS idx_ioc_records_cve_id ON ioc_records (cve_id);
-CREATE INDEX IF NOT EXISTS idx_ioc_records_expiry ON ioc_records (expiry) WHERE expiry IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_ioc_records_feed_ingest_id ON ioc_records (feed_ingest_id);
-CREATE INDEX IF NOT EXISTS idx_ioc_records_tags ON ioc_records USING GIN (tags);
-
-CREATE TABLE IF NOT EXISTS feed_ingest_log (
-    ingest_id TEXT PRIMARY KEY,
-    source TEXT NOT NULL,
-    status TEXT NOT NULL,
-    iocs_parsed INTEGER NOT NULL DEFAULT 0,
-    iocs_inserted INTEGER NOT NULL DEFAULT 0,
-    iocs_updated INTEGER NOT NULL DEFAULT 0,
-    iocs_skipped INTEGER NOT NULL DEFAULT 0,
-    errors JSONB NOT NULL DEFAULT '[]'::jsonb,
-    started_at TIMESTAMPTZ NOT NULL,
-    completed_at TIMESTAMPTZ,
-    org_id TEXT,
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
-);
-
-CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_source ON feed_ingest_log (source);
-CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_status ON feed_ingest_log (status);
-CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_started_at ON feed_ingest_log (started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_feed_ingest_log_org_id ON feed_ingest_log (org_id);
-"""
-
 __all__ = [
-    "IOC_STORE_MIGRATION_SQL",
     "IOCFilterRequest",
     "IOCStore",
     "IOCStoreBackend",

@@ -233,7 +233,7 @@ def load_builtin_policy_rules_from_db(
             return False
 
         # --- fetch the actual policy_rules rows ---
-        rules_rows = client.table("policy_rules").select("rule_type, value").in_("id", rule_ids).eq("is_active", True).execute().data
+        rules_rows = client.table("policy_rules").select("rule_type, value").in_("id", rule_ids).eq("enabled", True).execute().data
 
         if not rules_rows:
             logger.warning(

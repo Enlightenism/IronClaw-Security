@@ -845,9 +845,7 @@ class TestHandleCheckoutCompleted:
             unit_credits=5_000,
             session_id="cs_refund_after_credit_001",
             payment_intent="pi_refund_after_credit_001",
-        )[
-            "data"
-        ]["object"]
+        )["data"]["object"]
         svc._handle_checkout_completed(obj, {})  # noqa: SLF001
         assert svc.get_unit_balance(_ORG).balance == 5_000
 
@@ -2338,16 +2336,12 @@ class TestReconcileCheckoutSession:
             unit_credits=5000,
             session_id="cs_owner_page_001",
             owner_key=owner,
-        )[
-            "data"
-        ]["object"]
+        )["data"]["object"]
         second = _build_checkout_completed_event(
             unit_credits=2500,
             session_id="cs_owner_page_002",
             owner_key=owner,
-        )[
-            "data"
-        ]["object"]
+        )["data"]["object"]
         mock_client.get.side_effect = [
             {"object": "list", "data": [first], "has_more": True},
             {"object": "list", "data": [second], "has_more": False},
@@ -2387,9 +2381,7 @@ class TestReconcileCheckoutSession:
             unit_credits=5000,
             session_id="cs_owner_retry_001",
             owner_key=owner,
-        )[
-            "data"
-        ]["object"]
+        )["data"]["object"]
         mock_client.get.return_value = {"object": "list", "data": [session], "has_more": False}
 
         first = svc_wired.reconcile_owner_checkout_sessions(owner)
@@ -2414,9 +2406,7 @@ class TestReconcileCheckoutSession:
             unit_credits=5_000,
             session_id="cs_owner_refunded_001",
             owner_key=owner,
-        )[
-            "data"
-        ]["object"]
+        )["data"]["object"]
         mock_client.get.return_value = {
             "object": "list",
             "data": [session],
@@ -2469,17 +2459,13 @@ class TestReconcileCheckoutSession:
             unit_credits=5000,
             session_id="cs_owner_expired_001",
             owner_key=owner,
-        )[
-            "data"
-        ]["object"]
+        )["data"]["object"]
         expired_mine.update({"status": "expired", "payment_status": "unpaid"})
         expired_other = _build_checkout_completed_event(
             unit_credits=2500,
             session_id="cs_owner_expired_002",
             owner_key="other@ironclaw.test",
-        )[
-            "data"
-        ]["object"]
+        )["data"]["object"]
         expired_other.update({"status": "expired", "payment_status": "unpaid"})
 
         def _list_sessions(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2515,16 +2501,12 @@ class TestReconcileCheckoutSession:
             unit_credits=5000,
             session_id="cs_owner_003",
             owner_key=owner,
-        )[
-            "data"
-        ]["object"]
+        )["data"]["object"]
         successful = _build_checkout_completed_event(
             unit_credits=2500,
             session_id="cs_owner_004",
             owner_key=owner,
-        )[
-            "data"
-        ]["object"]
+        )["data"]["object"]
         mock_client.get.return_value = {
             "object": "list",
             "data": [failing, successful],
@@ -2556,9 +2538,7 @@ class TestReconcileCheckoutSession:
             unit_credits=5000,
             session_id="cs_owner_005",
             owner_key=owner,
-        )[
-            "data"
-        ]["object"]
+        )["data"]["object"]
         mock_client.get.return_value = {"object": "list", "data": [event], "has_more": False}
 
         with patch.object(

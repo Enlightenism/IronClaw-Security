@@ -349,15 +349,15 @@ def get_policy_set(set_key: str) -> dict[str, Any] | None:
 
 def get_scan_patterns(
     *,
-    is_active: bool | None = True,
+    enabled: bool | None = True,
     pattern_type: str | None = None,
 ) -> list[dict[str, Any]]:
     operation = "get_scan_patterns"
     try:
         client = get_supabase_service_client()
         q = client.table(_T_SCAN_PATTERNS).select("*")
-        if is_active is not None:
-            q = q.eq("is_active", is_active)
+        if enabled is not None:
+            q = q.eq("enabled", enabled)
         if pattern_type:
             q = q.eq("pattern_type", pattern_type)
         resp = q.execute()
@@ -457,8 +457,8 @@ def log_sandbox_execution(record: dict[str, Any]) -> dict[str, Any]:
     operation = "log_sandbox_execution"
     try:
         client = get_supabase_service_client()
-        if "executed_at" not in record:
-            record = {**record, "executed_at": _now_utc()}
+        if "completed_at" not in record:
+            record = {**record, "completed_at": _now_utc()}
         if "execution_id" in record:
             resp = client.table(_T_SANDBOX_EXECUTION_LOG).upsert(record, on_conflict="execution_id", returning="representation").execute()
         else:

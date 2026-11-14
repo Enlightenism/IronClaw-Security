@@ -415,9 +415,9 @@ def _build_db_entries(raw_patterns: list[dict[str, Any]]) -> list[_CompiledEntry
     for row in raw_patterns:
         if not isinstance(row, dict):
             continue
-        if not row.get("is_active", True):
+        if not row.get("enabled", True):
             continue
-        pattern_id = str(row.get("id") or row.get("pattern_id") or "")
+        pattern_id = str(row.get("pattern_id") or row.get("id") or "")
         if not pattern_id:
             continue
         raw_regex = str(row.get("pattern") or row.get("regex") or "").strip()

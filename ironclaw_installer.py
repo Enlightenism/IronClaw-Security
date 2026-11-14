@@ -1421,10 +1421,7 @@ def _restore_runtime_hooks(snapshots: list[tuple[Path, bytes | None]]) -> None:
             print(f"[ironclaw-installer] could not restore {target}; restore it from your backup.", file=sys.stderr)
 
 
-_TELEMETRY_DISCLOSURE = (
-    "[ironclaw-installer] telemetry: the enforcement hook sends each tool call's name, input, and output to the IronClaw dashboard "
-    "for checks, along with your install key. To stop this, remove the hook entry from your runtime settings."
-)
+_TELEMETRY_DISCLOSURE = "[ironclaw-installer] telemetry: the enforcement hook sends each tool call's name, input, and output to the IronClaw dashboard for checks, along with your install key. To stop this, remove the hook entry from your runtime settings."
 
 
 def _report_runtime_hook(program: str, enable: bool, plan: list[tuple[Path, dict[str, Any]]] | None) -> int:

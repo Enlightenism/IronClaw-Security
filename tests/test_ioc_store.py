@@ -25,6 +25,8 @@ from app.services.ioc_store import (
     InMemoryIOCStoreBackend,
     IOCStore,
     IOCStoreConfigurationError,
+    _ingest_log_row_id,
+    _ingest_result_to_live_row,
     _ingest_result_to_row,
     _is_unconfigured_client_error,
     _looks_like_test_runtime,
@@ -165,40 +167,33 @@ def _make_supabase_mock() -> MagicMock:
 
 
 def _row_from_record(record: IOCRecord) -> dict[str, Any]:
+    """Build a row shaped like the live ioc_records table (non-column fields live in raw_context)."""
     return {
-        "ioc_id": record.ioc_id,
+        "id": record.ioc_id,
         "ioc_type": record.ioc_type,
-        "value": record.value,
-        "source": record.source,
+        "ioc_value": record.value,
+        "source_feed": record.source,
         "severity": record.severity,
         "confidence": record.confidence,
         "tags": record.tags,
-        "description": record.description,
-        "org_id": record.org_id,
-        "mitre_technique_id": record.mitre_technique_id,
-        "mitre_tactic": record.mitre_tactic,
-        "cve_id": record.cve_id,
-        "first_seen": record.first_seen,
-        "last_seen": record.last_seen,
-        "expiry": record.expiry,
-        "active": record.active,
-        "feed_ingest_id": record.feed_ingest_id,
-        "extra": record.extra,
+        "raw_context": {
+            "description": record.description,
+            "org_id": record.org_id,
+            "mitre_technique_id": record.mitre_technique_id,
+            "mitre_tactic": record.mitre_tactic,
+            "cve_id": record.cve_id,
+            "expiry": record.expiry,
+            "feed_ingest_id": record.feed_ingest_id,
+            "extra": record.extra,
+        },
+        "first_seen_feed": record.first_seen,
+        "last_seen_feed": record.last_seen,
+        "is_active": record.active,
     }
 
 
 def _full_row(record: IOCRecord) -> dict[str, Any]:
-    return {
-        **_row_from_record(record),
-        "mitre_technique_id": record.mitre_technique_id,
-        "mitre_tactic": record.mitre_tactic,
-        "cve_id": record.cve_id,
-        "first_seen": record.first_seen,
-        "last_seen": record.last_seen,
-        "expiry": record.expiry,
-        "active": record.active,
-        "extra": record.extra,
-    }
+    return _row_from_record(record)
 
 
 def _sequential_builder(*responses: Any) -> MagicMock:
@@ -640,12 +635,11 @@ class TestUpsertIoc:
 
     def test_update_existing_merges_confidence(self, mock_client: MagicMock) -> None:
         existing_row = {
-            "ioc_id": "ioc-aaaa0000bbbb1111",
+            "id": "ioc-aaaa0000bbbb1111",
             "confidence": 0.5,
             "tags": ["old-tag"],
-            "description": "old desc",
-            "extra": {},
-            "expiry": None,
+            "raw_context": {"description": "old desc", "extra": {}, "expiry": None},
+            "is_active": True,
         }
         builder = _sequential_builder(_resp(data=existing_row), _resp(data=[existing_row]))
         mock_client.table.return_value = builder
@@ -659,12 +653,11 @@ class TestUpsertIoc:
 
     def test_update_existing_merges_tags(self, mock_client: MagicMock) -> None:
         existing_row = {
-            "ioc_id": "ioc-aaaa0000bbbb1111",
+            "id": "ioc-aaaa0000bbbb1111",
             "confidence": 0.5,
             "tags": ["alpha"],
-            "description": "",
-            "extra": {},
-            "expiry": None,
+            "raw_context": {"description": "", "extra": {}, "expiry": None},
+            "is_active": True,
         }
         builder = _sequential_builder(_resp(data=existing_row), _resp(data=[existing_row]))
         mock_client.table.return_value = builder
@@ -679,12 +672,11 @@ class TestUpsertIoc:
 
     def test_description_non_empty_incoming_wins(self, mock_client: MagicMock) -> None:
         existing_row = {
-            "ioc_id": "ioc-aaaa0000bbbb1111",
+            "id": "ioc-aaaa0000bbbb1111",
             "confidence": 0.5,
             "tags": [],
-            "description": "",
-            "extra": {},
-            "expiry": None,
+            "raw_context": {"description": "", "extra": {}, "expiry": None},
+            "is_active": True,
         }
         builder = _sequential_builder(_resp(data=existing_row), _resp(data=[existing_row]))
         mock_client.table.return_value = builder
@@ -693,7 +685,7 @@ class TestUpsertIoc:
             IOCStore().upsert_ioc(_make_record(description="new description"))
 
         payload = builder.update.call_args[0][0]
-        assert payload["description"] == "new description"
+        assert payload["raw_context"]["description"] == "new description"
 
     def test_upsert_ioc_configuration_error_returns_false_when_fallback_not_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
@@ -756,12 +748,11 @@ class TestBulkUpsert:
 
     def test_bulk_upsert_updates_existing_records_with_merge(self, mock_client: MagicMock) -> None:
         existing_row = {
-            "ioc_id": "ioc-0001",
+            "id": "ioc-0001",
             "confidence": 0.4,
             "tags": ["existing-tag"],
-            "description": "existing desc",
-            "extra": {"k": "v"},
-            "expiry": None,
+            "raw_context": {"description": "existing desc", "extra": {"k": "v"}, "expiry": None},
+            "is_active": True,
         }
         builder = _sequential_builder(_resp(data=[existing_row]), _resp(data=[existing_row]))
         mock_client.table.return_value = builder
@@ -780,12 +771,11 @@ class TestBulkUpsert:
 
     def test_bulk_upsert_overwrite_replaces_row(self, mock_client: MagicMock) -> None:
         existing_row = {
-            "ioc_id": "ioc-0001",
+            "id": "ioc-0001",
             "confidence": 0.4,
             "tags": ["old"],
-            "description": "old",
-            "extra": {},
-            "expiry": None,
+            "raw_context": {"description": "old", "extra": {}, "expiry": None},
+            "is_active": True,
         }
         builder = _sequential_builder(_resp(data=[existing_row]), _resp(data=[existing_row]))
         mock_client.table.return_value = builder
@@ -801,12 +791,11 @@ class TestBulkUpsert:
 
     def test_bulk_upsert_update_error_increments_skipped(self, mock_client: MagicMock) -> None:
         existing_row = {
-            "ioc_id": "ioc-0001",
+            "id": "ioc-0001",
             "confidence": 0.4,
             "tags": [],
-            "description": "",
-            "extra": {},
-            "expiry": None,
+            "raw_context": {"description": "", "extra": {}, "expiry": None},
+            "is_active": True,
         }
         builder = _make_builder()
         builder.execute.side_effect = [_resp(data=[existing_row]), _resp(data=[])]
@@ -912,7 +901,7 @@ class TestLookupByValue:
         with patch(_PATCH_TARGET, return_value=mock_client):
             IOCStore().lookup_by_value("1.2.3.4", active_only=False)
 
-        assert not any(call[0] == ("active", True) for call in builder.eq.call_args_list)
+        assert not any(call[0] == ("is_active", True) for call in builder.eq.call_args_list)
 
     def test_exception_returns_empty_list(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("timeout")
@@ -922,16 +911,17 @@ class TestLookupByValue:
 
         assert results == []
 
-    def test_org_id_filter_applied(self, mock_client: MagicMock) -> None:
-        builder = _make_builder(data=[])
+    def test_org_id_filter_applied_in_python(self, mock_client: MagicMock) -> None:
+        own = _row_from_record(_make_record(ioc_id="ioc-own", org_id="org-xyz"))
+        foreign = _row_from_record(_make_record(ioc_id="ioc-foreign", org_id="org-other"))
+        builder = _make_builder(data=[own, foreign])
         mock_client.table.return_value = builder
 
         with patch(_PATCH_TARGET, return_value=mock_client):
-            IOCStore().lookup_by_value("1.2.3.4", org_id="org-xyz")
+            results = IOCStore().lookup_by_value("1.2.3.4", org_id="org-xyz")
 
-        builder.or_.assert_called_once()
-        or_arg: str = builder.or_.call_args[0][0]
-        assert "org-xyz" in or_arg
+        assert [r.ioc_id for r in results] == ["ioc-own"]
+        builder.or_.assert_not_called()
 
 
 class TestLookupByValues:
@@ -973,7 +963,7 @@ class TestLookupByValues:
         with patch(_PATCH_TARGET, return_value=mock_client):
             IOCStore().lookup_by_values(["1.2.3.4"], active_only=False)
 
-        assert not any(call[0] == ("active", True) for call in builder.eq.call_args_list)
+        assert not any(call[0] == ("is_active", True) for call in builder.eq.call_args_list)
 
     def test_exception_returns_empty_list(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("network error")
@@ -1022,7 +1012,7 @@ class TestLookupByCve:
         with patch(_PATCH_TARGET, return_value=mock_client):
             IOCStore().lookup_by_cve("CVE-2024-1234", active_only=False)
 
-        assert not any(call[0] == ("active", True) for call in builder.eq.call_args_list)
+        assert not any(call[0] == ("is_active", True) for call in builder.eq.call_args_list)
 
     def test_exception_returns_empty_list(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
@@ -1032,16 +1022,17 @@ class TestLookupByCve:
 
         assert results == []
 
-    def test_org_id_filter_applied(self, mock_client: MagicMock) -> None:
-        builder = _make_builder(data=[])
+    def test_org_id_filter_applied_in_python(self, mock_client: MagicMock) -> None:
+        own = _row_from_record(_make_record(ioc_id="ioc-own", cve_id="CVE-2024-9999", org_id="org-abc"))
+        foreign = _row_from_record(_make_record(ioc_id="ioc-foreign", cve_id="CVE-2024-9999", org_id="org-other"))
+        builder = _make_builder(data=[own, foreign])
         mock_client.table.return_value = builder
 
         with patch(_PATCH_TARGET, return_value=mock_client):
-            IOCStore().lookup_by_cve("CVE-2024-9999", org_id="org-abc")
+            results = IOCStore().lookup_by_cve("CVE-2024-9999", org_id="org-abc")
 
-        builder.or_.assert_called_once()
-        or_arg: str = builder.or_.call_args[0][0]
-        assert "org-abc" in or_arg
+        assert [r.ioc_id for r in results] == ["ioc-own"]
+        builder.or_.assert_not_called()
 
 
 class TestLookupByMitreTechnique:
@@ -1082,7 +1073,7 @@ class TestLookupByMitreTechnique:
         with patch(_PATCH_TARGET, return_value=mock_client):
             IOCStore().lookup_by_mitre_technique("T1059", active_only=False)
 
-        assert not any(call[0] == ("active", True) for call in builder.eq.call_args_list)
+        assert not any(call[0] == ("is_active", True) for call in builder.eq.call_args_list)
 
     def test_exception_returns_empty_list(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
@@ -1096,24 +1087,26 @@ class TestLookupByMitreTechnique:
 class TestFilterIocs:
     def _make_row(self, ioc_id: str = "ioc-0001", severity: str = ThreatSeverityLevel.HIGH) -> dict[str, Any]:
         return {
-            "ioc_id": ioc_id,
+            "id": ioc_id,
             "ioc_type": IOCTypeEnum.IPV4,
-            "value": "5.5.5.5",
-            "source": ThreatFeedSourceEnum.CUSTOM_IOC,
+            "ioc_value": "5.5.5.5",
+            "source_feed": ThreatFeedSourceEnum.CUSTOM_IOC,
             "severity": severity,
             "confidence": 0.8,
             "tags": ["filtered"],
-            "description": "",
-            "org_id": "org-test",
-            "mitre_technique_id": None,
-            "mitre_tactic": None,
-            "cve_id": None,
-            "first_seen": _NOW,
-            "last_seen": _NOW,
-            "expiry": None,
-            "active": True,
-            "feed_ingest_id": "ingest-test",
-            "extra": {},
+            "raw_context": {
+                "description": "",
+                "org_id": "org-test",
+                "mitre_technique_id": None,
+                "mitre_tactic": None,
+                "cve_id": None,
+                "expiry": None,
+                "feed_ingest_id": "ingest-test",
+                "extra": {},
+            },
+            "first_seen_feed": _NOW,
+            "last_seen_feed": _NOW,
+            "is_active": True,
         }
 
     def test_returns_filtered_records(self, mock_client: MagicMock) -> None:
@@ -1161,8 +1154,11 @@ class TestFilterIocs:
             IOCStore().filter_iocs(req)
 
         builder.contains.assert_called_once_with("tags", ["ransomware"])
-        builder.ilike.assert_called_once_with("value", "%evil%")
-        builder.or_.assert_called_once()
+        builder.ilike.assert_called_once_with("ioc_value", "%evil%")
+        builder.eq.assert_any_call("raw_context->>cve_id", "CVE-2025-1111")
+        builder.eq.assert_any_call("raw_context->>mitre_technique_id", "T1059")
+        builder.eq.assert_any_call("is_active", True)
+        builder.or_.assert_not_called()
         builder.range.assert_called_once_with(5, 14)
 
     def test_exception_returns_empty_list(self, mock_client: MagicMock) -> None:
@@ -1176,7 +1172,7 @@ class TestFilterIocs:
 
 class TestDeactivateIoc:
     def test_returns_true_when_record_updated(self, mock_client: MagicMock) -> None:
-        builder = _make_builder(data=[{"ioc_id": "ioc-0001"}])
+        builder = _make_builder(data=[{"id": "ioc-0001"}])
         mock_client.table.return_value = builder
 
         with patch(_PATCH_TARGET, return_value=mock_client):
@@ -1202,20 +1198,20 @@ class TestDeactivateIoc:
         assert result is False
 
     def test_sets_active_false_in_payload(self, mock_client: MagicMock) -> None:
-        builder = _make_builder(data=[{"ioc_id": "ioc-0001"}])
+        builder = _make_builder(data=[{"id": "ioc-0001"}])
         mock_client.table.return_value = builder
 
         with patch(_PATCH_TARGET, return_value=mock_client):
             IOCStore().deactivate_ioc("ioc-0001")
 
         update_payload = builder.update.call_args[0][0]
-        assert update_payload["active"] is False
-        assert "last_seen" in update_payload
+        assert update_payload["is_active"] is False
+        assert "last_seen_feed" in update_payload
 
 
 class TestDeleteIoc:
     def test_returns_true_when_deleted(self, mock_client: MagicMock) -> None:
-        builder = _make_builder(data=[{"ioc_id": "ioc-1"}])
+        builder = _make_builder(data=[{"id": "ioc-1"}])
         mock_client.table.return_value = builder
 
         with patch(_PATCH_TARGET, return_value=mock_client):
@@ -1237,11 +1233,12 @@ class TestDeleteIoc:
 
 class TestDeleteByIngestId:
     def test_returns_deleted_count(self, mock_client: MagicMock) -> None:
-        builder = _make_builder(data=[{"ioc_id": "ioc-1"}, {"ioc_id": "ioc-2"}])
+        builder = _make_builder(data=[{"id": "ioc-1"}, {"id": "ioc-2"}])
         mock_client.table.return_value = builder
 
         with patch(_PATCH_TARGET, return_value=mock_client):
             assert IOCStore().delete_by_ingest_id("ingest-1") == 2
+        builder.eq.assert_called_with("raw_context->>feed_ingest_id", "ingest-1")
 
     def test_exception_returns_zero(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
@@ -1251,17 +1248,14 @@ class TestDeleteByIngestId:
 
 
 class TestPruneExpired:
-    def test_returns_count_when_rows_pruned(self, mock_client: MagicMock) -> None:
-        builder = _make_builder(data=[{"ioc_id": "ioc-1"}, {"ioc_id": "ioc-2"}])
+    def test_skips_pruning_on_supabase_path(self, mock_client: MagicMock) -> None:
+        builder = _make_builder(data=[{"id": "ioc-1"}, {"id": "ioc-2"}])
         mock_client.table.return_value = builder
 
         with patch(_PATCH_TARGET, return_value=mock_client):
-            assert IOCStore().prune_expired() == 2
+            assert IOCStore().prune_expired() == 0
 
-        update_payload = builder.update.call_args[0][0]
-        assert update_payload["active"] is False
-        builder.lt.assert_called_once()
-        builder.is_.assert_called_once_with("expiry", "null")
+        builder.update.assert_not_called()
 
     def test_exception_returns_zero(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
@@ -1276,14 +1270,26 @@ class TestCountIocs:
         mock_client.table.return_value = builder
 
         with patch(_PATCH_TARGET, return_value=mock_client):
-            count = IOCStore().count_iocs(
-                source=ThreatFeedSourceEnum.CUSTOM_IOC,
-                active=True,
-                org_id="org-1",
-            )
+            count = IOCStore().count_iocs(source=ThreatFeedSourceEnum.CUSTOM_IOC, active=True)
 
         assert count == 7
-        builder.or_.assert_called_once()
+        builder.eq.assert_any_call("source_feed", ThreatFeedSourceEnum.CUSTOM_IOC)
+        builder.eq.assert_any_call("is_active", True)
+        builder.or_.assert_not_called()
+
+    def test_org_count_scoped_in_python(self, mock_client: MagicMock) -> None:
+        rows = [
+            {"id": "ioc-1", "raw_context": {"org_id": "org-1"}},
+            {"id": "ioc-2", "raw_context": {"org_id": "org-2"}},
+            {"id": "ioc-3", "raw_context": {}},
+        ]
+        builder = _make_builder(data=rows, count=3)
+        mock_client.table.return_value = builder
+
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            assert IOCStore().count_iocs(org_id="org-1") == 2
+
+        builder.or_.assert_not_called()
 
     def test_returns_zero_when_count_missing(self, mock_client: MagicMock) -> None:
         builder = _make_builder()
@@ -1300,6 +1306,10 @@ class TestCountIocs:
             assert IOCStore().count_iocs() == 0
 
 
+def _live_ingest_row(ingest_id: str = "ingest-1", **overrides: Any) -> dict[str, Any]:
+    return _ingest_result_to_live_row(_make_ingest_result(ingest_id=ingest_id, **overrides))
+
+
 class TestPersistIngestResult:
     def test_upsert_success_returns_true(self, mock_client: MagicMock) -> None:
         builder = _make_builder(data=[{"ingest_id": "ingest-1"}])
@@ -1309,6 +1319,21 @@ class TestPersistIngestResult:
             assert IOCStore().persist_ingest_result(_make_ingest_result()) is True
 
         builder.upsert.assert_called_once()
+
+    def test_upsert_writes_live_columns(self, mock_client: MagicMock) -> None:
+        builder = _make_builder(data=[])
+        mock_client.table.return_value = builder
+
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            assert IOCStore().persist_ingest_result(_make_ingest_result(ingest_id="ingest-1")) is True
+
+        row = builder.upsert.call_args.args[0]
+        assert builder.upsert.call_args.kwargs == {"on_conflict": "id"}
+        assert row["id"] == _ingest_log_row_id("ingest-1")
+        assert row["overall_status"] == IngestStatusEnum.SUCCESS
+        assert row["total_iocs_upserted"] == 10
+        assert row["feeds_processed"] == 1
+        assert row["feed_results"][0]["ingest_id"] == "ingest-1"
 
     def test_insert_fallback_after_upsert_failure_returns_true(self, mock_client: MagicMock) -> None:
         builder = _make_builder(data=[{"ingest_id": "ingest-1"}])
@@ -1341,13 +1366,16 @@ class TestPersistIngestResult:
 
 class TestGetIngestResult:
     def test_returns_row(self, mock_client: MagicMock) -> None:
-        builder = _make_builder(data={"ingest_id": "ingest-1"})
+        builder = _make_builder(data=_live_ingest_row("ingest-1"))
         mock_client.table.return_value = builder
 
         with patch(_PATCH_TARGET, return_value=mock_client):
             result = IOCStore().get_ingest_result("ingest-1")
 
-        assert result == {"ingest_id": "ingest-1"}
+        assert result is not None
+        assert result["ingest_id"] == "ingest-1"
+        assert result["started_at"] == _NOW
+        builder.eq.assert_called_with("id", _ingest_log_row_id("ingest-1"))
 
     def test_returns_none(self, mock_client: MagicMock) -> None:
         builder = _make_builder(data=None)
@@ -1364,23 +1392,36 @@ class TestGetIngestResult:
 
 
 class TestListIngestHistory:
-    def test_returns_rows(self, mock_client: MagicMock) -> None:
-        rows = [{"ingest_id": "ingest-2"}, {"ingest_id": "ingest-1"}]
+    def test_returns_rows_filtered_by_source_and_org(self, mock_client: MagicMock) -> None:
+        rows = [
+            _live_ingest_row("ingest-2"),
+            _live_ingest_row("ingest-3", source=ThreatFeedSourceEnum.MITRE_ATTACK),
+            _live_ingest_row("ingest-4", org_id="org-other"),
+            _live_ingest_row("ingest-1"),
+        ]
         builder = _make_builder(data=rows)
         mock_client.table.return_value = builder
 
         with patch(_PATCH_TARGET, return_value=mock_client):
             result = IOCStore().list_ingest_history(
                 source=ThreatFeedSourceEnum.CUSTOM_IOC,
-                org_id="org-1",
+                org_id="org-test",
                 limit=10,
-                offset=5,
             )
 
-        assert result == rows
-        builder.order.assert_called_once_with("started_at", desc=True)
-        builder.or_.assert_called_once()
-        builder.range.assert_called_once_with(5, 14)
+        assert [row["ingest_id"] for row in result] == ["ingest-2", "ingest-1"]
+        assert all(row["started_at"] == _NOW for row in result)
+        builder.order.assert_called_once_with("run_started_at", desc=True)
+        builder.range.assert_called_once_with(0, 99)
+
+    def test_offset_skips_matching_rows(self, mock_client: MagicMock) -> None:
+        builder = _make_builder(data=[_live_ingest_row("ingest-2"), _live_ingest_row("ingest-1")])
+        mock_client.table.return_value = builder
+
+        with patch(_PATCH_TARGET, return_value=mock_client):
+            result = IOCStore().list_ingest_history(limit=1, offset=1)
+
+        assert [row["ingest_id"] for row in result] == ["ingest-1"]
 
     def test_exception_returns_empty_list(self, mock_client: MagicMock) -> None:
         mock_client.table.side_effect = RuntimeError("db error")
@@ -1427,7 +1468,7 @@ class TestHealthCheck:
         assert result["backend"] == "fallback"
 
     def test_client_health_check_ok(self, mock_client: MagicMock) -> None:
-        builder = _make_builder(data=[{"ioc_id": "ioc-1"}], count=3)
+        builder = _make_builder(data=[{"id": "ioc-1"}], count=3)
         mock_client.table.return_value = builder
 
         with patch(_PATCH_TARGET, return_value=mock_client):

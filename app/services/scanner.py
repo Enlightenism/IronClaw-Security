@@ -91,10 +91,10 @@ def load_builtin_patterns_from_db() -> int:
         try:
             scan_rows: list[dict[str, Any]] = client.select(
                 "scan_patterns",
-                columns="id,pattern,severity,category",
+                columns="pattern_id,pattern,severity,category",
             )
             for row in scan_rows:
-                rule_id = row.get("id")
+                rule_id = row.get("pattern_id")
                 pattern = row.get("pattern") or ""
                 severity = row.get("severity") or "medium"
                 category = row.get("category") or "unknown"
@@ -114,18 +114,18 @@ def load_builtin_patterns_from_db() -> int:
             logger.warning("scanner: scan_patterns load failed — skipping layer: %s", exc)
 
         # --- Layer 2: policy_rules (highest precedence) ---
-        # Pulls rows that carry a non-empty pattern string so that policies
+        # Pulls rows that carry a non-empty target_match string so that policies
         # configured at runtime override static defaults without a redeploy.
         try:
             policy_rows: list[dict[str, Any]] = client.select(
                 "policy_rules",
-                columns="id,pattern,severity,category",
-                filters={"pattern": "not.is.null"},
+                columns="id,target_match,severity,category",
+                filters={"target_match": "not.is.null"},
             )
             policy_loaded = 0
             for row in policy_rows:
                 rule_id = row.get("id")
-                pattern = (row.get("pattern") or "").strip()
+                pattern = (row.get("target_match") or "").strip()
                 severity = row.get("severity") or "medium"
                 category = row.get("category") or "policy"
                 if not rule_id or not pattern:

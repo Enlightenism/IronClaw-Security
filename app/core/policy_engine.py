@@ -434,7 +434,7 @@ def _load_rules_for_set(set_key: str) -> list[dict[str, Any]]:
         if result and isinstance(result, dict):
             rules: list[dict[str, Any]] = result.get("rules") or []
             if isinstance(rules, list):
-                active_rules = [r for r in rules if isinstance(r, dict) and r.get("is_active", True)]
+                active_rules = [r for r in rules if isinstance(r, dict) and r.get("enabled", True)]
                 _set_cached_rules(set_key, active_rules)
                 return active_rules
     except Exception as exc:  # noqa: BLE001

@@ -504,10 +504,10 @@ def check_rule_group_db_sync() -> dict[str, Any]:
         client = get_supabase_client()
         rows: list[dict[str, Any]] = client.select(
             "scan_patterns",
-            columns="id",
+            columns="pattern_id",
         )
 
-        db_ids: set[str] = {row["id"] for row in rows if row.get("id")}
+        db_ids: set[str] = {row["pattern_id"] for row in rows if row.get("pattern_id")}
         report["db_count"] = len(db_ids)
 
         in_memory_only = sorted(memory_ids - db_ids)
