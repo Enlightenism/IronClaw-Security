@@ -308,7 +308,8 @@ class InstallKeyHandoffService:
                 )
                 if str(row["key_version"]) != _KEY_VERSION:
                     raise InstallKeyHandoffError("Saved install command uses an unsupported encryption version.")
-                encrypted_command = base64.b64decode(str(row["encrypted_command_base64"]), validate=True)
+                # Postgres encode(..., 'base64') wraps lines every 76 characters.
+                encrypted_command = base64.b64decode("".join(str(row["encrypted_command_base64"]).split()), validate=True)
                 command = self._fernet().decrypt(encrypted_command).decode("utf-8")
             except (KeyError, ValueError, InvalidToken) as exc:
                 raise InstallKeyHandoffError("Saved install command could not be decrypted.") from exc
@@ -409,7 +410,8 @@ class InstallKeyHandoffService:
             )
             if str(row["key_version"]) != _KEY_VERSION:
                 raise InstallKeyHandoffError("Install-key secret uses an unsupported encryption version.")
-            encrypted_key = base64.b64decode(str(row["encrypted_key_base64"]), validate=True)
+            # Postgres encode(..., 'base64') wraps lines every 76 characters.
+            encrypted_key = base64.b64decode("".join(str(row["encrypted_key_base64"]).split()), validate=True)
             install_key = self._fernet().decrypt(encrypted_key).decode("utf-8")
         except (KeyError, ValueError, InvalidToken) as exc:
             raise InstallKeyHandoffError("Install-key claim could not be decrypted.") from exc

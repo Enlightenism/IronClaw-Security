@@ -6,7 +6,8 @@ from typing import Final, Literal
 
 IRONCLAW_GITHUB_REPOSITORY: Final[str] = "Enlightenism/IronClaw-Security"
 IRONCLAW_REPOSITORY_URL: Final[str] = f"https://github.com/{IRONCLAW_GITHUB_REPOSITORY}.git"
-IRONCLAW_INSTALLER_SOURCE_URL: Final[str] = f"git+{IRONCLAW_REPOSITORY_URL}"
+IRONCLAW_INSTALLER_TAG: Final[str] = "v1.0.0"
+IRONCLAW_INSTALLER_SOURCE_URL: Final[str] = f"git+{IRONCLAW_REPOSITORY_URL}@{IRONCLAW_INSTALLER_TAG}"
 IRONCLAW_PUBLIC_BASE_URL: Final[str] = "https://ironclaw-security.onrender.com"
 SECURITY_GUARDIAN_SKILL_NAME: Final[str] = "ironclaw-security"
 SECURITY_GUARDIAN_SKILL_REPOSITORY_PATH: Final[str] = f"skills/{SECURITY_GUARDIAN_SKILL_NAME}"
