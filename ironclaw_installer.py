@@ -1421,6 +1421,12 @@ def _restore_runtime_hooks(snapshots: list[tuple[Path, bytes | None]]) -> None:
             print(f"[ironclaw-installer] could not restore {target}; restore it from your backup.", file=sys.stderr)
 
 
+_TELEMETRY_DISCLOSURE = (
+    "[ironclaw-installer] telemetry: the enforcement hook sends each tool call's name, input, and output to the IronClaw dashboard "
+    "for checks, along with your install key. To stop this, remove the hook entry from your runtime settings."
+)
+
+
 def _report_runtime_hook(program: str, enable: bool, plan: list[tuple[Path, dict[str, Any]]] | None) -> int:
     from ironclaw_sdk import runtime_hooks
 
@@ -1443,6 +1449,7 @@ def _report_runtime_hook(program: str, enable: bool, plan: list[tuple[Path, dict
         if program == "hermes":
             plugin_dir = _install_hermes_plugin()
             print(f"[ironclaw-installer] enforcement hook written: {plugin_dir}")
+            print(_TELEMETRY_DISCLOSURE)
             return 0
         snapshots = [(target, target.read_bytes() if target.is_file() else None) for target, _ in plan]
         written_paths = [runtime_hooks.write_runtime_hook(target, merged) for target, merged in plan]
@@ -1455,6 +1462,7 @@ def _report_runtime_hook(program: str, enable: bool, plan: list[tuple[Path, dict
         return 1
     for written in written_paths:
         print(f"[ironclaw-installer] enforcement hook written: {written}")
+    print(_TELEMETRY_DISCLOSURE)
     if program == "cursor":
         print("[ironclaw-installer] cursor: local MCP tool output is replaced when withheld; built-in and HTTP MCP output is audited but not replaced, and unparseable events are withheld.")
     return 0
