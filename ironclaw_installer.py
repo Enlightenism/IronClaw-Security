@@ -481,7 +481,7 @@ def _normalize_install_claim_map(values: list[str] | tuple[str, ...] | None) -> 
 
 def _redeem_install_claim(base_url: str, program: str, claim_token: str) -> str:
     validated_claim = _validate_install_claim_for_runtime(program, claim_token)
-    endpoint = urljoin(f"{base_url.rstrip('/')}/", "integrations/install-claims/redeem")
+    endpoint = urljoin(f"{base_url.rstrip('/')}/", "api/integrations/install-claims/redeem")
     request = Request(
         endpoint,
         data=json.dumps({"claim_token": validated_claim}).encode("utf-8"),

@@ -493,7 +493,7 @@ def test_run_install_redeems_claim_and_keeps_key_out_of_results(
 
     request = requests[0]
     assert request.get_method() == "POST"
-    assert request.full_url.endswith("/integrations/install-claims/redeem")
+    assert request.full_url.endswith("/api/integrations/install-claims/redeem")
     assert json.loads(request.data) == {"claim_token": claim_token}
 
     runtime_payload = json.loads(result.config_file.read_text(encoding="utf-8"))
@@ -552,7 +552,7 @@ def test_run_bootstrap_redeems_once_persists_privately_and_installs_the_shared_s
 
     request = requests[0]
     assert request.get_method() == "POST"
-    assert request.full_url == ("https://ironclaw-security.onrender.com/integrations/install-claims/redeem")
+    assert request.full_url == ("https://ironclaw-security.onrender.com/api/integrations/install-claims/redeem")
     assert json.loads(request.data) == {"claim_token": claim_token}
     assert commands == [["/usr/bin/claude", "--version"]]
     installed_skill = tmp_path / "home" / ".claude" / "skills" / "ironclaw-security" / "SKILL.md"
@@ -613,7 +613,7 @@ def test_run_bootstrap_installs_fail_closed_openclaw_plugin(
 
     plugin_dir = config_dir / "openclaw-plugin"
     config_file = (config_dir / install_module.DEFAULT_CONFIG_FILENAME).resolve()
-    assert requests[0].full_url == "https://ironclaw-security.onrender.com/integrations/install-claims/redeem"
+    assert requests[0].full_url == "https://ironclaw-security.onrender.com/api/integrations/install-claims/redeem"
     assert json.loads(requests[0].data) == {"claim_token": claim_token}
     assert commands == [
         [

@@ -17,6 +17,7 @@ from app.core.install_key_formats import (
     SECURITY_GUARDIAN_SKILL_FILE_PATH,
     SECURITY_GUARDIAN_SKILL_ROUTE,
 )
+from app.main import app as production_app
 from app.routes.integrations.installer import router as installer_router
 from app.services.install_key_handoff import InstallKeySecretUnavailableError
 
@@ -846,3 +847,14 @@ def test_install_claim_redemption_returns_key_once_without_caching(client: TestC
     }
     assert response.headers["cache-control"] == "no-store, private"
     handoff_service.redeem_claim.assert_called_once_with("ic_claim_single_use_0123456789")
+
+
+def test_install_claim_redeem_is_routed_under_api_prefix_in_production_app() -> None:
+    """Verify production routing for the redeem path.
+
+    No X-API-Key is sent on purpose: the route returns 422 for an empty body without auth.
+    If auth is added in front of this route, this test should fail and be updated.
+    """
+    with TestClient(production_app) as client:
+        response = client.post("/api/integrations/install-claims/redeem", json={})
+    assert response.status_code == 422
