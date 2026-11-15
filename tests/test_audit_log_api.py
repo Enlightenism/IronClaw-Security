@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from pathlib import Path
+
 from fastapi.testclient import TestClient
+import pytest
 
 from app.dependencies.action_execute import reset_action_execute_pipeline
 from app.main import app
@@ -8,16 +12,21 @@ from app.orchestrator.security_audit_log import (
     initialize_security_audit_log,
     record_policy_decision,
 )
-from app.services.audit_log_service import reset_audit_log, set_audit_log
+from app.services.audit_log_service import get_audit_log, reset_audit_log, set_audit_log
 from app.services.review_queue_service import reset_review_queue
 
 client = TestClient(app)
 
 
-def setup_function() -> None:
+@pytest.fixture(autouse=True)
+def _isolate_audit_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.chdir(tmp_path)
+    saved_audit_log = get_audit_log()
     reset_audit_log()
     reset_review_queue()
     reset_action_execute_pipeline()
+    yield
+    set_audit_log(saved_audit_log)
 
 
 def _seed_audit_event(

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from app.orchestrator.secure_runtime_pipeline import (
     initialize_secure_runtime_pipeline,
     run_secure_runtime,
@@ -7,7 +11,8 @@ from app.orchestrator.secure_runtime_pipeline import (
 )
 
 
-def test_run_secure_runtime_allows_safe_request() -> None:
+def test_run_secure_runtime_allows_safe_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
     pipeline = initialize_secure_runtime_pipeline(
         audit_log_path="output/test-security-events-runtime-allow.jsonl",
     )
@@ -36,7 +41,8 @@ def test_run_secure_runtime_allows_safe_request() -> None:
     assert summary["action_type"] == "file_edit"
 
 
-def test_run_secure_runtime_blocks_high_risk_request() -> None:
+def test_run_secure_runtime_blocks_high_risk_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
     pipeline = initialize_secure_runtime_pipeline(
         audit_log_path="output/test-security-events-runtime-block.jsonl",
     )
@@ -64,7 +70,8 @@ def test_run_secure_runtime_blocks_high_risk_request() -> None:
     assert summary["response_status"] in {"denied", "queued_for_review"}
 
 
-def test_summarize_secure_runtime_result_contains_expected_keys() -> None:
+def test_summarize_secure_runtime_result_contains_expected_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
     pipeline = initialize_secure_runtime_pipeline(
         audit_log_path="output/test-security-events-runtime-summary.jsonl",
     )

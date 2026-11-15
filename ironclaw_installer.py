@@ -53,6 +53,7 @@ DEFAULT_RETENTION_DAYS: Final[int] = 30
 DEFAULT_PROVIDER_TARGETS: Final[tuple[str, ...]] = tuple(InstallKeyFormatRegistry.list_programs())
 _CANONICAL_RUNTIME_TARGETS: Final[tuple[str, ...]] = DEFAULT_PROVIDER_TARGETS
 _INSTALL_CLAIM_PATTERN: Final[re.Pattern[str]] = re.compile(r"ic_claim_[A-Za-z0-9_-]{20,128}\Z")
+_INSTALL_KEY_BODY_PATTERN: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9_-]+\Z")
 _MAX_CLAIM_RESPONSE_BYTES: Final[int] = 16_384
 _MAX_USER_CONFIG_BYTES: Final[int] = 1_048_576
 _GENERIC_INSTALL_KEY_PREFIXES: Final[tuple[str, ...]] = (
@@ -395,38 +396,6 @@ def _canonical_program_name(value: str | None) -> str | None:
     return normalize_install_key_program(normalized)
 
 
-def _is_placeholder_or_masked_install_key(candidate: str) -> bool:
-    value = str(candidate).strip()
-    if not value:
-        return True
-    lowered = value.lower()
-    placeholder_tokens = (
-        "placeholder",
-        "fake",
-        "faker",
-        "stale",
-        "dummy",
-        "example",
-        "demo",
-        "test",
-        "mask",
-        "masked",
-        "none",
-        "null",
-        "undefined",
-        "missing",
-        "not_set",
-        "your_key",
-    )
-    if lowered in placeholder_tokens:
-        return True
-    if any(token in lowered for token in placeholder_tokens):
-        return True
-    if "..." in value or "***" in value or "*" in value and len(value) <= 24:
-        return True
-    return False
-
-
 def _validate_install_key_for_runtime(program: str | None, install_key: str | None) -> str:
     runtime_program = _canonical_program_name(program)
     if runtime_program is None or runtime_program not in _CANONICAL_RUNTIME_TARGETS:
@@ -436,20 +405,16 @@ def _validate_install_key_for_runtime(program: str | None, install_key: str | No
     if not candidate:
         raise IronClawInstallerError(f"A valid paid install key is required for {runtime_program}; blank values are rejected.")
 
-    if _is_placeholder_or_masked_install_key(candidate):
-        raise IronClawInstallerError(f"A valid paid install key is required for {runtime_program}; placeholder, masked, or stale values are rejected.")
-
     lower = candidate.lower()
     if any(lower.startswith(prefix) for prefix in _GENERIC_INSTALL_KEY_PREFIXES):
         raise IronClawInstallerError(f"A valid paid install key is required for {runtime_program}; generic platform auth values are rejected.")
     if candidate.startswith("ic_org_"):
         raise IronClawInstallerError(f"A valid paid install key is required for {runtime_program}; organization keys are not runtime install keys.")
 
-    expected_prefix = InstallKeyFormatRegistry.get_spec(runtime_program).prefix
-    if candidate.startswith("ic_") and not candidate.startswith(expected_prefix):
-        raise IronClawInstallerError(f"A valid paid install key is required for {runtime_program}; key prefix mismatch for canonical runtime family.")
-    if not candidate.startswith(expected_prefix):
-        raise IronClawInstallerError(f"A valid paid install key is required for {runtime_program}; expected prefix {expected_prefix!r}.")
+    spec = InstallKeyFormatRegistry.get_spec(runtime_program)
+    # Server keys are prefix + secrets.token_urlsafe(32), so the body is URL-safe characters only; this also rejects masked values such as "..." or "*".
+    if not spec.matches_key(candidate) or not _INSTALL_KEY_BODY_PATTERN.fullmatch(candidate[len(spec.prefix) :]):
+        raise IronClawInstallerError(f"A valid paid install key is required for {runtime_program}; expected prefix {spec.prefix!r} followed by URL-safe characters.")
 
     return candidate
 
@@ -645,15 +610,15 @@ def _runtime_skill_install_command(program: str) -> list[str]:
     ]
 
 
-def _check_claude_code_version() -> str | None:
-    # A missing Claude Code binary stops the install before redeeming, since there is nothing to protect.
-    # Any version is accepted; an old, unknown, or unreadable version returns a warning instead of blocking.
+def _check_claude_code_version() -> None:
+    # Runs before redeeming so a missing, unreadable, or outdated Claude Code does not consume the single-use claim.
     claude_path = shutil.which("claude")
     if claude_path is None:
         raise IronClawInstallerError(
             "Required installer 'claude' was not found. Install Claude Code and run the same command again; the claim was not redeemed.",
         )
     required = ".".join(str(part) for part in _CLAUDE_CODE_MIN_VERSION)
+    unreadable_message = f"Could not read the Claude Code version. The fail-closed hook needs Claude Code {required} or newer; on older builds a hook crash or timeout fails open. The claim was not redeemed."
     try:
         result = subprocess.run(
             [claude_path, "--version"],
@@ -662,14 +627,15 @@ def _check_claude_code_version() -> str | None:
             text=True,
             timeout=_SUBPROCESS_TIMEOUT,
         )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return f"Could not read the Claude Code version. The fail-closed hook needs Claude Code {required} or newer; on older builds a hook crash or timeout fails open."
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise IronClawInstallerError(unreadable_message) from exc
     match = _VERSION_PATTERN.search(result.stdout)
     if match is None:
-        return f"Could not read the Claude Code version. The fail-closed hook needs Claude Code {required} or newer; on older builds a hook crash or timeout fails open."
+        raise IronClawInstallerError(unreadable_message)
     if tuple(int(part) for part in match.groups()) < _CLAUDE_CODE_MIN_VERSION:
-        return f"Claude Code {'.'.join(match.groups())} is older than {required}. Update Claude Code so the fail-closed hook applies; until then a hook crash or timeout fails open."
-    return None
+        raise IronClawInstallerError(
+            f"Claude Code {'.'.join(match.groups())} is older than {required}. Update Claude Code so the fail-closed hook applies; until then a hook crash or timeout fails open. The claim was not redeemed.",
+        )
 
 
 def _preflight_claude_code_environment() -> None:
@@ -822,6 +788,14 @@ def _store_install_key(
     return config_file
 
 
+def _raise_if_install_key_stored(config_file: Path, program: str) -> None:
+    stored_keys = _read_bootstrap_config(config_file).get("install_keys")
+    if isinstance(stored_keys, dict) and isinstance(stored_keys.get(program), str) and stored_keys[program].strip():
+        raise IronClawInstallerError(
+            f"An install key for {program} is already stored in {config_file}. The claim was not redeemed and the stored key was left unchanged; only the hook or skill step needs to be rerun.",
+        )
+
+
 def _redeem_claim_into_config(
     *,
     program: str,
@@ -836,6 +810,8 @@ def _redeem_claim_into_config(
     validated_claim = _validate_install_claim_for_runtime(runtime_program, claim_token)
     normalized_base_url = _normalize_base_url(base_url)
     target_config_dir = _prepare_config_dir(config_dir)
+    config_file = target_config_dir / DEFAULT_CONFIG_FILENAME
+    _raise_if_install_key_stored(config_file, runtime_program)
     install_key = _redeem_install_claim(normalized_base_url, runtime_program, validated_claim)
     config_file = _store_install_key(
         target_config_dir=target_config_dir,
@@ -855,10 +831,9 @@ def run_bootstrap(
     on_key_saved: Callable[[], None] | None = None,
 ) -> BootstrapResult:
     installer_program = _canonical_program_name(program)
-    version_warning: str | None = None
     if installer_program == "claude_code":
-        # Checked before redeeming so a missing Claude Code does not consume the single-use claim.
-        version_warning = _check_claude_code_version()
+        # Checked before redeeming so a missing or outdated Claude Code does not consume the single-use claim.
+        _check_claude_code_version()
         _preflight_claude_code_environment()
     elif installer_program is not None and installer_program in _CANONICAL_RUNTIME_TARGETS:
         # Checked before redeeming so a missing installer does not consume the single-use claim.
@@ -886,7 +861,6 @@ def run_bootstrap(
             program=runtime_program,
             config_file=config_file,
             skill_name=SECURITY_GUARDIAN_SKILL_NAME,
-            warnings=((version_warning,) if version_warning else ()),
         )
 
     command = _runtime_skill_install_command(runtime_program)
@@ -919,6 +893,10 @@ def run_redeem(
     base_url: str = DEFAULT_BOOTSTRAP_BASE_URL,
 ) -> BootstrapResult:
     """Redeem a claim and store the key. The generic skill-install command shown next to it installs the skill."""
+    if _canonical_program_name(program) == "claude_code":
+        # Checked before redeeming so a missing or outdated Claude Code does not consume the single-use claim.
+        _check_claude_code_version()
+        _preflight_claude_code_environment()
     runtime_program, target_config_dir, config_file = _redeem_claim_into_config(
         program=program,
         claim_token=claim_token,
@@ -947,8 +925,7 @@ def save_install_key(
     runtime_program = _canonical_program_name(program)
     if runtime_program is None or runtime_program not in _CANONICAL_RUNTIME_TARGETS:
         raise IronClawInstallerError(f"Unsupported runtime target for install-key storage: {program!r}")
-    if not InstallKeyFormatRegistry.get_spec(runtime_program).matches_key(install_key):
-        raise IronClawInstallerError(f"Install key does not match the {runtime_program} key format.")
+    install_key = _validate_install_key_for_runtime(runtime_program, install_key)
 
     normalized_base_url = _normalize_base_url(base_url)
     target_config_dir = _prepare_config_dir(config_dir)
@@ -1152,6 +1129,8 @@ def run_install(config: InstallConfig) -> InstallResult:
     _validate_project_root(config.project_root)
     _ensure_directory(config.config_dir)
 
+    for program in config.install_claims:
+        _raise_if_install_key_stored(config.config_file, program)
     install_keys = {program: _redeem_install_claim(config.base_url, program, claim_token) for program, claim_token in config.install_claims.items()}
     config_payload = _build_runtime_config(config, install_keys)
     wrote_config, config_existed_before = _write_json_file(

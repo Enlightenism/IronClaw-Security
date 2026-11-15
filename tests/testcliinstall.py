@@ -207,6 +207,65 @@ def test_install_claims_use_canonical_runtime_names_and_commands(
 
 
 @pytest.mark.parametrize(
+    "install_key",
+    [
+        "ic_install_openclaw_Q3testK9xLmV-aB7pZr0wYdE2nHgJ5",
+        "ic_install_openclaw_mask_demo_null_Lp2-Zk9xQw_Ab3c",
+        "ic_install_openclaw_none0FakeExampleZq8-Ab3TvW7",
+    ],
+)
+def test_server_issued_key_with_denylisted_substring_in_random_body_is_accepted(
+    install_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    install_key: str,
+) -> None:
+    monkeypatch.setattr(
+        install_module,
+        "_open_install_claim_request",
+        lambda request, *, timeout: io.BytesIO(
+            json.dumps({"key_id": "ik_openclaw_001", "program": "openclaw", "install_key": install_key}).encode("utf-8"),
+        ),
+    )
+
+    assert install_module._redeem_install_claim("https://example.test", "openclaw", "ic_claim_0123456789abcdefghij") == install_key
+
+
+@pytest.mark.parametrize(
+    "install_key",
+    [
+        "ic_install_claude_code_abc123",
+        "abc123",
+        "ic_install_openclaw_",
+        "ic_install_openclaw_abc.123",
+        "ic_install_openclaw_abc/123",
+        "ic_install_openclaw_abc 123",
+        "ic_install_openclaw_...abcd",
+        "ic_install_openclaw_***",
+    ],
+)
+def test_server_issued_key_rejects_wrong_prefix_or_charset(install_module: Any, install_key: str) -> None:
+    with pytest.raises(install_module.IronClawInstallerError, match="install key"):
+        install_module._validate_install_key_for_runtime("openclaw", install_key)
+
+
+def test_save_install_key_stores_server_format_key_with_denylisted_body(install_module: Any, tmp_path: Path) -> None:
+    install_key = "ic_install_claude_code_test_Q3x-Lm9_abcdEF12"
+
+    install_module.save_install_key(program="claude_code", install_key=install_key, config_dir=tmp_path)
+
+    stored = json.loads((tmp_path / install_module.DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
+    assert stored["install_keys"]["claude_code"] == install_key
+
+
+@pytest.mark.parametrize("install_key", ["ic_install_claude_code_abc.123", "ic_install_claude_code_***", "ic_org_claude_code_abc123"])
+def test_save_install_key_rejects_wrong_prefix_or_charset(install_module: Any, tmp_path: Path, install_key: str) -> None:
+    with pytest.raises(install_module.IronClawInstallerError, match="install key"):
+        install_module.save_install_key(program="claude_code", install_key=install_key, config_dir=tmp_path)
+
+    assert not (tmp_path / install_module.DEFAULT_CONFIG_FILENAME).exists()
+
+
+@pytest.mark.parametrize(
     ("runtime_program", "claim_token"),
     [
         (program, "ic_claim_0123456789abcdefghij")
@@ -821,21 +880,14 @@ def test_report_runtime_hook_restores_claude_code_settings_when_write_fails(
         ("unknown\n", "Could not read the Claude Code version"),
     ],
 )
-def test_run_bootstrap_warns_but_installs_on_unsupported_claude_code(
+def test_run_bootstrap_blocks_unsupported_claude_code_before_redeeming(
     install_module: Any,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     version_output: str,
     message: str,
 ) -> None:
-    install_key = "ik_claude_version_warning_001"
     requests: list[Any] = []
-
-    def fake_open_claim_request(request: Any, *, timeout: float) -> io.BytesIO:
-        requests.append(request)
-        return io.BytesIO(
-            json.dumps({"key_id": "ik_claude_version_001", "program": "claude_code", "install_key": install_key}).encode("utf-8"),
-        )
 
     monkeypatch.setattr(install_module.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(
@@ -843,21 +895,188 @@ def test_run_bootstrap_warns_but_installs_on_unsupported_claude_code(
         "run",
         lambda command, **kwargs: install_module.subprocess.CompletedProcess(command, 0, stdout=version_output, stderr=""),
     )
+    monkeypatch.setattr(install_module, "_open_install_claim_request", lambda request, *, timeout: requests.append(request))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+
+    config_dir = tmp_path / "user-config"
+    with pytest.raises(install_module.IronClawInstallerError, match=message) as exc_info:
+        install_module.run_bootstrap(
+            program="claude_code",
+            claim_token="ic_claim_0123456789abcdefghij",
+            config_dir=config_dir,
+        )
+
+    assert "The claim was not redeemed" in str(exc_info.value)
+    assert requests == []
+    assert not (config_dir / install_module.DEFAULT_CONFIG_FILENAME).exists()
+
+
+@pytest.mark.parametrize(
+    ("which_result", "run_stdout", "run_error", "message"),
+    [
+        (None, None, None, "'claude' was not found"),
+        ("/usr/bin/claude", None, OSError("version probe failed"), "Could not read the Claude Code version"),
+        ("/usr/bin/claude", "unknown\n", None, "Could not read the Claude Code version"),
+        ("/usr/bin/claude", "2.1.294 (Claude Code)\n", None, "Claude Code 2.1.294 is older than 2.1.295"),
+    ],
+)
+def test_check_claude_code_version_raises_for_missing_unreadable_or_outdated_claude(
+    install_module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    which_result: str | None,
+    run_stdout: str | None,
+    run_error: Exception | None,
+    message: str,
+) -> None:
+    def fake_run(command: list[str], **kwargs: Any) -> install_module.subprocess.CompletedProcess[str]:
+        if run_error is not None:
+            raise run_error
+        return install_module.subprocess.CompletedProcess(command, 0, stdout=run_stdout, stderr="")
+
+    monkeypatch.setattr(install_module.shutil, "which", lambda name: which_result)
+    monkeypatch.setattr(install_module.subprocess, "run", fake_run)
+
+    with pytest.raises(install_module.IronClawInstallerError, match=message) as exc_info:
+        install_module._check_claude_code_version()
+
+    assert "The claim was not redeemed" in str(exc_info.value)
+
+
+def test_check_claude_code_version_accepts_minimum_supported_version(install_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(install_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        install_module.subprocess,
+        "run",
+        lambda command, **kwargs: install_module.subprocess.CompletedProcess(command, 0, stdout="2.1.295 (Claude Code)\n", stderr=""),
+    )
+
+    assert install_module._check_claude_code_version() is None
+
+
+def test_run_bootstrap_refuses_to_redeem_when_claude_code_key_is_already_stored(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[Any] = []
+    config_dir = tmp_path / "user-config"
+    config_dir.mkdir()
+    config_file = config_dir / install_module.DEFAULT_CONFIG_FILENAME
+    original_config = json.dumps({"install_keys": {"claude_code": "ic_install_claude_code_stored123"}})
+    config_file.write_text(original_config, encoding="utf-8")
+
+    monkeypatch.setattr(install_module, "_check_claude_code_version", lambda: None)
+    monkeypatch.setattr(install_module, "_preflight_claude_code_environment", lambda: None)
+    monkeypatch.setattr(install_module, "_open_install_claim_request", lambda request, *, timeout: requests.append(request))
+
+    with pytest.raises(install_module.IronClawInstallerError, match="already stored.*only the hook or skill step needs to be rerun"):
+        install_module.run_bootstrap(
+            program="claude_code",
+            claim_token="ic_claim_0123456789abcdefghij",
+            config_dir=config_dir,
+        )
+
+    assert requests == []
+    assert config_file.read_text(encoding="utf-8") == original_config
+
+
+def test_run_install_refuses_to_redeem_when_install_key_is_already_stored(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[Any] = []
+    config_dir = tmp_path / ".ironclaw-user"
+    config_dir.mkdir()
+    config_file = config_dir / install_module.DEFAULT_CONFIG_FILENAME
+    original_config = json.dumps({"install_keys": {"claude_code": "ic_install_claude_code_stored123"}})
+    config_file.write_text(original_config, encoding="utf-8")
+
+    parser = install_module.build_parser()
+    args = parser.parse_args(
+        [
+            "--project-root",
+            str(tmp_path),
+            "--config-dir",
+            str(config_dir),
+            "--install-claim",
+            "claude_code=ic_claim_0123456789abcdefghij",
+        ],
+    )
+    config = install_module.build_install_config(args)
+
+    monkeypatch.setattr(install_module, "_validate_project_root", lambda project_root: None)
+    monkeypatch.setattr(install_module, "_open_install_claim_request", lambda request, *, timeout: requests.append(request))
+
+    with pytest.raises(install_module.IronClawInstallerError, match="already stored.*only the hook or skill step needs to be rerun"):
+        install_module.run_install(config)
+
+    assert requests == []
+    assert config_file.read_text(encoding="utf-8") == original_config
+
+
+def test_run_redeem_blocks_claude_code_below_minimum_before_redeeming(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[Any] = []
+    config_dir = tmp_path / "user-config"
+
+    monkeypatch.setattr(install_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        install_module.subprocess,
+        "run",
+        lambda command, **kwargs: install_module.subprocess.CompletedProcess(command, 0, stdout="2.1.294 (Claude Code)\n", stderr=""),
+    )
+    monkeypatch.setattr(install_module, "_open_install_claim_request", lambda request, *, timeout: requests.append(request))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+
+    with pytest.raises(install_module.IronClawInstallerError, match="Claude Code 2.1.294 is older than 2.1.295") as exc_info:
+        install_module.run_redeem(
+            program="claude_code",
+            claim_token="ic_claim_0123456789abcdefghij",
+            config_dir=config_dir,
+        )
+
+    assert "The claim was not redeemed" in str(exc_info.value)
+    assert requests == []
+    assert not (config_dir / install_module.DEFAULT_CONFIG_FILENAME).exists()
+
+
+def test_run_redeem_redeems_claude_code_at_minimum_version(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_key = "ic_install_claude_code_abc123"
+    requests: list[Any] = []
+
+    def fake_open_claim_request(request: Any, *, timeout: float) -> io.BytesIO:
+        requests.append(request)
+        return io.BytesIO(
+            json.dumps({"key_id": "ik_claude_redeem_001", "program": "claude_code", "install_key": install_key}).encode("utf-8"),
+        )
+
+    monkeypatch.setattr(install_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        install_module.subprocess,
+        "run",
+        lambda command, **kwargs: install_module.subprocess.CompletedProcess(command, 0, stdout="2.1.295 (Claude Code)\n", stderr=""),
+    )
     monkeypatch.setattr(install_module, "_open_install_claim_request", fake_open_claim_request)
     monkeypatch.setattr(install_module, "_restrict_private_file_permissions", lambda _: None)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
 
     config_dir = tmp_path / "user-config"
-    result = install_module.run_bootstrap(
+    result = install_module.run_redeem(
         program="claude_code",
         claim_token="ic_claim_0123456789abcdefghij",
         config_dir=config_dir,
     )
 
     assert len(requests) == 1
-    assert len(result.warnings) == 1
-    assert message in result.warnings[0]
-    assert (tmp_path / "home" / ".claude" / "skills" / "ironclaw-security" / "SKILL.md").is_file()
+    assert result.program == "claude_code"
     saved_config = json.loads((config_dir / install_module.DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
     assert saved_config["install_keys"] == {"claude_code": install_key}
 

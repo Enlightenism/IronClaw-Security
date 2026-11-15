@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -11,7 +13,16 @@ from app.orchestrator.security_audit_log import (
     record_policy_decision,
 )
 from app.services import history as history_service
-from app.services.audit_log_service import set_audit_log
+from app.services.audit_log_service import get_audit_log, reset_audit_log, set_audit_log
+
+
+@pytest.fixture(autouse=True)
+def _isolate_audit_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.chdir(tmp_path)
+    saved_audit_log = get_audit_log()
+    reset_audit_log()
+    yield
+    set_audit_log(saved_audit_log)
 
 
 def _seed_history_event(

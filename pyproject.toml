@@ -121,6 +121,7 @@ ironclaw-testclient = "testclient:main"
 include-package-data = true
 py-modules = [
   "cli_brain",
+  "client",
   "ironclaw_installer",
   "ironclawclient",
   "ironclawshellguard",
@@ -133,8 +134,11 @@ py-modules = [
 where = ["."]
 include = [
   "app*",
+  "frontend*",
   "ironclawskill*",
-  "ironclaw_sdk*"
+  "ironclaw_sdk*",
+  "ironclaw_skill*",
+  "sandbox_broker*"
 ]
 exclude = [
   "tests*",
