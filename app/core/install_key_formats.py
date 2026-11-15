@@ -6,7 +6,7 @@ from typing import Final, Literal
 
 IRONCLAW_GITHUB_REPOSITORY: Final[str] = "Enlightenism/IronClaw-Security"
 IRONCLAW_REPOSITORY_URL: Final[str] = f"https://github.com/{IRONCLAW_GITHUB_REPOSITORY}.git"
-IRONCLAW_INSTALLER_TAG: Final[str] = "v1.0.0"
+IRONCLAW_INSTALLER_TAG: Final[str] = "v1.0.1"
 IRONCLAW_INSTALLER_SOURCE_URL: Final[str] = f"git+{IRONCLAW_REPOSITORY_URL}@{IRONCLAW_INSTALLER_TAG}"
 IRONCLAW_PUBLIC_BASE_URL: Final[str] = "https://ironclaw-security.onrender.com"
 SECURITY_GUARDIAN_SKILL_NAME: Final[str] = "ironclaw-security"
@@ -15,7 +15,7 @@ SECURITY_GUARDIAN_SKILL_FILE_PATH: Final[str] = f"{SECURITY_GUARDIAN_SKILL_REPOS
 SECURITY_GUARDIAN_SKILL_ROUTE: Final[str] = f"/{SECURITY_GUARDIAN_SKILL_FILE_PATH}"
 SECURITY_GUARDIAN_SKILL_URL: Final[str] = f"{IRONCLAW_PUBLIC_BASE_URL}{SECURITY_GUARDIAN_SKILL_ROUTE}"
 
-_INSTALL_CLAIM_PREFIX_TEMPLATE: Final[str] = f"python -m pip install --no-deps --upgrade {IRONCLAW_INSTALLER_SOURCE_URL}\npython -m ironclaw_installer bootstrap --program {{program}} --claim-token {{claim_token}}"
+_INSTALL_CLAIM_PREFIX_TEMPLATE: Final[str] = f"python -m pip install --upgrade {IRONCLAW_INSTALLER_SOURCE_URL}\npython -m ironclaw_installer bootstrap --program {{program}} --claim-token {{claim_token}}"
 
 
 def _generic_install_command(agent_cli_id: str | None, program: str) -> str:

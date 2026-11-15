@@ -18,7 +18,7 @@ const CLAIM_TOKEN_PATTERN = /^ic_claim_[A-Za-z0-9_-]{20,128}$/;
 const RUNTIME_PROGRAM_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const COMMAND_MAX_LENGTH = 1024;
 const INSTALLER_SOURCE_COMMAND =
-  "python -m pip install --no-deps --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git";
+  "python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.1";
 const PLACEHOLDER_TEXT = "Generate a one-time install command after purchase";
 const hashSeed = (text) => {
   let hash = 2166136261;
