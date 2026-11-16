@@ -16,7 +16,7 @@ jest.mock("sonner", () => ({
 }));
 
 const INSTALLER_SOURCE_COMMAND =
-  "python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.1";
+  "python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.2";
 
 const makeClaim = (overrides = {}) => ({
   integration_id: "claude-code",

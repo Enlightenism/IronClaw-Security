@@ -242,7 +242,7 @@ def test_install_key_registry_exposes_canonical_command_metadata_and_supported_p
     assert spec.canonical_slug == "claude-code"
     assert spec.agent_cli_id is None
     assert spec.generic_command == ""
-    assert spec.format_command("ic_claim_0123456789abcdefghij") == ("python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.1\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ic_claim_0123456789abcdefghij")
+    assert spec.format_command("ic_claim_0123456789abcdefghij") == ("python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.2\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ic_claim_0123456789abcdefghij")
     assert "--no-deps" not in spec.format_command("ic_claim_0123456789abcdefghij")
     assert "--upgrade" in spec.format_command("ic_claim_0123456789abcdefghij")
     assert "git+https://github.com/Enlightenism/IronClaw-Security.git@" in spec.format_command("ic_claim_0123456789abcdefghij")
