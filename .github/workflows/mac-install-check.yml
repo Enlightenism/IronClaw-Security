@@ -1,0 +1,39 @@
+name: mac-install-check
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v1.0.2"]
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the pinned release from GitHub
+        run: python3 -m pip install --upgrade "git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.2"
+
+      - name: Import check outside the source tree
+        working-directory: /tmp
+        run: python3 -c "import ironclaw_installer, ironclaw_sdk, app.core.install_key_formats; print('IMPORT OK')"
+
+      - name: Installer help runs
+        working-directory: /tmp
+        run: python3 -m ironclaw_installer bootstrap --help
+
+      - name: Installer tests pass on macOS
+        run: |
+          python3 -m pip install -e ".[dev]"
+          python3 -m pytest tests/testcliinstall.py -q
+
+      - name: Bootstrap reaches the live server (fake token, nothing redeemed)
+        working-directory: /tmp
+        run: |
+          set +e
+          python3 -m ironclaw_installer bootstrap --program claude_code --claim-token ic_claim_FAKEFAKEFAKEFAKEFAKEFAKE00
+          code=$?
+          echo "exit=$code"
+          test "$code" -ne 0
