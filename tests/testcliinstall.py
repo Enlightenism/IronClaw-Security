@@ -3,9 +3,12 @@ from __future__ import annotations
 import importlib
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import tomllib
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -304,10 +307,6 @@ def test_build_install_claim_commands_use_canonical_templates_for_every_runtime(
             ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "openclaw", "--scope", "user"],
         ),
         (
-            "claude_code",
-            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "claude-code", "--scope", "user"],
-        ),
-        (
             "cursor",
             ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "cursor", "--scope", "user"],
         ),
@@ -335,6 +334,50 @@ def test_runtime_skill_install_command_uses_canonical_host_metadata(
     expected_command: list[str],
 ) -> None:
     assert install_module._runtime_skill_install_command(runtime_program) == expected_command
+
+
+def test_run_bootstrap_claude_code_installs_skill_without_gh(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skill_installs: list[bool] = []
+    subprocess_commands: list[list[str]] = []
+
+    def fake_open_claim_request(request: Any, *, timeout: float) -> io.BytesIO:
+        return io.BytesIO(
+            json.dumps(
+                {
+                    "key_id": "ik_claude_bootstrap_003",
+                    "program": "claude_code",
+                    "install_key": "ic_install_claude_code_abc123",
+                },
+            ).encode("utf-8"),
+        )
+
+    def fake_install_claude_code_skill() -> Path:
+        skill_installs.append(True)
+        return tmp_path / "SKILL.md"
+
+    def fake_subprocess_run(command: list[str], **kwargs: Any) -> None:
+        subprocess_commands.append(command)
+
+    monkeypatch.setattr(install_module, "_check_claude_code_version", lambda: None)
+    monkeypatch.setattr(install_module, "_preflight_claude_code_environment", lambda: None)
+    monkeypatch.setattr(install_module, "_open_install_claim_request", fake_open_claim_request)
+    monkeypatch.setattr(install_module, "_restrict_private_file_permissions", lambda _: None)
+    monkeypatch.setattr(install_module, "_install_claude_code_skill", fake_install_claude_code_skill)
+    monkeypatch.setattr(install_module.subprocess, "run", fake_subprocess_run)
+
+    result = install_module.run_bootstrap(
+        program="claude_code",
+        claim_token="ic_claim_0123456789abcdefghij",
+        config_dir=tmp_path / "user-config",
+    )
+
+    assert result.program == "claude_code"
+    assert skill_installs == [True]
+    assert all(command[0] != "gh" for command in subprocess_commands)
 
 
 @pytest.mark.parametrize(
@@ -939,7 +982,7 @@ def test_check_claude_code_version_raises_for_missing_unreadable_or_outdated_cla
     with pytest.raises(install_module.IronClawInstallerError, match=message) as exc_info:
         install_module._check_claude_code_version()
 
-    assert "The claim was not redeemed" in str(exc_info.value)
+    assert "the claim was not redeemed" in str(exc_info.value).lower()
 
 
 def test_check_claude_code_version_accepts_minimum_supported_version(install_module: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1164,7 +1207,56 @@ def test_report_runtime_hook_opt_out_points_adapters_at_reenable(
 
 
 def test_runtime_hooks_default_on_with_opt_out_flag(install_module: Any) -> None:
-    parser = install_module.build_parser()
+    parser = install_module.build_bootstrap_parser()
+    base_args = ["--program", "openclaw", "--claim-token", "ic_claim_0123456789abcdefghij"]
 
-    assert parser.parse_args(["openclaw"]).enable_runtime_hooks is True
-    assert parser.parse_args(["openclaw", "--no-enable-runtime-hooks"]).enable_runtime_hooks is False
+    assert parser.parse_args(base_args).enable_runtime_hooks is True
+    assert parser.parse_args([*base_args, "--no-enable-runtime-hooks"]).enable_runtime_hooks is False
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows icacls only")
+def test_restrict_private_file_permissions_applies_acl_on_windows(install_module: Any, tmp_path: Path) -> None:
+    credential_file = tmp_path / "credentials.json"
+    credential_file.write_text("{}", encoding="utf-8")
+
+    install_module._restrict_private_file_permissions(credential_file)
+
+    acl = subprocess.run(
+        ["icacls", str(credential_file)],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ).stdout.lower()
+    assert os.environ["USERNAME"].lower() in acl
+    assert "nt authority\\system" in acl
+
+
+def test_restrict_private_file_permissions_runs_icacls_steps_in_order(
+    install_module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    credential_file = tmp_path / "credentials.json"
+    credential_file.write_text("{}", encoding="utf-8")
+    user_sid = "S-1-5-21-1111-2222-3333-1001"
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: Any) -> install_module.subprocess.CompletedProcess[str]:
+        commands.append(command)
+        stdout = f'"DESKTOP\\user","{user_sid}"\n' if command[0].endswith("whoami.exe") else ""
+        return install_module.subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    icacls = str(tmp_path / "System32" / "icacls.exe")
+    monkeypatch.setattr(install_module, "os", SimpleNamespace(name="nt", environ={"SystemRoot": str(tmp_path)}))
+    monkeypatch.setattr(install_module.subprocess, "run", fake_run)
+
+    install_module._restrict_private_file_permissions(credential_file)
+
+    assert commands[1:] == [
+        [icacls, str(credential_file), "/inheritance:r"],
+        [icacls, str(credential_file), "/reset"],
+        [icacls, str(credential_file), "/grant:r", f"*{user_sid}:(F)"],
+        [icacls, str(credential_file), "/grant", "*S-1-5-18:(F)"],
+    ]

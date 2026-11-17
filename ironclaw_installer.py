@@ -203,24 +203,22 @@ def _restrict_private_file_permissions(path: Path) -> None:
         )
         if user_sid is None:
             raise IronClawInstallerError("Could not determine the current Windows user for credential protection.")
-        subprocess.run(
-            [
-                str(icacls),
-                str(path),
-                "/reset",
-                "/inheritance:r",
-                "/grant:r",
-                f"*{user_sid}:(F)",
-                "/grant",
-                "*S-1-5-18:(F)",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=DEFAULT_TIMEOUT_SECONDS,
+        icacls_steps = (
+            [str(icacls), str(path), "/inheritance:r"],
+            [str(icacls), str(path), "/reset"],
+            [str(icacls), str(path), "/grant:r", f"*{user_sid}:(F)"],
+            [str(icacls), str(path), "/grant", "*S-1-5-18:(F)"],
         )
+        for step in icacls_steps:
+            subprocess.run(
+                step,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=DEFAULT_TIMEOUT_SECONDS,
+            )
     except (OSError, subprocess.SubprocessError, csv.Error) as exc:
         raise IronClawInstallerError(f"Could not restrict permissions for credential file: {path}") from exc
 
