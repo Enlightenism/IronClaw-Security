@@ -61,13 +61,13 @@ Use this shared security workflow when planning or performing actions with an AI
 
 ## Third-party install scanning
 
-Install commands for other tools or skills (for example `npx skills add`, `claude plugin install`, `pip install`, `npm install`, or `curl … | sh`) are scanned, not blocked wholesale. The gate resolves each command to its source, fetches the artifact over public HTTPS, scans it through the sandbox broker, and allows the command only when the scan is clean. Any failure fails closed.
+Install commands for other tools or skills, including the npx skills add workflow, Claude plugin installation, Python package installation, Node package installation, and curl downloads piped to a shell, are scanned, not blocked wholesale. The gate resolves each command to its source, fetches the artifact over public HTTPS, scans it through the sandbox broker, and allows the command only when the scan is clean. Any failure fails closed.
 
 - **IronClaw-pinned installs** are allowed by their pin and are not re-fetched.
 - **Resolved sources** are fetched over HTTPS only, and only from public addresses. Private, loopback, and link-local targets are refused. The fetch budget is 12 seconds and the broker scan budget is 8 seconds.
-- **Piped downloads** (`curl … | sh`, `wget … | bash`, `iwr … | iex`) scan the downloaded body along with the command.
+- **Piped downloads**: shell downloads from curl or wget piped to a shell interpreter, and PowerShell web requests piped to the expression command, scan the downloaded body along with the command.
 - **npm lifecycle scripts** (`preinstall`, `install`, `postinstall`) are blocked.
-- **Unresolvable sources are blocked:** brew, cargo, go, gem, composer, apt, winget, choco, conda, `--install-extension`, `claude plugin` by marketplace name, skills or plugins without a URL, PowerShell `iwr`/`irm` without a URL, `bash -c "$(curl …)"`, and unknown shells. Use a direct HTTPS URL or an IronClaw-pinned install command to proceed.
+- **Unresolvable sources are blocked:** brew, cargo, go, gem, composer, apt, winget, choco, conda, the VS Code install-extension switch, Claude plugin marketplace names, skills or plugins without a URL, PowerShell web requests without a URL, shell subshells that run curl command substitution, and unknown shells. Use a direct HTTPS URL or an IronClaw-pinned install command to proceed.
 - **Every run is re-scanned.** No scan result is cached.
 - **False positives:** the broker's regex patterns are broad (for example `subprocess`, `exec(`, `eval(`, and `socket.socket(`), so some legitimate packages will be blocked. This is the accepted cost of failing closed.
 - **Known gap:** a two-step download (`curl -o x.sh URL`, then `sh x.sh`) is not fully covered. Only the first command is checked, and only when it matches an install pattern. The second command is not scanned separately, so review it before running it.
