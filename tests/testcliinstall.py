@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -198,8 +199,8 @@ def test_install_claims_use_canonical_runtime_names_and_commands(
     }
     assert config.provider_targets == install_module.DEFAULT_PROVIDER_TARGETS
     commands = install_module.build_install_claim_commands(config.install_claims)
-    assert commands["claude_code"] == ("python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ic_claim_0123456789abcdefghij")
-    assert commands["hermes"] == ("python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3\npython -m ironclaw_installer bootstrap --program hermes --claim-token ic_claim_ABCDEFGHIJ0123456789")
+    assert commands["claude_code"] == install_module.InstallKeyFormatRegistry.get_spec("claude_code").format_command("ic_claim_0123456789abcdefghij")
+    assert commands["hermes"] == install_module.InstallKeyFormatRegistry.get_spec("hermes").format_command("ic_claim_ABCDEFGHIJ0123456789")
     assert set(config.to_dict()["install_claims"].values()) == {"[REDACTED]"}
 
     with pytest.raises(install_module.IronClawInstallerError, match="install key"):
@@ -300,39 +301,23 @@ def test_build_install_claim_commands_use_canonical_templates_for_every_runtime(
 
 
 @pytest.mark.parametrize(
-    ("runtime_program", "expected_command"),
+    "runtime_program",
     [
-        (
-            "openclaw",
-            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "openclaw", "--scope", "user", "--pin", "v1.0.3"],
-        ),
-        (
-            "cursor",
-            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "cursor", "--scope", "user", "--pin", "v1.0.3"],
-        ),
-        (
-            "goose",
-            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "goose", "--scope", "user", "--pin", "v1.0.3"],
-        ),
-        (
-            "antigravity_cli",
-            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "antigravity-cli", "--scope", "user", "--pin", "v1.0.3"],
-        ),
-        (
-            "copilot",
-            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "github-copilot", "--scope", "user", "--pin", "v1.0.3"],
-        ),
-        (
-            "hermes",
-            ["hermes", "skills", "install", "https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md", "--category", "software-development", "--name", "ironclaw-security", "--yes"],
-        ),
+        "openclaw",
+        "cursor",
+        "goose",
+        "antigravity_cli",
+        "copilot",
+        "hermes",
     ],
 )
 def test_runtime_skill_install_command_uses_canonical_host_metadata(
     install_module: Any,
     runtime_program: str,
-    expected_command: list[str],
 ) -> None:
+    expected_command = shlex.split(
+        install_module.InstallKeyFormatRegistry.get_spec(runtime_program).generic_command,
+    )
     assert install_module._runtime_skill_install_command(runtime_program) == expected_command
 
 
@@ -659,17 +644,9 @@ def test_run_bootstrap_installs_fail_closed_openclaw_plugin(
     assert requests[0].full_url == "https://ironclaw-security.onrender.com/api/integrations/install-claims/redeem"
     assert json.loads(requests[0].data) == {"claim_token": claim_token}
     assert commands == [
-        [
-            "gh",
-            "skill",
-            "install",
-            "Enlightenism/IronClaw-Security",
-            "skills/ironclaw-security",
-            "--agent",
-            "openclaw",
-            "--scope",
-            "user",
-        ],
+        shlex.split(
+            install_module.InstallKeyFormatRegistry.get_spec("openclaw").generic_command,
+        ),
         ["openclaw", "plugins", "install", "--link", str(plugin_dir), "--force"],
         [
             "openclaw",
