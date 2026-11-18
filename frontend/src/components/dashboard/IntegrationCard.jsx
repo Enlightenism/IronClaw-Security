@@ -185,11 +185,12 @@ const validateInstallClaim = (claim, program, integrationId) => {
   }
 
   const commandLines = claim.command.trim().split("\n");
-  const expectedBootstrapLine =
-    `python -m ironclaw_installer bootstrap --program ${program} --claim-token ${claim.claim_token}`;
+  const expectedBootstrapLine = `python -m ironclaw_installer bootstrap --program ${program} --claim-token ${claim.claim_token}`;
   if (
     commandLines.length !== 2 ||
-    !/^python -m pip install --upgrade git\+https:\/\/github\.com\/Enlightenism\/IronClaw-Security\.git@[^\s]+$/.test(commandLines[0]) ||
+    !/^python -m pip install --upgrade git\+https:\/\/github\.com\/Enlightenism\/IronClaw-Security\.git@[^\s]+$/.test(
+      commandLines[0],
+    ) ||
     commandLines[1] !== expectedBootstrapLine
   ) {
     return null;

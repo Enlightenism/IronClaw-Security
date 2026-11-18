@@ -3,11 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.routes.integrations.agent_skills import router as agent_skills_router
+from app.routes.integrations.antigravity_cli import router as antigravity_cli_router
 from app.routes.integrations.claude_code import router as claude_code_router
 from app.routes.integrations.compatibility import router as compatibility_router
 from app.routes.integrations.copilot import router as copilot_router
 from app.routes.integrations.cursor import router as cursor_router
-from app.routes.integrations.antigravity_cli import router as antigravity_cli_router
 from app.routes.integrations.goose import router as goose_router
 from app.routes.integrations.health import router as health_router
 from app.routes.integrations.hermes import router as hermes_router

@@ -20,18 +20,10 @@ _INSTALL_CLAIM_PREFIX_TEMPLATE: Final[str] = f"python -m pip install --upgrade {
 
 def _generic_install_command(agent_cli_id: str | None, program: str) -> str:
     if program == "hermes":
-        return (
-            f"hermes skills install {SECURITY_GUARDIAN_SKILL_URL} "
-            "--category software-development "
-            f"--name {SECURITY_GUARDIAN_SKILL_NAME} --yes"
-        )
+        return f"hermes skills install {SECURITY_GUARDIAN_SKILL_URL} --category software-development --name {SECURITY_GUARDIAN_SKILL_NAME} --yes"
     if agent_cli_id is None:
         return ""
-    return (
-        f"gh skill install {IRONCLAW_GITHUB_REPOSITORY} "
-        f"{SECURITY_GUARDIAN_SKILL_REPOSITORY_PATH} "
-        f"--agent {agent_cli_id} --scope user --pin {IRONCLAW_INSTALLER_TAG}"
-    )
+    return f"gh skill install {IRONCLAW_GITHUB_REPOSITORY} {SECURITY_GUARDIAN_SKILL_REPOSITORY_PATH} --agent {agent_cli_id} --scope user --pin {IRONCLAW_INSTALLER_TAG}"
 
 
 RuntimeInstallKeyProgram = Literal[

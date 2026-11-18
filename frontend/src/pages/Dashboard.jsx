@@ -912,7 +912,8 @@ const Dashboard = () => {
         savedCommandClaimed:
           !revoked && metadata?.saved_command_claimed === true,
         skillCommand:
-          !revoked && typeof tokens?.command_metadata?.[integrationId] === "string"
+          !revoked &&
+          typeof tokens?.command_metadata?.[integrationId] === "string"
             ? tokens.command_metadata[integrationId]
             : "",
         onCreateClaim: createInstallClaim,
@@ -920,7 +921,12 @@ const Dashboard = () => {
         testid: toCardTestId(program),
       };
     });
-  }, [createInstallClaim, installKeyStatusByProgram, tokens?.install_metadata]);
+  }, [
+    createInstallClaim,
+    installKeyStatusByProgram,
+    tokens?.command_metadata,
+    tokens?.install_metadata,
+  ]);
 
   if (loading || (loadingData && !data)) {
     return (
