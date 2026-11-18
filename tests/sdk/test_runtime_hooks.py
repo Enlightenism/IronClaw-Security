@@ -36,7 +36,6 @@ def _post_gate_raising(error: Exception) -> Any:
 @pytest.mark.parametrize(
     ("program", "event"),
     [
-        ("gemini_cli", "AfterTool"),
         ("cursor", "postToolUse"),
         ("copilot", "postToolUse"),
     ],
@@ -156,15 +155,9 @@ def test_emit_return_copilot_uses_modified_result(capsys: pytest.CaptureFixture[
     assert output == {"modifiedResult": {"resultType": "success", "textResultForLlm": "safe text"}}
 
 
-def test_emit_return_gemini_cli_denies_with_additional_context(capsys: pytest.CaptureFixture[str]) -> None:
-    assert runtime_hooks._emit_return("gemini_cli", "safe text") == 0
-
-    output = json.loads(capsys.readouterr().out)
-    assert output == {
-        "decision": "deny",
-        "reason": "safe text",
-        "hookSpecificOutput": {"hookEventName": "AfterTool", "additionalContext": RETURN_CONTEXT},
-    }
+def test_emit_return_antigravity_cli_is_not_registered(capsys: pytest.CaptureFixture[str]) -> None:
+    assert runtime_hooks._emit_return("antigravity_cli", "safe text") == 0
+    assert capsys.readouterr().out == ""
 
 
 def test_emit_return_cursor_is_audit_only(capsys: pytest.CaptureFixture[str]) -> None:
@@ -258,13 +251,82 @@ def test_install_gate_timeout_fits_inside_pre_hook_budget() -> None:
     assert runtime_hooks.INSTALL_GATE_TIMEOUT_SECONDS == 26
 
 
-def test_gemini_post_timeout_is_in_milliseconds() -> None:
-    gemini = runtime_hooks.merge_hook_config("gemini_cli", {})
-    post_entry = gemini["hooks"]["AfterTool"][0]["hooks"][0]
-    pre_entry = gemini["hooks"]["BeforeTool"][0]["hooks"][0]
+def test_antigravity_pre_hook_uses_seconds_timeout() -> None:
+    antigravity = runtime_hooks.merge_hook_config("antigravity_cli", {})
+    entry = antigravity["ironclaw-security"]["PreToolUse"][0]["hooks"][0]
 
-    assert post_entry["timeout"] == runtime_hooks.RETURN_HOOK_TIMEOUT_SECONDS * 1000
-    assert pre_entry["timeout"] == runtime_hooks.PRE_HOOK_TIMEOUT_SECONDS * 1000
+    assert entry["timeout"] == runtime_hooks.PRE_HOOK_TIMEOUT_SECONDS
+
+
+def test_antigravity_named_hook_fresh_file() -> None:
+    config = runtime_hooks.merge_hook_config("antigravity_cli", {})
+
+    assert config == {
+        "ironclaw-security": {
+            "PreToolUse": [
+                {
+                    "matcher": "*",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "python -m ironclaw_sdk.runtime_hooks --program antigravity_cli",
+                            "timeout": 30,
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+
+
+def test_antigravity_named_hook_preserves_other_named_hooks() -> None:
+    existing = {
+        "other-hook": {
+            "PreToolUse": [
+                {
+                    "matcher": "run_command",
+                    "hooks": [{"type": "command", "command": "./other-hook.sh"}],
+                }
+            ]
+        }
+    }
+
+    config = runtime_hooks.merge_hook_config("antigravity_cli", existing)
+
+    assert config["other-hook"] == existing["other-hook"]
+    assert "ironclaw-security" in config
+
+
+def test_antigravity_named_hook_is_idempotent() -> None:
+    once = runtime_hooks.merge_hook_config("antigravity_cli", {})
+    twice = runtime_hooks.merge_hook_config("antigravity_cli", once)
+
+    assert twice == once
+    assert len(twice["ironclaw-security"]["PreToolUse"]) == 1
+
+
+def test_antigravity_config_path_never_uses_settings_json(tmp_path: Path) -> None:
+    target = runtime_hooks.runtime_hook_config_path("antigravity_cli", tmp_path)
+
+    assert target == tmp_path / ".gemini" / "config" / "hooks.json"
+    assert target != tmp_path / ".gemini" / "settings.json"
+    planned = runtime_hooks.plan_runtime_hook("antigravity_cli", tmp_path)
+    assert planned is not None
+    planned_target, planned_config = planned
+    runtime_hooks.write_runtime_hook(planned_target, planned_config)
+    assert planned_target.exists()
+    assert not (tmp_path / ".gemini" / "settings.json").exists()
+
+
+def test_emit_pre_antigravity_allow_and_deny(capsys: pytest.CaptureFixture[str]) -> None:
+    assert runtime_hooks._emit("antigravity_cli", None) == 0
+    assert json.loads(capsys.readouterr().out) == {"decision": "allow"}
+
+    assert runtime_hooks._emit("antigravity_cli", "blocked by policy") == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "decision": "deny",
+        "reason": "blocked by policy",
+    }
 
 
 def test_copilot_entries_use_bash_and_powershell_keys() -> None:

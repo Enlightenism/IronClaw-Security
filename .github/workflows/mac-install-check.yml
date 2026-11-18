@@ -12,7 +12,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install the pinned release from GitHub
-        run: python3 -m pip install --upgrade "git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.2"
+        run: python3 -m pip install --upgrade "git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3"
 
       - name: Import check outside the source tree
         working-directory: /tmp

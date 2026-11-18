@@ -97,7 +97,7 @@ def _make_key_record(
         "claude_code": "ic_install_claude_code_",
         "cursor": "ic_install_cursor_",
         "goose": "ic_install_goose_",
-        "gemini_cli": "ic_install_gemini_cli_",
+        "antigravity_cli": "ic_install_antigravity_cli_",
         "copilot": "ic_install_copilot_",
         "hermes": "ic_install_hermes_",
         "security_guardian": "ic_install_security_guardian_",
@@ -399,7 +399,7 @@ class TestDashboardInstallKeySlotLogic:
                 "claude_code",
                 "cursor",
                 "goose",
-                "gemini_cli",
+                "antigravity_cli",
                 "copilot",
                 "hermes",
             }
@@ -563,7 +563,7 @@ class TestDashboardInstallKeySlotLogic:
                 "claude_code",
                 "cursor",
                 "goose",
-                "gemini_cli",
+                "antigravity_cli",
                 "copilot",
                 "hermes",
             }
@@ -588,7 +588,7 @@ class TestDashboardInstallKeySlotLogic:
             "claude_code",
             "cursor",
             "goose",
-            "gemini_cli",
+            "antigravity_cli",
             "copilot",
             "hermes",
         }

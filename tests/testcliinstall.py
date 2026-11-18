@@ -63,7 +63,7 @@ def test_example_skill_config_uses_canonical_multi_platform_targets(install_modu
         "openclaw",
         "cursor",
         "goose",
-        "gemini_cli",
+        "antigravity_cli",
         "copilot",
         "hermes",
     ]
@@ -104,7 +104,7 @@ def test_build_install_config_defaults(install_module: Any, tmp_path: Path) -> N
         "claude_code",
         "cursor",
         "goose",
-        "gemini_cli",
+        "antigravity_cli",
         "copilot",
         "hermes",
     ]
@@ -198,8 +198,8 @@ def test_install_claims_use_canonical_runtime_names_and_commands(
     }
     assert config.provider_targets == install_module.DEFAULT_PROVIDER_TARGETS
     commands = install_module.build_install_claim_commands(config.install_claims)
-    assert commands["claude_code"] == ("python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.2\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ic_claim_0123456789abcdefghij")
-    assert commands["hermes"] == ("python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.2\npython -m ironclaw_installer bootstrap --program hermes --claim-token ic_claim_ABCDEFGHIJ0123456789")
+    assert commands["claude_code"] == ("python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ic_claim_0123456789abcdefghij")
+    assert commands["hermes"] == ("python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3\npython -m ironclaw_installer bootstrap --program hermes --claim-token ic_claim_ABCDEFGHIJ0123456789")
     assert set(config.to_dict()["install_claims"].values()) == {"[REDACTED]"}
 
     with pytest.raises(install_module.IronClawInstallerError, match="install key"):
@@ -277,7 +277,7 @@ def test_save_install_key_rejects_wrong_prefix_or_charset(install_module: Any, t
             "claude_code",
             "cursor",
             "goose",
-            "gemini_cli",
+            "antigravity_cli",
             "copilot",
             "hermes",
         )
@@ -304,27 +304,27 @@ def test_build_install_claim_commands_use_canonical_templates_for_every_runtime(
     [
         (
             "openclaw",
-            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "openclaw", "--scope", "user"],
+            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "openclaw", "--scope", "user", "--pin", "v1.0.3"],
         ),
         (
             "cursor",
-            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "cursor", "--scope", "user"],
+            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "cursor", "--scope", "user", "--pin", "v1.0.3"],
         ),
         (
             "goose",
-            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "goose", "--scope", "user"],
+            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "goose", "--scope", "user", "--pin", "v1.0.3"],
         ),
         (
-            "gemini_cli",
-            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "gemini-cli", "--scope", "user"],
+            "antigravity_cli",
+            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "antigravity-cli", "--scope", "user", "--pin", "v1.0.3"],
         ),
         (
             "copilot",
-            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "github-copilot", "--scope", "user"],
+            ["gh", "skill", "install", "Enlightenism/IronClaw-Security", "skills/ironclaw-security", "--agent", "github-copilot", "--scope", "user", "--pin", "v1.0.3"],
         ),
         (
             "hermes",
-            ["hermes", "skills", "install", "https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md", "--name", "ironclaw-security"],
+            ["hermes", "skills", "install", "https://ironclaw-security.onrender.com/skills/ironclaw-security/SKILL.md", "--category", "software-development", "--name", "ironclaw-security", "--yes"],
         ),
     ],
 )
@@ -392,7 +392,7 @@ def test_run_bootstrap_claude_code_installs_skill_without_gh(
         ("claude_code", "sk_live_abc123"),
         ("cursor", "ghp_abc123"),
         ("goose", "token_abc123"),
-        ("gemini_cli", "ic_org_12345"),
+        ("antigravity_cli", "ic_org_12345"),
         ("copilot", "ic_install_copilot_...abcd"),
         ("hermes", "ic_install_hermes_***"),
     ],

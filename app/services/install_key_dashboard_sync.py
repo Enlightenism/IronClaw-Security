@@ -20,7 +20,7 @@ class InstallKeyDashboardSyncService:
         "claude_code": "Claude Code",
         "cursor": "Cursor",
         "goose": "Goose",
-        "gemini_cli": "Gemini CLI",
+        "antigravity_cli": "Antigravity CLI",
         "copilot": "GitHub Copilot",
         "hermes": "Hermes",
     }

@@ -20,7 +20,7 @@ def test_default_dashboard_overview_includes_platform_families_and_slots() -> No
         "claude_code",
         "cursor",
         "goose",
-        "gemini_cli",
+        "antigravity_cli",
         "copilot",
         "hermes",
     ]

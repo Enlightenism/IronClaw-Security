@@ -981,7 +981,7 @@ class TestHandleCheckoutCompleted:
             "claude_code",
             "cursor",
             "goose",
-            "gemini_cli",
+            "antigravity_cli",
             "copilot",
             "hermes",
         }
@@ -1100,7 +1100,7 @@ class TestHandleCheckoutCompleted:
             metadata={"payment_status": "paid"},
         )
 
-        assert set(result) == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"}
+        assert set(result) == {"openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes"}
         assert "security_guardian" not in result
         assert provisioning_service.provision_for_program.call_count == 7
         assert all(call.kwargs["owner_key"] == "ic_org_org-runtime-route" for call in provisioning_service.provision_for_program.call_args_list)
@@ -1136,7 +1136,7 @@ class TestHandleCheckoutCompleted:
             failure_details=failure_details,
         )
 
-        assert set(result) == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "hermes"}
+        assert set(result) == {"openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "hermes"}
         assert "copilot" not in result
         assert provisioning_service.provision_for_program.call_count == 7
         assert failure_details == {"copilot": "RuntimeError: persistence write-order failure"}

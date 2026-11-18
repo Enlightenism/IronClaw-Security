@@ -166,7 +166,7 @@ const PAID_TOKENS = {
       "claude_code",
       "cursor",
       "goose",
-      "gemini_cli",
+      "antigravity_cli",
       "copilot",
       "hermes",
     ].map((program) => {
@@ -707,7 +707,7 @@ describe("session_id payment polling", () => {
       "claude_code",
       "cursor",
       "goose",
-      "gemini_cli",
+      "antigravity_cli",
       "copilot",
       "hermes",
     ]) {
@@ -1275,7 +1275,7 @@ describe("dashboard structure", () => {
       "claude-code-card",
       "cursor-card",
       "goose-card",
-      "gemini_cli-card",
+      "antigravity_cli-card",
       "copilot-card",
       "hermes-card",
     ];
@@ -1320,8 +1320,7 @@ describe("dashboard structure", () => {
         return Promise.resolve({
           data: {
             status: "ok",
-            claude_code_command:
-              "gh skill install Enlightenism/IronClaw-Security skills/ironclaw-security --agent claude-code --scope user",
+            claude_code_command: "",
             install_metadata: {},
           },
         });
@@ -1457,7 +1456,7 @@ describe("dashboard structure", () => {
       expect(screen.getByTestId("openclaw-card")).toBeInTheDocument();
       expect(screen.getByTestId("cursor-card")).toBeInTheDocument();
       expect(screen.getByTestId("goose-card")).toBeInTheDocument();
-      expect(screen.getByTestId("gemini_cli-card")).toBeInTheDocument();
+      expect(screen.getByTestId("antigravity_cli-card")).toBeInTheDocument();
       expect(screen.getByTestId("copilot-card")).toBeInTheDocument();
       expect(screen.getByTestId("hermes-card")).toBeInTheDocument();
     });

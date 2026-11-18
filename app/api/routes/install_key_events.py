@@ -140,7 +140,7 @@ class InstallKeyEventRequest(BaseModel):
             return None
         normalized = _normalize_program(value)
         if normalized is None:
-            raise ValueError("program must be one of: openclaw, claude_code, cursor, goose, gemini_cli, copilot, hermes")
+            raise ValueError("program must be one of: openclaw, claude_code, cursor, goose, antigravity_cli, copilot, hermes")
         return normalized
 
     @field_validator("occurred_at", mode="before")

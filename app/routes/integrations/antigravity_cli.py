@@ -20,13 +20,13 @@ from app.services.integration_registry import initialize_integration_registry
 from app.services.secret_scanner import evaluate_secret_scanner_request, scan_for_secrets
 
 router = APIRouter(
-    prefix="/integrations/gemini-cli",
-    tags=["gemini-cli"],
+    prefix="/integrations/antigravity-cli",
+    tags=["antigravity-cli"],
 )
 
 _ADAPTER_VERSION = "1.0.0"
-_PLATFORM = "gemini-cli"
-_ADAPTER_NAME = "ironclaw-gemini-cli"
+_PLATFORM = "antigravity-cli"
+_ADAPTER_NAME = "ironclaw-antigravity-cli"
 
 
 def _utc_now() -> str:
@@ -34,7 +34,7 @@ def _utc_now() -> str:
 
 
 def _trace_id() -> str:
-    return f"gemini-{uuid.uuid4().hex}"
+    return f"antigravity-{uuid.uuid4().hex}"
 
 
 def _build_secret_scan_context(
@@ -114,27 +114,27 @@ def _build_capabilities(*, include_runtime_details: bool = True) -> list[dict[st
     capabilities = [
         {
             "name": "prompt-guard",
-            "description": "Inspect Gemini CLI prompts and user/system input before execution.",
+            "description": "Inspect Antigravity CLI prompts and user/system input before execution.",
             "required": True,
         },
         {
             "name": "workflow-guard",
-            "description": "Validate multi-step Gemini CLI workflow plans and chained actions before they are executed.",
+            "description": "Validate multi-step Antigravity CLI workflow plans and chained actions before they are executed.",
             "required": True,
         },
         {
             "name": "tool-plan-guard",
-            "description": "Review Gemini CLI tool plans and planned tool invocations before dispatch.",
+            "description": "Review Antigravity CLI tool plans and planned tool invocations before dispatch.",
             "required": True,
         },
         {
             "name": "command-guard",
-            "description": "Assess command execution in Gemini CLI agent runtimes before shell or subprocess dispatch.",
+            "description": "Assess command execution in Antigravity CLI agent runtimes before shell or subprocess dispatch.",
             "required": True,
         },
         {
             "name": "tool-call-guard",
-            "description": "Guard tool and function-call execution paths used by Gemini CLI agents.",
+            "description": "Guard tool and function-call execution paths used by Antigravity CLI agents.",
             "required": True,
         },
         {
@@ -144,7 +144,7 @@ def _build_capabilities(*, include_runtime_details: bool = True) -> list[dict[st
         },
         {
             "name": "audit-trail",
-            "description": "Persist the full Gemini CLI decision path, matched rules, and risk outcome.",
+            "description": "Persist the full Antigravity CLI decision path, matched rules, and risk outcome.",
             "required": True,
         },
         {
@@ -158,12 +158,12 @@ def _build_capabilities(*, include_runtime_details: bool = True) -> list[dict[st
             [
                 {
                     "name": "execution-boundary",
-                    "description": "Enforce Gemini CLI execution boundaries for shell, tool, and workflow actions.",
+                    "description": "Enforce Antigravity CLI execution boundaries for shell, tool, and workflow actions.",
                     "required": False,
                 },
                 {
                     "name": "workspace-guard",
-                    "description": "Review file and workspace mutation requests used by multi-step Gemini CLI flows.",
+                    "description": "Review file and workspace mutation requests used by multi-step Antigravity CLI flows.",
                     "required": False,
                 },
             ]
@@ -207,7 +207,7 @@ def _canonical_adapter_metadata(metadata: dict[str, Any] | None) -> dict[str, An
 def _build_adapter() -> GenericAgentAdapter:
     try:
         registry = initialize_integration_registry()
-        record = registry.items.get("integration-gemini-cli")
+        record = registry.items.get("integration-antigravity-cli")
         if record is not None:
             return GenericAgentAdapter(
                 record=record,
@@ -225,10 +225,10 @@ def _build_adapter() -> GenericAgentAdapter:
     )
 
 
-class GeminiCliEvaluateRequest(BaseModel):
+class AntigravityCliEvaluateRequest(BaseModel):
     action_type: str = Field(
         ...,
-        description="Gemini CLI action type: prompt_input, tool_plan, command, tool_call, workflow_step, multi_step_workflow, approval, or message.",
+        description="Antigravity CLI action type: prompt_input, tool_plan, command, tool_call, workflow_step, multi_step_workflow, approval, or message.",
         examples=["prompt_input", "tool_plan", "command", "workflow_step"],
     )
     target: str = Field(
@@ -246,7 +246,7 @@ class GeminiCliEvaluateRequest(BaseModel):
     )
     session_id: str | None = Field(
         default=None,
-        description="Gemini CLI session identifier for audit correlation.",
+        description="Antigravity CLI session identifier for audit correlation.",
     )
     risk_score: int = Field(
         default=0,
@@ -256,11 +256,11 @@ class GeminiCliEvaluateRequest(BaseModel):
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
-        description="Additional Gemini CLI runtime and workflow metadata.",
+        description="Additional Antigravity CLI runtime and workflow metadata.",
     )
 
 
-class GeminiCliEvaluateResponse(BaseModel):
+class AntigravityCliEvaluateResponse(BaseModel):
     trace_id: str
     adapter_name: str
     platform: str
@@ -281,7 +281,7 @@ class GeminiCliEvaluateResponse(BaseModel):
     secret_scan: dict[str, Any]
 
 
-class GeminiCliHandshakeRequest(BaseModel):
+class AntigravityCliHandshakeRequest(BaseModel):
     client_id: str | None = Field(
         default=None,
         description="Caller identity for connection validation.",
@@ -292,7 +292,7 @@ class GeminiCliHandshakeRequest(BaseModel):
     )
     session_id: str | None = Field(
         default=None,
-        description="Gemini CLI session identifier associated with the handshake.",
+        description="Antigravity CLI session identifier associated with the handshake.",
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
@@ -300,7 +300,7 @@ class GeminiCliHandshakeRequest(BaseModel):
     )
 
 
-class GeminiCliHandshakeResponse(BaseModel):
+class AntigravityCliHandshakeResponse(BaseModel):
     status: str
     platform: str
     adapter_name: str
@@ -312,7 +312,7 @@ class GeminiCliHandshakeResponse(BaseModel):
     metadata: dict[str, Any]
 
 
-class GeminiCliManifestResponse(BaseModel):
+class AntigravityCliManifestResponse(BaseModel):
     adapter_name: str
     platform: str
     protocol_version: str
@@ -325,12 +325,12 @@ class GeminiCliManifestResponse(BaseModel):
 
 @router.post(
     "/evaluate",
-    response_model=GeminiCliEvaluateResponse,
+    response_model=AntigravityCliEvaluateResponse,
     status_code=status.HTTP_200_OK,
-    summary="Evaluate a Gemini CLI prompt, workflow step, command, or tool-plan action",
-    description=("Accepts a Gemini CLI prompt, workflow step, command, or tool-plan payload. Runs secret scanning before policy evaluation and returns a deterministic allow/block verdict with a full audit trail."),
+    summary="Evaluate an Antigravity CLI prompt, workflow step, command, or tool-plan action",
+    description=("Accepts an Antigravity CLI prompt, workflow step, command, or tool-plan payload. Runs secret scanning before policy evaluation and returns a deterministic allow/block verdict with a full audit trail."),
 )
-async def evaluate_gemini_cli(body: GeminiCliEvaluateRequest) -> GeminiCliEvaluateResponse:
+async def evaluate_antigravity_cli(body: AntigravityCliEvaluateRequest) -> AntigravityCliEvaluateResponse:
     trace_id = _trace_id()
     workflow_context = str(body.metadata.get("workflow_plan") or body.metadata.get("multi_step_plan") or "")
     scan_payload = f"{body.target}\n{body.content}\n{workflow_context}".strip()
@@ -345,7 +345,7 @@ async def evaluate_gemini_cli(body: GeminiCliEvaluateRequest) -> GeminiCliEvalua
     secret_scan_result = _run_secret_scan(scan_payload=scan_payload, context=secret_scan_context)
 
     if secret_scan_result.get("findings"):
-        return GeminiCliEvaluateResponse(
+        return AntigravityCliEvaluateResponse(
             trace_id=trace_id,
             adapter_name=_ADAPTER_NAME,
             platform=_PLATFORM,
@@ -357,7 +357,7 @@ async def evaluate_gemini_cli(body: GeminiCliEvaluateRequest) -> GeminiCliEvalua
             should_block=True,
             risk_score=100,
             risk_level="critical",
-            summary="Secret scan detected sensitive data in the Gemini CLI payload. Action blocked before dispatch.",
+            summary="Secret scan detected sensitive data in the Antigravity CLI payload. Action blocked before dispatch.",
             matched_rules=["secret-scan-pre-flight"],
             reasons=[
                 {
@@ -392,7 +392,7 @@ async def evaluate_gemini_cli(body: GeminiCliEvaluateRequest) -> GeminiCliEvalua
             action_type=body.action_type,
             target=body.target,
             content=body.content,
-            agent_name="gemini-cli",
+            agent_name="antigravity-cli",
             runtime_name=_PLATFORM,
             client_id=body.client_id,
             session_id=body.session_id,
@@ -448,7 +448,7 @@ async def evaluate_gemini_cli(body: GeminiCliEvaluateRequest) -> GeminiCliEvalua
         secret_scan_triggered=False,
     )
 
-    return GeminiCliEvaluateResponse(
+    return AntigravityCliEvaluateResponse(
         trace_id=trace_id,
         adapter_name=response.adapter_name,
         platform=response.platform,
@@ -472,12 +472,12 @@ async def evaluate_gemini_cli(body: GeminiCliEvaluateRequest) -> GeminiCliEvalua
 
 @router.post(
     "/handshake",
-    response_model=GeminiCliHandshakeResponse,
+    response_model=AntigravityCliHandshakeResponse,
     status_code=status.HTTP_200_OK,
-    summary="Validate Gemini CLI integration health and connection state",
-    description=("Validates Gemini CLI connection health and returns the adapter capability manifest used to guard multi-step workflows, commands, and tool execution paths."),
+    summary="Validate Antigravity CLI integration health and connection state",
+    description=("Validates Antigravity CLI connection health and returns the adapter capability manifest used to guard multi-step workflows, commands, and tool execution paths."),
 )
-async def gemini_cli_handshake(body: GeminiCliHandshakeRequest) -> GeminiCliHandshakeResponse:
+async def antigravity_cli_handshake(body: AntigravityCliHandshakeRequest) -> AntigravityCliHandshakeResponse:
     adapter = _build_adapter()
 
     try:
@@ -485,7 +485,7 @@ async def gemini_cli_handshake(body: GeminiCliHandshakeRequest) -> GeminiCliHand
 
         handshake_req = AdapterExecutionRequest(
             action_type="handshake",
-            target="gemini-cli",
+            target="antigravity-cli",
             payload={
                 "client_id": body.client_id,
                 "protocol_version": body.protocol_version,
@@ -497,7 +497,7 @@ async def gemini_cli_handshake(body: GeminiCliHandshakeRequest) -> GeminiCliHand
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Gemini CLI adapter handshake failed: {exc}",
+            detail=f"Antigravity CLI adapter handshake failed: {exc}",
         ) from exc
 
     engine = build_policy_engine()
@@ -515,7 +515,7 @@ async def gemini_cli_handshake(body: GeminiCliHandshakeRequest) -> GeminiCliHand
 
     adapter_metadata = _canonical_adapter_metadata(getattr(adapter, "metadata", None))
 
-    return GeminiCliHandshakeResponse(
+    return AntigravityCliHandshakeResponse(
         status="ok",
         platform=_PLATFORM,
         adapter_name=_ADAPTER_NAME,
@@ -537,12 +537,12 @@ async def gemini_cli_handshake(body: GeminiCliHandshakeRequest) -> GeminiCliHand
 
 @router.get(
     "/manifest",
-    response_model=GeminiCliManifestResponse,
+    response_model=AntigravityCliManifestResponse,
     status_code=status.HTTP_200_OK,
-    summary="Return Gemini CLI capability manifest and guarded action categories",
-    description=("Returns Gemini CLI supported action types, guarded tool categories, and policy bindings used by the IronClaw guardrail layer."),
+    summary="Return Antigravity CLI capability manifest and guarded action categories",
+    description=("Returns Antigravity CLI supported action types, guarded tool categories, and policy bindings used by the IronClaw guardrail layer."),
 )
-async def gemini_cli_manifest() -> GeminiCliManifestResponse:
+async def antigravity_cli_manifest() -> AntigravityCliManifestResponse:
     engine = build_policy_engine()
 
     policy_bindings: dict[str, Any] = {
@@ -557,7 +557,7 @@ async def gemini_cli_manifest() -> GeminiCliManifestResponse:
         "tags": sorted({tag for rule in engine.rules for tag in rule.tags}),
     }
 
-    gemini_action_types = sorted(
+    antigravity_action_types = sorted(
         TOOL_GUARDED_ACTIONS
         | {
             "prompt_input",
@@ -587,11 +587,11 @@ async def gemini_cli_manifest() -> GeminiCliManifestResponse:
         ]
     )
 
-    return GeminiCliManifestResponse(
+    return AntigravityCliManifestResponse(
         adapter_name=_ADAPTER_NAME,
         platform=_PLATFORM,
         protocol_version=_ADAPTER_VERSION,
-        supported_action_types=gemini_action_types,
+        supported_action_types=antigravity_action_types,
         guarded_tool_categories=guarded_categories,
         policy_bindings=policy_bindings,
         capabilities=capabilities,

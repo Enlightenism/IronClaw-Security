@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -19,11 +20,8 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from app.core.install_key_formats import (
-    IRONCLAW_GITHUB_REPOSITORY,
     IRONCLAW_PUBLIC_BASE_URL,
     SECURITY_GUARDIAN_SKILL_NAME,
-    SECURITY_GUARDIAN_SKILL_REPOSITORY_PATH,
-    SECURITY_GUARDIAN_SKILL_URL,
     InstallKeyFormatRegistry,
     normalize_install_key_program,
 )
@@ -590,22 +588,10 @@ def _build_bootstrap_config_payload(
 
 
 def _runtime_skill_install_command(program: str) -> list[str]:
-    spec = InstallKeyFormatRegistry.get_spec(program)
-    if program == "hermes":
-        return ["hermes", "skills", "install", SECURITY_GUARDIAN_SKILL_URL, "--name", SECURITY_GUARDIAN_SKILL_NAME]
-    if spec.agent_cli_id is None:
+    generic_command = InstallKeyFormatRegistry.get_spec(program).generic_command
+    if not generic_command:
         raise IronClawInstallerError(f"No supported skill installer is configured for {program}.")
-    return [
-        "gh",
-        "skill",
-        "install",
-        IRONCLAW_GITHUB_REPOSITORY,
-        SECURITY_GUARDIAN_SKILL_REPOSITORY_PATH,
-        "--agent",
-        spec.agent_cli_id,
-        "--scope",
-        "user",
-    ]
+    return shlex.split(generic_command)
 
 
 def _check_claude_code_version() -> None:
@@ -956,7 +942,7 @@ def _build_runtime_features(provider_set: set[str], has_install_keys: bool) -> d
         "openclaw_integration": "openclaw" in provider_set,
         "cursor_integration": "cursor" in provider_set,
         "goose_integration": "goose" in provider_set,
-        "gemini_cli_integration": "gemini_cli" in provider_set,
+        "antigravity_cli_integration": "antigravity_cli" in provider_set,
         "copilot_integration": "copilot" in provider_set,
         "hermes_integration": "hermes" in provider_set,
         "embedded_install_keys": has_install_keys,
@@ -1240,7 +1226,7 @@ def build_bootstrap_parser() -> argparse.ArgumentParser:
         "--enable-runtime-hooks",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Write the fail-closed tool-call enforcement hook into the runtime's user-global config (claude_code, gemini_cli, cursor, copilot, goose), or install and enable the IronClaw plugin for hermes. On by default; pass --no-enable-runtime-hooks to skip.",
+        help="Write the fail-closed tool-call enforcement hook into the runtime's user-global config (claude_code, antigravity_cli, cursor, copilot, goose), or install and enable the IronClaw plugin for hermes. On by default; pass --no-enable-runtime-hooks to skip.",
     )
     parser.add_argument(
         "--base-url",

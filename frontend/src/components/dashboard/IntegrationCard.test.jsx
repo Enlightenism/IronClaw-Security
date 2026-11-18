@@ -7,6 +7,8 @@ const mockWriteText = jest.fn();
 const mockToastSuccess = jest.fn();
 const mockToastError = jest.fn();
 const CLAIM_TOKEN = `ic_claim_${"A".repeat(43)}`;
+const INSTALLER_SOURCE_COMMAND =
+  "python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3";
 
 jest.mock("sonner", () => ({
   toast: {
@@ -15,14 +17,11 @@ jest.mock("sonner", () => ({
   },
 }));
 
-const INSTALLER_SOURCE_COMMAND =
-  "python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.2";
-
 const makeClaim = (overrides = {}) => ({
   integration_id: "claude-code",
   program: "claude_code",
   claim_token: CLAIM_TOKEN,
-  command: `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ${CLAIM_TOKEN}`,
+  command: `python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3\npython -m ironclaw_installer bootstrap --program claude_code --claim-token ${CLAIM_TOKEN}`,
   ...overrides,
 });
 
@@ -119,7 +118,7 @@ describe("IntegrationCard", () => {
   it("rejects the retired redeem template and --key install commands", async () => {
     const user = userEvent.setup();
     const retiredClaim = makeClaim({
-      command: `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer redeem --program claude_code --claim-token ${CLAIM_TOKEN}\ngh skill install Enlightenism/IronClaw-Security skills/ironclaw-security --agent claude-code --scope user`,
+      command: `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer redeem --program claude_code --claim-token ${CLAIM_TOKEN}\ngh skill install Enlightenism/IronClaw-Security skills/ironclaw-security --agent claude-code --scope user --pin v1.0.3`,
     });
     const keyClaim = makeClaim({
       command: `gh skill install Enlightenism/IronClaw-Security skills/ironclaw-security --agent claude-code --scope user --key ${CLAIM_TOKEN}`,

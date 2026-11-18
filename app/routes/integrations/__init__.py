@@ -7,7 +7,7 @@ from app.routes.integrations.claude_code import router as claude_code_router
 from app.routes.integrations.compatibility import router as compatibility_router
 from app.routes.integrations.copilot import router as copilot_router
 from app.routes.integrations.cursor import router as cursor_router
-from app.routes.integrations.gemini_cli import router as gemini_cli_router
+from app.routes.integrations.antigravity_cli import router as antigravity_cli_router
 from app.routes.integrations.goose import router as goose_router
 from app.routes.integrations.health import router as health_router
 from app.routes.integrations.hermes import router as hermes_router
@@ -37,7 +37,7 @@ router.include_router(claude_code_router)
 router.include_router(openclaw_router)
 router.include_router(cursor_router)
 router.include_router(goose_router)
-router.include_router(gemini_cli_router)
+router.include_router(antigravity_cli_router)
 router.include_router(copilot_router)
 router.include_router(hermes_router)
 router.include_router(agent_skills_router)

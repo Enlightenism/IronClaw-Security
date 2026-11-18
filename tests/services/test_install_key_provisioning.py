@@ -47,7 +47,7 @@ def _make_install_key_record(
         "claude_code": "ic_install_claude_code_test_secret_abcdef",
         "cursor": "ic_install_cursor_test_secret_cursor",
         "goose": "ic_install_goose_test_secret_goose",
-        "gemini_cli": "ic_install_gemini_cli_test_secret_gemini",
+        "antigravity_cli": "ic_install_antigravity_cli_test_secret_antigravity",
         "copilot": "ic_install_copilot_test_secret_copilot",
         "hermes": "ic_install_hermes_test_secret_hermes",
         "security_guardian": "ic_install_security_guardian_test_secret_guardian",
@@ -198,7 +198,7 @@ def test_provision_for_purchase_issues_program_specific_keys_with_stripe_refs() 
             key_id=f"ik_{program}_001",
             raw_key=f"ic_install_{program}_issue_secret_123",
         )
-        for program in ("openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes")
+        for program in ("openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes")
     ]
     install_key_registry.generate_for_paid_customer.side_effect = records
 
@@ -214,7 +214,7 @@ def test_provision_for_purchase_issues_program_specific_keys_with_stripe_refs() 
         issued_after_payment=True,
     )
 
-    assert set(results) == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"}
+    assert set(results) == {"openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes"}
     assert results["openclaw"].record.key_id == "ik_openclaw_001"
     assert results["hermes"].record.key_id == "ik_hermes_001"
     first_call = install_key_registry.generate_for_paid_customer.call_args_list[0].kwargs
@@ -259,7 +259,7 @@ def test_provision_for_program_accepts_aliases_for_supported_runtimes() -> None:
 
     for alias, expected in {
         "github-copilot": "copilot",
-        "gemini-cli": "gemini_cli",
+        "antigravity-cli": "antigravity_cli",
         "cursor-agent": "cursor",
         "hermes-agent": "hermes",
         "goose-agent": "goose",
@@ -289,7 +289,7 @@ def test_provision_for_program_accepts_aliases_for_supported_runtimes() -> None:
     [
         ("cursor", "cursor-agent", "ic_install_cursor_"),
         ("goose", "goose-agent", "ic_install_goose_"),
-        ("gemini_cli", "gemini-cli", "ic_install_gemini_cli_"),
+        ("antigravity_cli", "antigravity-cli", "ic_install_antigravity_cli_"),
         ("copilot", "github-copilot", "ic_install_copilot_"),
         ("hermes", "hermes-agent", "ic_install_hermes_"),
     ],
@@ -399,7 +399,7 @@ def test_provision_for_purchase_generates_all_supported_programs() -> None:
             "claude_code",
             "cursor",
             "goose",
-            "gemini_cli",
+            "antigravity_cli",
             "copilot",
             "hermes",
             "security_guardian",
@@ -422,7 +422,7 @@ def test_provision_for_purchase_generates_all_supported_programs() -> None:
         source="purchase",
     )
 
-    expected_programs = {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"}
+    expected_programs = {"openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes"}
     assert set(results.keys()) == expected_programs
     for program in expected_programs:
         assert results[program].raw_key == ""
@@ -449,7 +449,7 @@ def test_provision_for_purchase_uses_org_owner_resolution_when_auth_ctx_is_org()
             "claude_code",
             "cursor",
             "goose",
-            "gemini_cli",
+            "antigravity_cli",
             "copilot",
             "hermes",
         )
@@ -506,7 +506,7 @@ def test_provision_for_purchase_omits_security_guardian_from_runtime_platform_en
                 "claude_code",
                 "cursor",
                 "goose",
-                "gemini_cli",
+                "antigravity_cli",
                 "copilot",
                 "hermes",
             ),
@@ -530,7 +530,7 @@ def test_provision_for_purchase_omits_security_guardian_from_runtime_platform_en
         source="purchase",
     )
 
-    assert set(results.keys()) == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"}
+    assert set(results.keys()) == {"openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes"}
     assert "security_guardian" not in results
     assert install_key_registry.generate_for_paid_customer.call_count == 7
 

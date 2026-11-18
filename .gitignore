@@ -10,6 +10,7 @@ data/
 *.bak
 *.pem
 openapi.json.bak
+ironclaw_security.egg-info/
 
 
 # Runtime-generated data — never commit

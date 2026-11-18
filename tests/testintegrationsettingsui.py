@@ -44,7 +44,7 @@ def test_buildintegrationssettingsview_contains_expected_settings_sections() -> 
         "Claude Code",
         "Cursor",
         "Goose",
-        "Gemini CLI",
+        "Antigravity CLI",
         "GitHub Copilot",
         "Security Guardian",
     ]
@@ -56,7 +56,7 @@ def test_buildintegrationssettingsview_contains_expected_settings_sections() -> 
         "Claude Code",
         "Cursor",
         "Goose",
-        "Gemini CLI",
+        "Antigravity CLI",
         "GitHub Copilot",
         "Security Guardian",
     }
@@ -76,7 +76,7 @@ def test_buildintegrationssettingsview_uses_canonical_provider_metadata() -> Non
         "Claude Code",
         "Cursor",
         "Goose",
-        "Gemini CLI",
+        "Antigravity CLI",
         "GitHub Copilot",
         "Security Guardian",
     ]

@@ -14,7 +14,7 @@ provider_targets = [
     "openclaw",
     "cursor",
     "goose",
-    "gemini_cli",
+    "antigravity_cli",
     "copilot",
     "hermes",
 ]

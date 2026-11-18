@@ -28,7 +28,7 @@ from app.supabaseclient import SupabaseAPIError, SupabaseClientError
 _logger: logging.Logger = get_logger("ironclaw.install_keys")
 
 # ---------------------------------------------------------------------------
-# Constants — distinct from apikeys.py ic_ and ic_org_ prefixes
+# Constants - distinct from apikeys.py ic_ and ic_org_ prefixes
 # ---------------------------------------------------------------------------
 
 _INSTALL_KEY_SECRET_BYTES: Final[int] = 32
@@ -1554,7 +1554,7 @@ class InstallKeyRegistry:
         claude = sum(1 for r in records if r.program == "claude_code")
         cursor = sum(1 for r in records if r.program == "cursor")
         goose = sum(1 for r in records if r.program == "goose")
-        gemini = sum(1 for r in records if r.program == "gemini_cli")
+        antigravity = sum(1 for r in records if r.program == "antigravity_cli")
         copilot = sum(1 for r in records if r.program == "copilot")
         security_guardian = sum(1 for r in records if r.program == "security_guardian")
         hermes = sum(1 for r in records if r.program == "hermes")
@@ -1566,7 +1566,7 @@ class InstallKeyRegistry:
             "claude_code_keys": claude,
             "cursor_keys": cursor,
             "goose_keys": goose,
-            "gemini_cli_keys": gemini,
+            "antigravity_cli_keys": antigravity,
             "copilot_keys": copilot,
             "hermes_keys": hermes,
             "security_guardian_keys": security_guardian,
@@ -1574,7 +1574,7 @@ class InstallKeyRegistry:
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton — isolated from get_api_key_registry()
+# Module-level singleton - isolated from get_api_key_registry()
 # ---------------------------------------------------------------------------
 
 _install_key_registry: InstallKeyRegistry | None = None

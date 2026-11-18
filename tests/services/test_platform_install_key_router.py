@@ -31,8 +31,8 @@ from app.services.platform_install_key_router import (
         ("cursor-agent", "cursor", "ic_install_cursor_"),
         ("goose", "goose", "ic_install_goose_"),
         ("goose-agent", "goose", "ic_install_goose_"),
-        ("gemini-cli", "gemini_cli", "ic_install_gemini_cli_"),
-        ("gemini_cli", "gemini_cli", "ic_install_gemini_cli_"),
+        ("antigravity-cli", "antigravity_cli", "ic_install_antigravity_cli_"),
+        ("antigravity_cli", "antigravity_cli", "ic_install_antigravity_cli_"),
         ("github-copilot", "copilot", "ic_install_copilot_"),
         ("githubcopilot", "copilot", "ic_install_copilot_"),
         ("hermes", "hermes", "ic_install_hermes_"),
@@ -60,7 +60,7 @@ def test_resolve_platform_routes_aliases_to_canonical_install_key_program(platfo
         ("anthropic", "ic_install_claude_code_secret_123", True),
         ("cursor", "ic_install_cursor_secret_123", True),
         ("goose-agent", "ic_install_goose_secret_123", True),
-        ("gemini_cli", "ic_install_gemini_cli_secret_123", True),
+        ("antigravity_cli", "ic_install_antigravity_cli_secret_123", True),
         ("github-copilot", "ic_install_copilot_secret_123", True),
         ("hermes-agent", "ic_install_hermes_secret_123", True),
         ("security-guardian", "ic_install_security_guardian_secret_123", False),
@@ -91,7 +91,7 @@ def test_list_groups_returns_shared_format_sections() -> None:
 
     assert len(groups) == 7
     programs = {group.program for group in groups}
-    assert programs == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"}
+    assert programs == {"openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes"}
     assert all(group.platforms for group in groups)
     assert all(group.program != "security_guardian" for group in groups)
     assert any(group.program == "hermes" and "hermes" in group.platforms for group in groups)
@@ -111,9 +111,8 @@ def test_list_platforms_returns_aliases_and_canonical_names() -> None:
         "goose": "goose",
         "goose_agent": "goose",
         "goose-agent": "goose",
-        "gemini_cli": "gemini_cli",
-        "gemini-cli": "gemini_cli",
-        "gemini": "gemini_cli",
+        "antigravity_cli": "antigravity_cli",
+        "antigravity-cli": "antigravity_cli",
         "copilot": "copilot",
         "github_copilot": "copilot",
         "github-copilot": "copilot",
@@ -139,8 +138,7 @@ def test_list_platforms_returns_aliases_and_canonical_names() -> None:
     assert "cursor" in platforms
     assert "cursor_agent" in platforms
     assert "goose" in platforms
-    assert "gemini_cli" in platforms
-    assert "gemini" in platforms
+    assert "antigravity_cli" in platforms
     assert "copilot" in platforms
     assert "githubcopilot" in platforms
     assert "hermes" in platforms

@@ -19,7 +19,7 @@ def test_list_compatibility_rules_returns_expected_runtime_families():
         "hermes",
         "cursor",
         "goose",
-        "gemini-cli",
+        "antigravity-cli",
         "copilot",
         "security-guardian",
         "generic-agent",

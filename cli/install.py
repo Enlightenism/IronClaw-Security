@@ -258,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--platform",
         default=None,
-        help="Canonical runtime platform to install, e.g. openclaw, claude_code, cursor, goose, gemini_cli, copilot, hermes.",
+        help="Canonical runtime platform to install, e.g. openclaw, claude_code, cursor, goose, antigravity_cli, copilot, hermes.",
     )
     parser.add_argument(
         "--install-claim",

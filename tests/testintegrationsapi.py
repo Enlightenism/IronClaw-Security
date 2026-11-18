@@ -426,7 +426,7 @@ def test_integration_install_route_normalizes_supported_platform_names(installer
     for platform, integration_id, program in (
         ("cursor", "integration-cursor", "cursor"),
         ("goose-agent", "integration-goose", "goose"),
-        ("gemini-cli", "integration-gemini-cli", "gemini_cli"),
+        ("antigravity-cli", "integration-antigravity-cli", "antigravity_cli"),
         ("github-copilot", "integration-copilot", "copilot"),
     ):
         install_key = f"{InstallKeyFormatRegistry.get_spec(program).prefix}validkey"
@@ -496,7 +496,7 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
             _Record("claude_code", "ic_install_claude_code_...efgh"),
             _Record("cursor", "ic_install_cursor_...ijkl"),
             _Record("goose", "ic_install_goose_...mnop"),
-            _Record("gemini_cli", "ic_install_gemini_cli_...qrst"),
+            _Record("antigravity_cli", "ic_install_antigravity_cli_...qrst"),
             _Record("copilot", "ic_install_copilot_...uvwx"),
             _Record("hermes", "ic_install_hermes_...abcd"),
             _Record("security_guardian", "ic_install_security_guardian_...yzab"),
@@ -520,7 +520,7 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
         "claude-code",
         "cursor",
         "goose",
-        "gemini-cli",
+        "antigravity-cli",
         "copilot",
         "hermes",
     ]
@@ -534,7 +534,7 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
             "openclaw_command",
             "cursor_command",
             "goose_command",
-            "gemini_cli_command",
+            "antigravity_cli_command",
             "copilot_command",
             "hermes_command",
         )
@@ -560,7 +560,7 @@ def test_integration_list_endpoints_expose_canonical_platform_metadata(client: T
             "openclaw",
             "cursor",
             "goose",
-            "gemini-cli",
+            "antigravity-cli",
             "copilot",
             "hermes",
         ]
@@ -589,13 +589,13 @@ def test_integration_token_exposes_registry_normalized_platform_aliases(client: 
             ),
             SimpleNamespace(
                 owner_key="owner-456",
-                program="gemini_cli",
+                program="antigravity_cli",
                 active=True,
                 payment_status="paid",
                 entitlements_status="active",
                 issued_after_payment=True,
-                masked_key="ic_install_gemini_cli_...xyz",
-                key_id="ik_gemini_123",
+                masked_key="ic_install_antigravity_cli_...xyz",
+                key_id="ik_antigravity_123",
             ),
         ]
     )
@@ -614,9 +614,9 @@ def test_integration_token_exposes_registry_normalized_platform_aliases(client: 
     assert payload["install_metadata"]["claude-code"]["platform"] == "claude-code"
     assert payload["install_metadata"]["claude-code"]["slug"] == "claude-code"
     assert payload["install_metadata"]["claude-code"]["available"] is True
-    assert payload["install_metadata"]["gemini-cli"]["available"] is True
+    assert payload["install_metadata"]["antigravity-cli"]["available"] is True
     assert payload["command_metadata"]["claude-code"] == ""
-    assert payload["command_metadata"]["gemini-cli"] == ""
+    assert payload["command_metadata"]["antigravity-cli"] == ""
     assert "claude_code" not in payload["command_metadata"]
 
 
@@ -723,7 +723,7 @@ def test_integration_token_filters_out_non_runtime_and_shared_family_records(cli
         "claude-code",
         "cursor",
         "goose",
-        "gemini-cli",
+        "antigravity-cli",
         "copilot",
         "hermes",
     }
@@ -773,7 +773,7 @@ def test_install_claim_is_owner_bound_short_lived_and_not_a_raw_key(client: Test
     payload = response.json()
     assert payload["key_id"] == record.key_id
     assert payload["claim_token"] == claim.claim_token
-    assert payload["command"] == (f"python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.2\npython -m ironclaw_installer bootstrap --program openclaw --claim-token {claim.claim_token}")
+    assert payload["command"] == (f"python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3\npython -m ironclaw_installer bootstrap --program openclaw --claim-token {claim.claim_token}")
     assert "expires_at" not in payload
     assert "install_key" not in payload
     assert response.headers["cache-control"] == "no-store, private"

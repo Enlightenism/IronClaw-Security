@@ -28,7 +28,7 @@ MAX_REASON_CHARS = 240
 REDACTED = "[REDACTED]"
 DEFAULT_CONFIG_PARTS = (".ironclaw", "config.json")
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
-SUPPORTED_PROGRAMS = frozenset({"claude_code", "gemini_cli", "cursor", "copilot", "goose", "hermes"})
+SUPPORTED_PROGRAMS = frozenset({"claude_code", "antigravity_cli", "cursor", "copilot", "goose", "hermes"})
 # OpenClaw runs its gate through the plugin, so it is only accepted for --phase persist and is not an installable hook program.
 GATE_PROGRAMS = SUPPORTED_PROGRAMS | {"openclaw"}
 ADAPTER_PROGRAMS = frozenset({"goose", "hermes"})
@@ -137,11 +137,16 @@ def _parse_tool_event(raw_event: str) -> tuple[dict[str, Any], str, Any, str]:
     event = json.loads(raw_event)
     if not isinstance(event, dict):
         raise HookError(UNIDENTIFIED_TOOL_REASON)
-    tool_name = _first_string(event, "tool_name", "toolName")
+    tool_call = event.get("toolCall")
+    if isinstance(tool_call, dict):
+        tool_name = _first_string(tool_call, "name")
+        params = tool_call.get("args")
+    else:
+        tool_name = _first_string(event, "tool_name", "toolName")
+        params = event["tool_input"] if "tool_input" in event else event.get("toolArgs")
     if tool_name is None:
         raise HookError(UNIDENTIFIED_TOOL_REASON)
-    params = event["tool_input"] if "tool_input" in event else event.get("toolArgs")
-    session_id = _first_string(event, "session_id", "sessionId") or str(uuid.uuid4())
+    session_id = _first_string(event, "session_id", "sessionId", "conversationId") or str(uuid.uuid4())
     return event, tool_name, params, session_id
 
 
@@ -352,13 +357,12 @@ def authorize_install(command: str, program: str, config_file: Path | None) -> s
 HOOK_MARKER = "ironclaw_sdk.runtime_hooks"
 _HOOK_EVENTS: dict[str, str] = {
     "claude_code": "PreToolUse",
-    "gemini_cli": "BeforeTool",
+    "antigravity_cli": "PreToolUse",
     "cursor": "preToolUse",
     "copilot": "preToolUse",
 }
 POST_HOOK_EVENTS: dict[str, str] = {
     "claude_code": "PostToolUse",
-    "gemini_cli": "AfterTool",
     "cursor": "postToolUse",
     "copilot": "postToolUse",
 }
@@ -379,8 +383,8 @@ def runtime_hook_config_path(program: str, home: Path | None = None) -> Path:
     base = home or Path.home()
     if program == "claude_code":
         return base / ".claude" / "settings.json"
-    if program == "gemini_cli":
-        return base / ".gemini" / "settings.json"
+    if program == "antigravity_cli":
+        return base / ".gemini" / "config" / "hooks.json"
     if program == "cursor":
         return base / ".cursor" / "hooks.json"
     if program == "copilot":
@@ -403,11 +407,17 @@ def _hook_entry(program: str, phase: str = "pre") -> dict[str, Any]:
             entry["onFailure"] = "block"
         entry["timeout"] = PRE_HOOK_TIMEOUT_SECONDS if phase == "pre" else RETURN_HOOK_TIMEOUT_SECONDS
         return {"matcher": "", "hooks": [entry]}
-    if program == "gemini_cli":
-        gemini_hook: dict[str, Any] = {"type": "command", "command": command}
-        # Gemini hook timeouts are configured in milliseconds, so the seconds value is converted.
-        gemini_hook["timeout"] = (PRE_HOOK_TIMEOUT_SECONDS if phase == "pre" else RETURN_HOOK_TIMEOUT_SECONDS) * 1000
-        return {"matcher": ".*", "hooks": [gemini_hook]}
+    if program == "antigravity_cli":
+        return {
+            "matcher": "*",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": command,
+                    "timeout": PRE_HOOK_TIMEOUT_SECONDS,
+                }
+            ],
+        }
     if program == "cursor":
         timeout = PRE_HOOK_TIMEOUT_SECONDS if phase == "pre" else RETURN_HOOK_TIMEOUT_SECONDS
         return {"command": command, "timeout": timeout}
@@ -418,6 +428,11 @@ def _hook_entry(program: str, phase: str = "pre") -> dict[str, Any]:
 
 def merge_hook_config(program: str, existing: dict[str, Any]) -> dict[str, Any]:
     config = dict(existing)
+    if program == "antigravity_cli":
+        config["ironclaw-security"] = {
+            "PreToolUse": [_hook_entry(program, "pre")],
+        }
+        return config
     if program in ("cursor", "copilot"):
         config.setdefault("version", 1)
     hooks = config.get("hooks", {})
@@ -470,6 +485,12 @@ def write_runtime_hook(target: Path, config: dict[str, Any]) -> Path:
 
 
 def _emit(program: str, reason: str | None) -> int:
+    if program == "antigravity_cli":
+        output = {"decision": "allow" if reason is None else "deny"}
+        if reason is not None:
+            output["reason"] = reason
+        sys.stdout.write(json.dumps(output) + "\n")
+        return 0
     if program in JSON_DECISION_PROGRAMS:
         output: dict[str, str] = {"permissionDecision": "allow" if reason is None else "deny"}
         if reason is not None:
@@ -626,8 +647,6 @@ def _emit_return(program: str, replacement: str | None) -> int:
         output = {"decision": "block", "reason": replacement, "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": RETURN_CONTEXT}}
     elif program == "copilot":
         output = {"modifiedResult": {"resultType": "success", "textResultForLlm": replacement}}
-    elif program == "gemini_cli":
-        output = {"decision": "deny", "reason": replacement, "hookSpecificOutput": {"hookEventName": "AfterTool", "additionalContext": RETURN_CONTEXT}}
     else:
         return 0
     sys.stdout.write(json.dumps(output) + "\n")

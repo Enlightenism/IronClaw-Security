@@ -18,7 +18,7 @@ def test_list_platform_profiles_returns_expected_platforms():
         "openclaw",
         "cursor",
         "goose",
-        "gemini-cli",
+        "antigravity-cli",
         "copilot",
         "security-guardian",
         "hermes",

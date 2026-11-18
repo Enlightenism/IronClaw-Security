@@ -268,7 +268,7 @@ class TestDashboardOverview:
         records = [
             _make_record(key_id="ik_cursor_1", owner_key=_OWNER, program="cursor", masked_key="ic_install_cursor_...ffff"),
             _make_record(key_id="ik_goose_1", owner_key=_OWNER, program="goose", masked_key="ic_install_goose_...aaaa"),
-            _make_record(key_id="ik_gemini_1", owner_key=_OWNER, program="gemini_cli", masked_key="ic_install_gemini_cli_...bbbb"),
+            _make_record(key_id="ik_antigravity_1", owner_key=_OWNER, program="antigravity_cli", masked_key="ic_install_antigravity_cli_...bbbb"),
             _make_record(key_id="ik_copilot_1", owner_key=_OWNER, program="copilot", masked_key="ic_install_copilot_...cccc"),
             _make_record(key_id="ik_hermes_1", owner_key=_OWNER, program="hermes", masked_key="ic_install_hermes_...eeee"),
         ]

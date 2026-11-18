@@ -347,7 +347,7 @@ def test_provision_install_keys_calls_generate_for_paid_customer_for_all_support
         "claude_code",
         "cursor",
         "goose",
-        "gemini_cli",
+        "antigravity_cli",
         "copilot",
         "hermes",
     ]
@@ -371,7 +371,7 @@ def test_provision_install_keys_calls_generate_for_paid_customer_with_openclaw_a
         "claude_code",
         "cursor",
         "goose",
-        "gemini_cli",
+        "antigravity_cli",
         "copilot",
         "hermes",
     ]
@@ -417,7 +417,7 @@ def test_provision_install_keys_calls_generate_for_paid_customer_with_claude_cod
         "claude_code",
         "cursor",
         "goose",
-        "gemini_cli",
+        "antigravity_cli",
         "copilot",
         "hermes",
     ]
@@ -475,7 +475,7 @@ def test_provision_install_keys_calls_supported_programs_in_registry_order(
         "claude_code",
         "cursor",
         "goose",
-        "gemini_cli",
+        "antigravity_cli",
         "copilot",
         "hermes",
     ]
@@ -492,7 +492,7 @@ def test_provision_install_keys_calls_generate_for_paid_customer_with_hermes_arg
         "claude_code",
         "cursor",
         "goose",
-        "gemini_cli",
+        "antigravity_cli",
         "copilot",
         "hermes",
     ]
@@ -543,7 +543,7 @@ def test_provision_install_keys_returns_dict_with_openclaw_key(
         "claude_code",
         "cursor",
         "goose",
-        "gemini_cli",
+        "antigravity_cli",
         "copilot",
         "hermes",
     ]
@@ -567,7 +567,7 @@ def test_provision_install_keys_returns_dict_with_claude_code_key(
         "claude_code",
         "cursor",
         "goose",
-        "gemini_cli",
+        "antigravity_cli",
         "copilot",
         "hermes",
     ]
@@ -586,13 +586,13 @@ def test_provision_install_keys_return_dict_has_exactly_three_keys(
     customer: BillingCustomer,
     active_sub: BillingSubscription,
 ) -> None:
-    mock_install_key_registry.generate_for_paid_customer.side_effect = [_make_install_key_record(customer.email, active_sub.subscription_id, program) for program in ["openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"]]
+    mock_install_key_registry.generate_for_paid_customer.side_effect = [_make_install_key_record(customer.email, active_sub.subscription_id, program) for program in ["openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes"]]
     result = registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
         subscription_id=active_sub.subscription_id,
         owner_key=customer.email,
     )
-    assert set(result.keys()) == {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"}
+    assert set(result.keys()) == {"openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes"}
 
 
 def test_provision_install_keys_openclaw_value_is_install_key_record(
@@ -601,7 +601,7 @@ def test_provision_install_keys_openclaw_value_is_install_key_record(
     customer: BillingCustomer,
     active_sub: BillingSubscription,
 ) -> None:
-    mock_install_key_registry.generate_for_paid_customer.side_effect = [_make_install_key_record(customer.email, active_sub.subscription_id, program) for program in ["openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"]]
+    mock_install_key_registry.generate_for_paid_customer.side_effect = [_make_install_key_record(customer.email, active_sub.subscription_id, program) for program in ["openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes"]]
     result = registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
         subscription_id=active_sub.subscription_id,
@@ -616,7 +616,7 @@ def test_provision_install_keys_claude_code_value_is_install_key_record(
     customer: BillingCustomer,
     active_sub: BillingSubscription,
 ) -> None:
-    mock_install_key_registry.generate_for_paid_customer.side_effect = [_make_install_key_record(customer.email, active_sub.subscription_id, program) for program in ["openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"]]
+    mock_install_key_registry.generate_for_paid_customer.side_effect = [_make_install_key_record(customer.email, active_sub.subscription_id, program) for program in ["openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes"]]
     result = registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
         subscription_id=active_sub.subscription_id,
@@ -631,7 +631,7 @@ def test_provision_install_keys_openclaw_record_program_is_openclaw(
     customer: BillingCustomer,
     active_sub: BillingSubscription,
 ) -> None:
-    mock_install_key_registry.generate_for_paid_customer.side_effect = [_make_install_key_record(customer.email, active_sub.subscription_id, program) for program in ["openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"]]
+    mock_install_key_registry.generate_for_paid_customer.side_effect = [_make_install_key_record(customer.email, active_sub.subscription_id, program) for program in ["openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes"]]
     result = registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
         subscription_id=active_sub.subscription_id,
@@ -646,7 +646,7 @@ def test_provision_install_keys_claude_code_record_program_is_claude_code(
     customer: BillingCustomer,
     active_sub: BillingSubscription,
 ) -> None:
-    mock_install_key_registry.generate_for_paid_customer.side_effect = [_make_install_key_record(customer.email, active_sub.subscription_id, program) for program in ["openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"]]
+    mock_install_key_registry.generate_for_paid_customer.side_effect = [_make_install_key_record(customer.email, active_sub.subscription_id, program) for program in ["openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes"]]
     result = registry.provision_install_keys_on_purchase(
         customer_id=customer.customer_id,
         subscription_id=active_sub.subscription_id,

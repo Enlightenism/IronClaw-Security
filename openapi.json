@@ -94,6 +94,19 @@
             "description": "Instructional content or payload associated with the action.",
             "title": "Content"
           },
+          "eventid": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eventid"
+          },
           "filepath": {
             "anyOf": [
               {
@@ -640,10 +653,6 @@
             "title": "Metadata",
             "type": "object"
           },
-          "quarantined_count": {
-            "title": "Quarantined Count",
-            "type": "integer"
-          },
           "review_count": {
             "title": "Review Count",
             "type": "integer"
@@ -662,7 +671,6 @@
           "total",
           "allowed_count",
           "review_count",
-          "quarantined_count",
           "denied_count"
         ],
         "title": "ActionHistoryView",
@@ -1582,6 +1590,358 @@
         "title": "AlertNotificationResponse",
         "type": "object"
       },
+      "AntigravityCliEvaluateRequest": {
+        "properties": {
+          "action_type": {
+            "description": "Antigravity CLI action type: prompt_input, tool_plan, command, tool_call, workflow_step, multi_step_workflow, approval, or message.",
+            "examples": [
+              "prompt_input",
+              "tool_plan",
+              "command",
+              "workflow_step"
+            ],
+            "title": "Action Type",
+            "type": "string"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Caller client or agent identifier.",
+            "title": "Client Id"
+          },
+          "content": {
+            "default": "",
+            "description": "Prompt payload, tool-plan, command script, or workflow step content.",
+            "title": "Content",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Additional Antigravity CLI runtime and workflow metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "risk_score": {
+            "default": 0,
+            "description": "Caller-supplied risk hint (0-100).",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Risk Score",
+            "type": "integer"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Antigravity CLI session identifier for audit correlation.",
+            "title": "Session Id"
+          },
+          "target": {
+            "description": "Target resource, command, tool name, file path, or workflow subject.",
+            "examples": [
+              "bash",
+              "tool://web-search",
+              "/workspace/agent-plan.json"
+            ],
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action_type",
+          "target"
+        ],
+        "title": "AntigravityCliEvaluateRequest",
+        "type": "object"
+      },
+      "AntigravityCliEvaluateResponse": {
+        "properties": {
+          "adapter_name": {
+            "title": "Adapter Name",
+            "type": "string"
+          },
+          "audit_trail": {
+            "additionalProperties": true,
+            "title": "Audit Trail",
+            "type": "object"
+          },
+          "decision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          },
+          "matched_rules": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Matched Rules",
+            "type": "array"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "reviewed_at": {
+            "title": "Reviewed At",
+            "type": "string"
+          },
+          "risk_level": {
+            "title": "Risk Level",
+            "type": "string"
+          },
+          "risk_score": {
+            "title": "Risk Score",
+            "type": "integer"
+          },
+          "secret_scan": {
+            "additionalProperties": true,
+            "title": "Secret Scan",
+            "type": "object"
+          },
+          "should_allow": {
+            "title": "Should Allow",
+            "type": "boolean"
+          },
+          "should_block": {
+            "title": "Should Block",
+            "type": "boolean"
+          },
+          "should_quarantine": {
+            "title": "Should Quarantine",
+            "type": "boolean"
+          },
+          "should_warn": {
+            "title": "Should Warn",
+            "type": "boolean"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "trace_id": {
+            "title": "Trace Id",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "allow",
+              "block"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trace_id",
+          "adapter_name",
+          "platform",
+          "mode",
+          "verdict",
+          "should_allow",
+          "should_warn",
+          "should_quarantine",
+          "should_block",
+          "risk_score",
+          "risk_level",
+          "summary",
+          "matched_rules",
+          "reasons",
+          "decision_id",
+          "reviewed_at",
+          "audit_trail",
+          "secret_scan"
+        ],
+        "title": "AntigravityCliEvaluateResponse",
+        "type": "object"
+      },
+      "AntigravityCliHandshakeRequest": {
+        "properties": {
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Caller identity for connection validation.",
+            "title": "Client Id"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Optional connection metadata and runtime context.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "protocol_version": {
+            "default": "1.0.0",
+            "description": "Requested protocol version.",
+            "title": "Protocol Version",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Antigravity CLI session identifier associated with the handshake.",
+            "title": "Session Id"
+          }
+        },
+        "title": "AntigravityCliHandshakeRequest",
+        "type": "object"
+      },
+      "AntigravityCliHandshakeResponse": {
+        "properties": {
+          "adapter_name": {
+            "title": "Adapter Name",
+            "type": "string"
+          },
+          "capabilities": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "connected_at": {
+            "title": "Connected At",
+            "type": "string"
+          },
+          "integration_health": {
+            "title": "Integration Health",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "policy_mode": {
+            "title": "Policy Mode",
+            "type": "string"
+          },
+          "protocol_version": {
+            "title": "Protocol Version",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "platform",
+          "adapter_name",
+          "protocol_version",
+          "integration_health",
+          "connected_at",
+          "capabilities",
+          "policy_mode",
+          "metadata"
+        ],
+        "title": "AntigravityCliHandshakeResponse",
+        "type": "object"
+      },
+      "AntigravityCliManifestResponse": {
+        "properties": {
+          "adapter_name": {
+            "title": "Adapter Name",
+            "type": "string"
+          },
+          "capabilities": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "guarded_tool_categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Guarded Tool Categories",
+            "type": "array"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "policy_bindings": {
+            "additionalProperties": true,
+            "title": "Policy Bindings",
+            "type": "object"
+          },
+          "protocol_version": {
+            "title": "Protocol Version",
+            "type": "string"
+          },
+          "supported_action_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported Action Types",
+            "type": "array"
+          }
+        },
+        "required": [
+          "adapter_name",
+          "platform",
+          "protocol_version",
+          "supported_action_types",
+          "guarded_tool_categories",
+          "policy_bindings",
+          "capabilities",
+          "generated_at"
+        ],
+        "title": "AntigravityCliManifestResponse",
+        "type": "object"
+      },
       "ApiReferencePageResponse": {
         "properties": {
           "apikeyheadername": {
@@ -1730,25 +2090,6 @@
           "description"
         ],
         "title": "ApiRouteGroupView",
-        "type": "object"
-      },
-      "AttachPaymentMethodRequest": {
-        "properties": {
-          "paymentMethodId": {
-            "description": "Stripe PaymentMethod ID to attach",
-            "title": "Paymentmethodid",
-            "type": "string"
-          },
-          "setAsDefault": {
-            "default": false,
-            "title": "Setasdefault",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "paymentMethodId"
-        ],
-        "title": "AttachPaymentMethodRequest",
         "type": "object"
       },
       "AuditEvent": {
@@ -4256,7 +4597,7 @@
           },
           "package_catalogue": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/app__ui__billing__package__PackageCatalogueEntry"
+              "$ref": "#/components/schemas/PackageCatalogueEntry"
             },
             "title": "Package Catalogue",
             "type": "object"
@@ -4528,6 +4869,39 @@
             "title": "Purchase Id",
             "type": "string"
           },
+          "refund_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refund Reason"
+          },
+          "refunded_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refunded At"
+          },
+          "stripe_payment_intent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stripe Payment Intent Id"
+          },
           "token_coverage": {
             "title": "Token Coverage",
             "type": "integer"
@@ -4637,6 +5011,13 @@
       },
       "BillingPackageView": {
         "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
           "description": {
             "title": "Description",
             "type": "string"
@@ -4644,6 +5025,11 @@
           "display_label": {
             "title": "Display Label",
             "type": "string"
+          },
+          "featured": {
+            "default": false,
+            "title": "Featured",
+            "type": "boolean"
           },
           "included_units": {
             "title": "Included Units",
@@ -4885,6 +5271,11 @@
             "title": "Canaddnew",
             "type": "boolean"
           },
+          "customer_mapping_status": {
+            "default": "mapped",
+            "title": "Customer Mapping Status",
+            "type": "string"
+          },
           "defaultmethodid": {
             "anyOf": [
               {
@@ -4908,6 +5299,17 @@
             "title": "Maxmethods",
             "type": "integer"
           },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
           "methodcount": {
             "title": "Methodcount",
             "type": "integer"
@@ -4918,6 +5320,11 @@
             },
             "title": "Methods",
             "type": "array"
+          },
+          "methods_status": {
+            "default": "available",
+            "title": "Methods Status",
+            "type": "string"
           },
           "notes": {
             "items": {
@@ -4936,10 +5343,15 @@
           },
           "package_catalogue": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/app__ui__billing__payment_methods__PackageCatalogueEntry"
+              "$ref": "#/components/schemas/PackageCatalogueEntry"
             },
             "title": "Package Catalogue",
             "type": "object"
+          },
+          "status": {
+            "default": "ok",
+            "title": "Status",
+            "type": "string"
           },
           "statuscounts": {
             "items": {
@@ -7260,6 +7672,35 @@
         "title": "ComponentStatus",
         "type": "object"
       },
+      "ContactRequest": {
+        "properties": {
+          "email": {
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "message"
+        ],
+        "title": "ContactRequest",
+        "type": "object"
+      },
       "CopilotChatRequest": {
         "properties": {
           "history": {
@@ -9484,6 +9925,98 @@
         "title": "CustomerKeysResponse",
         "type": "object"
       },
+      "CyberNewsFeeds": {
+        "properties": {
+          "attacks": {
+            "items": {
+              "$ref": "#/components/schemas/CyberNewsItem"
+            },
+            "title": "Attacks",
+            "type": "array"
+          },
+          "bleeping_computer": {
+            "items": {
+              "$ref": "#/components/schemas/CyberNewsItem"
+            },
+            "title": "Bleeping Computer",
+            "type": "array"
+          },
+          "cisa": {
+            "items": {
+              "$ref": "#/components/schemas/CyberNewsItem"
+            },
+            "title": "Cisa",
+            "type": "array"
+          },
+          "hacker_news": {
+            "items": {
+              "$ref": "#/components/schemas/CyberNewsItem"
+            },
+            "title": "Hacker News",
+            "type": "array"
+          }
+        },
+        "required": [
+          "attacks",
+          "hacker_news",
+          "cisa",
+          "bleeping_computer"
+        ],
+        "title": "CyberNewsFeeds",
+        "type": "object"
+      },
+      "CyberNewsItem": {
+        "properties": {
+          "link": {
+            "title": "Link",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "link",
+          "published_at",
+          "source"
+        ],
+        "title": "CyberNewsItem",
+        "type": "object"
+      },
+      "CyberNewsResponse": {
+        "properties": {
+          "feeds": {
+            "$ref": "#/components/schemas/CyberNewsFeeds"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "updated_at",
+          "feeds"
+        ],
+        "title": "CyberNewsResponse",
+        "type": "object"
+      },
       "DashboardBillingKPI": {
         "properties": {
           "plan": {
@@ -9693,6 +10226,50 @@
         "title": "DashboardInstallKeyView",
         "type": "object"
       },
+      "DashboardLastPaymentView": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "number"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "package_id": {
+            "title": "Package Id",
+            "type": "string"
+          },
+          "purchased_at": {
+            "title": "Purchased At",
+            "type": "string"
+          },
+          "support_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Support Reference"
+          },
+          "units": {
+            "title": "Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "amount",
+          "units",
+          "package_id",
+          "purchased_at"
+        ],
+        "title": "DashboardLastPaymentView",
+        "type": "object"
+      },
       "DashboardQueueView": {
         "properties": {
           "completed_today": {
@@ -9751,6 +10328,11 @@
             "title": "Environment",
             "type": "string"
           },
+          "has_paid": {
+            "default": false,
+            "title": "Has Paid",
+            "type": "boolean"
+          },
           "install_keys": {
             "items": {
               "$ref": "#/components/schemas/DashboardInstallKeyView"
@@ -9764,6 +10346,16 @@
             },
             "title": "Kpis",
             "type": "array"
+          },
+          "last_payment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DashboardLastPaymentView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "metadata": {
             "additionalProperties": true,
@@ -9791,6 +10383,24 @@
                 "type": "null"
               }
             ]
+          },
+          "wallet_history": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardWalletHistoryEntry"
+            },
+            "title": "Wallet History",
+            "type": "array"
+          },
+          "wallet_status": {
+            "default": "unavailable",
+            "title": "Wallet Status",
+            "type": "string"
+          },
+          "wallet_units": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Wallet Units",
+            "type": "integer"
           }
         },
         "required": [
@@ -9871,6 +10481,61 @@
         "title": "DashboardUnitsResponse",
         "type": "object"
       },
+      "DashboardWalletHistoryEntry": {
+        "properties": {
+          "balance_after": {
+            "title": "Balance After",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "entry_type": {
+            "title": "Entry Type",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "package_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package Id"
+          },
+          "support_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Support Reference"
+          },
+          "units": {
+            "title": "Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entry_type",
+          "label",
+          "units",
+          "balance_after",
+          "created_at"
+        ],
+        "title": "DashboardWalletHistoryEntry",
+        "type": "object"
+      },
       "DashboardWalletKPI": {
         "properties": {
           "total_purchased_units": {
@@ -9879,10 +10544,6 @@
           },
           "unit_balance": {
             "title": "Unit Balance",
-            "type": "integer"
-          },
-          "units_consumed": {
-            "title": "Units Consumed",
             "type": "integer"
           },
           "updated_at": {
@@ -9899,7 +10560,6 @@
         },
         "required": [
           "unit_balance",
-          "units_consumed",
           "total_purchased_units",
           "updated_at"
         ],
@@ -12638,358 +13298,6 @@
           "updated"
         ],
         "title": "FeedToggleResponse",
-        "type": "object"
-      },
-      "GeminiCliEvaluateRequest": {
-        "properties": {
-          "action_type": {
-            "description": "Gemini CLI action type: prompt_input, tool_plan, command, tool_call, workflow_step, multi_step_workflow, approval, or message.",
-            "examples": [
-              "prompt_input",
-              "tool_plan",
-              "command",
-              "workflow_step"
-            ],
-            "title": "Action Type",
-            "type": "string"
-          },
-          "client_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Caller client or agent identifier.",
-            "title": "Client Id"
-          },
-          "content": {
-            "default": "",
-            "description": "Prompt payload, tool-plan, command script, or workflow step content.",
-            "title": "Content",
-            "type": "string"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "description": "Additional Gemini CLI runtime and workflow metadata.",
-            "title": "Metadata",
-            "type": "object"
-          },
-          "risk_score": {
-            "default": 0,
-            "description": "Caller-supplied risk hint (0-100).",
-            "maximum": 100.0,
-            "minimum": 0.0,
-            "title": "Risk Score",
-            "type": "integer"
-          },
-          "session_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Gemini CLI session identifier for audit correlation.",
-            "title": "Session Id"
-          },
-          "target": {
-            "description": "Target resource, command, tool name, file path, or workflow subject.",
-            "examples": [
-              "bash",
-              "tool://web-search",
-              "/workspace/agent-plan.json"
-            ],
-            "title": "Target",
-            "type": "string"
-          }
-        },
-        "required": [
-          "action_type",
-          "target"
-        ],
-        "title": "GeminiCliEvaluateRequest",
-        "type": "object"
-      },
-      "GeminiCliEvaluateResponse": {
-        "properties": {
-          "adapter_name": {
-            "title": "Adapter Name",
-            "type": "string"
-          },
-          "audit_trail": {
-            "additionalProperties": true,
-            "title": "Audit Trail",
-            "type": "object"
-          },
-          "decision_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Decision Id"
-          },
-          "matched_rules": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Matched Rules",
-            "type": "array"
-          },
-          "mode": {
-            "title": "Mode",
-            "type": "string"
-          },
-          "platform": {
-            "title": "Platform",
-            "type": "string"
-          },
-          "reasons": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Reasons",
-            "type": "array"
-          },
-          "reviewed_at": {
-            "title": "Reviewed At",
-            "type": "string"
-          },
-          "risk_level": {
-            "title": "Risk Level",
-            "type": "string"
-          },
-          "risk_score": {
-            "title": "Risk Score",
-            "type": "integer"
-          },
-          "secret_scan": {
-            "additionalProperties": true,
-            "title": "Secret Scan",
-            "type": "object"
-          },
-          "should_allow": {
-            "title": "Should Allow",
-            "type": "boolean"
-          },
-          "should_block": {
-            "title": "Should Block",
-            "type": "boolean"
-          },
-          "should_quarantine": {
-            "title": "Should Quarantine",
-            "type": "boolean"
-          },
-          "should_warn": {
-            "title": "Should Warn",
-            "type": "boolean"
-          },
-          "summary": {
-            "title": "Summary",
-            "type": "string"
-          },
-          "trace_id": {
-            "title": "Trace Id",
-            "type": "string"
-          },
-          "verdict": {
-            "enum": [
-              "allow",
-              "block"
-            ],
-            "title": "Verdict",
-            "type": "string"
-          }
-        },
-        "required": [
-          "trace_id",
-          "adapter_name",
-          "platform",
-          "mode",
-          "verdict",
-          "should_allow",
-          "should_warn",
-          "should_quarantine",
-          "should_block",
-          "risk_score",
-          "risk_level",
-          "summary",
-          "matched_rules",
-          "reasons",
-          "decision_id",
-          "reviewed_at",
-          "audit_trail",
-          "secret_scan"
-        ],
-        "title": "GeminiCliEvaluateResponse",
-        "type": "object"
-      },
-      "GeminiCliHandshakeRequest": {
-        "properties": {
-          "client_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Caller identity for connection validation.",
-            "title": "Client Id"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "description": "Optional connection metadata and runtime context.",
-            "title": "Metadata",
-            "type": "object"
-          },
-          "protocol_version": {
-            "default": "1.0.0",
-            "description": "Requested protocol version.",
-            "title": "Protocol Version",
-            "type": "string"
-          },
-          "session_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Gemini CLI session identifier associated with the handshake.",
-            "title": "Session Id"
-          }
-        },
-        "title": "GeminiCliHandshakeRequest",
-        "type": "object"
-      },
-      "GeminiCliHandshakeResponse": {
-        "properties": {
-          "adapter_name": {
-            "title": "Adapter Name",
-            "type": "string"
-          },
-          "capabilities": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Capabilities",
-            "type": "array"
-          },
-          "connected_at": {
-            "title": "Connected At",
-            "type": "string"
-          },
-          "integration_health": {
-            "title": "Integration Health",
-            "type": "string"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
-          },
-          "platform": {
-            "title": "Platform",
-            "type": "string"
-          },
-          "policy_mode": {
-            "title": "Policy Mode",
-            "type": "string"
-          },
-          "protocol_version": {
-            "title": "Protocol Version",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "platform",
-          "adapter_name",
-          "protocol_version",
-          "integration_health",
-          "connected_at",
-          "capabilities",
-          "policy_mode",
-          "metadata"
-        ],
-        "title": "GeminiCliHandshakeResponse",
-        "type": "object"
-      },
-      "GeminiCliManifestResponse": {
-        "properties": {
-          "adapter_name": {
-            "title": "Adapter Name",
-            "type": "string"
-          },
-          "capabilities": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Capabilities",
-            "type": "array"
-          },
-          "generated_at": {
-            "title": "Generated At",
-            "type": "string"
-          },
-          "guarded_tool_categories": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Guarded Tool Categories",
-            "type": "array"
-          },
-          "platform": {
-            "title": "Platform",
-            "type": "string"
-          },
-          "policy_bindings": {
-            "additionalProperties": true,
-            "title": "Policy Bindings",
-            "type": "object"
-          },
-          "protocol_version": {
-            "title": "Protocol Version",
-            "type": "string"
-          },
-          "supported_action_types": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Supported Action Types",
-            "type": "array"
-          }
-        },
-        "required": [
-          "adapter_name",
-          "platform",
-          "protocol_version",
-          "supported_action_types",
-          "guarded_tool_categories",
-          "policy_bindings",
-          "capabilities",
-          "generated_at"
-        ],
-        "title": "GeminiCliManifestResponse",
         "type": "object"
       },
       "GlobalPostureSummaryResponse": {
@@ -16862,6 +17170,118 @@
         "title": "IngestLogListResponse",
         "type": "object"
       },
+      "InstallGateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "command": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Command",
+            "type": "string"
+          },
+          "platform": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Platform",
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform",
+          "command"
+        ],
+        "title": "InstallGateRequest",
+        "type": "object"
+      },
+      "InstallGateResponse": {
+        "properties": {
+          "artifacts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "family": {
+            "title": "Family",
+            "type": "string"
+          },
+          "pinned": {
+            "title": "Pinned",
+            "type": "boolean"
+          },
+          "program": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Program"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict",
+          "family",
+          "program",
+          "pinned",
+          "reasons"
+        ],
+        "title": "InstallGateResponse",
+        "type": "object"
+      },
+      "InstallKeyClaimRedeemRequest": {
+        "properties": {
+          "claim_token": {
+            "maxLength": 256,
+            "minLength": 10,
+            "title": "Claim Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_token"
+        ],
+        "title": "InstallKeyClaimRedeemRequest",
+        "type": "object"
+      },
       "InstallKeyEventRequest": {
         "additionalProperties": false,
         "properties": {
@@ -16894,8 +17314,6 @@
             "enum": [
               "action_blocked",
               "prompt_injection_detected",
-              "quarantine_detected",
-              "quarantine_event",
               "usage_units_debited",
               "install_key_usage_recorded",
               "install_key_activated",
@@ -16996,8 +17414,6 @@
             "enum": [
               "action_blocked",
               "prompt_injection_detected",
-              "quarantine_detected",
-              "quarantine_event",
               "usage_units_debited",
               "install_key_usage_recorded",
               "install_key_activated",
@@ -17300,32 +17716,125 @@
         "title": "IntegrationHealthResponse",
         "type": "object"
       },
-      "IntegrationInstallStepResponse": {
+      "IntegrationInstallRequest": {
         "properties": {
-          "completed": {
-            "title": "Completed",
+          "adapter_version": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adapter Version"
+          },
+          "claim_token": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Token"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
             "type": "boolean"
           },
-          "detail": {
-            "title": "Detail",
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform"
+          }
+        },
+        "title": "IntegrationInstallRequest",
+        "type": "object"
+      },
+      "IntegrationInstallResponse": {
+        "properties": {
+          "adapter_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adapter Version"
+          },
+          "installation": {
+            "$ref": "#/components/schemas/InstallationSummaryView"
+          },
+          "integration_id": {
+            "title": "Integration Id",
             "type": "string"
           },
-          "label": {
-            "title": "Label",
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform"
+          },
+          "service": {
+            "title": "Service",
             "type": "string"
           },
-          "step_id": {
-            "title": "Step Id",
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/InstallationStepView"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "timestamp": {
+            "title": "Timestamp",
             "type": "string"
           }
         },
         "required": [
-          "step_id",
-          "label",
-          "completed",
-          "detail"
+          "status",
+          "service",
+          "timestamp",
+          "integration_id",
+          "installation"
         ],
-        "title": "IntegrationInstallStepResponse",
+        "title": "IntegrationInstallResponse",
         "type": "object"
       },
       "IntegrationLifecycleResponse": {
@@ -18333,86 +18842,6 @@
         "title": "IntegrationTargetView",
         "type": "object"
       },
-      "IntegrationTokenResponse": {
-        "properties": {
-          "claude_code_command": {
-            "default": "",
-            "title": "Claude Code Command",
-            "type": "string"
-          },
-          "command_metadata": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Command Metadata",
-            "type": "object"
-          },
-          "copilot_command": {
-            "default": "",
-            "title": "Copilot Command",
-            "type": "string"
-          },
-          "cursor_command": {
-            "default": "",
-            "title": "Cursor Command",
-            "type": "string"
-          },
-          "gemini_cli_command": {
-            "default": "",
-            "title": "Gemini Cli Command",
-            "type": "string"
-          },
-          "goose_command": {
-            "default": "",
-            "title": "Goose Command",
-            "type": "string"
-          },
-          "hermes_command": {
-            "default": "",
-            "title": "Hermes Command",
-            "type": "string"
-          },
-          "install_metadata": {
-            "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Install Metadata",
-            "type": "object"
-          },
-          "openclaw_command": {
-            "default": "",
-            "title": "Openclaw Command",
-            "type": "string"
-          },
-          "security_guardian_command": {
-            "default": "",
-            "title": "Security Guardian Command",
-            "type": "string"
-          },
-          "status": {
-            "default": "locked",
-            "title": "Status",
-            "type": "string"
-          },
-          "supported_platforms": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Supported Platforms",
-            "type": "array"
-          },
-          "user_token": {
-            "title": "User Token",
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_token"
-        ],
-        "title": "IntegrationTokenResponse",
-        "type": "object"
-      },
       "IntegrationTransitionView": {
         "properties": {
           "action": {
@@ -18487,6 +18916,89 @@
           "detail"
         ],
         "title": "IntegrationVerificationCheckResponse",
+        "type": "object"
+      },
+      "IntegrationsTokenResponse": {
+        "properties": {
+          "antigravity_cli_command": {
+            "title": "Antigravity Cli Command",
+            "type": "string"
+          },
+          "claude_code_command": {
+            "title": "Claude Code Command",
+            "type": "string"
+          },
+          "command_metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Command Metadata",
+            "type": "object"
+          },
+          "copilot_command": {
+            "title": "Copilot Command",
+            "type": "string"
+          },
+          "cursor_command": {
+            "title": "Cursor Command",
+            "type": "string"
+          },
+          "goose_command": {
+            "title": "Goose Command",
+            "type": "string"
+          },
+          "hermes_command": {
+            "title": "Hermes Command",
+            "type": "string"
+          },
+          "install_metadata": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Install Metadata",
+            "type": "object"
+          },
+          "openclaw_command": {
+            "title": "Openclaw Command",
+            "type": "string"
+          },
+          "security_guardian_command": {
+            "title": "Security Guardian Command",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "supported_platforms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported Platforms",
+            "type": "array"
+          },
+          "user_token": {
+            "title": "User Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "user_token",
+          "claude_code_command",
+          "openclaw_command",
+          "cursor_command",
+          "goose_command",
+          "antigravity_cli_command",
+          "copilot_command",
+          "hermes_command",
+          "security_guardian_command",
+          "supported_platforms",
+          "command_metadata",
+          "install_metadata"
+        ],
+        "title": "IntegrationsTokenResponse",
         "type": "object"
       },
       "KeyUsageSummary": {
@@ -20297,6 +20809,76 @@
           "organization"
         ],
         "title": "OrganizationResponse",
+        "type": "object"
+      },
+      "PackageCatalogueEntry": {
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "featured": {
+            "default": false,
+            "title": "Featured",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "package_id": {
+            "title": "Package Id",
+            "type": "string"
+          },
+          "price_cents": {
+            "title": "Price Cents",
+            "type": "integer"
+          },
+          "price_usd": {
+            "title": "Price Usd",
+            "type": "integer"
+          },
+          "stripe_price_id": {
+            "default": "",
+            "title": "Stripe Price Id",
+            "type": "string"
+          },
+          "token_coverage": {
+            "title": "Token Coverage",
+            "type": "integer"
+          },
+          "tokens_per_unit": {
+            "title": "Tokens Per Unit",
+            "type": "integer"
+          },
+          "units": {
+            "title": "Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "package_id",
+          "label",
+          "units",
+          "price_usd",
+          "price_cents",
+          "tokens_per_unit",
+          "token_coverage",
+          "notes"
+        ],
+        "title": "PackageCatalogueEntry",
         "type": "object"
       },
       "PagerDutyConfigRequest": {
@@ -25593,6 +26175,197 @@
         "title": "RetentionRule",
         "type": "object"
       },
+      "ReturnGateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action_type": {
+            "default": "tool_output",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Action Type",
+            "type": "string"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "command": {
+            "anyOf": [
+              {
+                "maxLength": 32768,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command"
+          },
+          "content": {
+            "default": "",
+            "title": "Content",
+            "type": "string"
+          },
+          "file_path": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Path"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "platform": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Platform",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "target": {
+            "default": "return",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Target",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "platform"
+        ],
+        "title": "ReturnGateRequest",
+        "type": "object"
+      },
+      "ReturnGateScanResponse": {
+        "properties": {
+          "audit_only": {
+            "default": true,
+            "title": "Audit Only",
+            "type": "boolean"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "risk_score": {
+            "title": "Risk Score",
+            "type": "integer"
+          },
+          "sandbox_id": {
+            "title": "Sandbox Id",
+            "type": "string"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict",
+          "sandbox_id",
+          "stage",
+          "reasons",
+          "risk_score"
+        ],
+        "title": "ReturnGateScanResponse",
+        "type": "object"
+      },
+      "ReturnGateTransformResponse": {
+        "properties": {
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "replacement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacement"
+          },
+          "sandbox_id": {
+            "title": "Sandbox Id",
+            "type": "string"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verdict",
+          "sandbox_id",
+          "replacement",
+          "reasons"
+        ],
+        "title": "ReturnGateTransformResponse",
+        "type": "object"
+      },
       "ReviewDecisionOptions": {
         "properties": {
           "canapprove": {
@@ -29218,294 +29991,6 @@
         "title": "UnitDebitRequest",
         "type": "object"
       },
-      "UnitLedgerDetailResponse": {
-        "properties": {
-          "generated_at": {
-            "title": "Generated At",
-            "type": "string"
-          },
-          "item": {
-            "$ref": "#/components/schemas/UnitLedgerItem"
-          },
-          "notes": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Notes",
-            "type": "array"
-          }
-        },
-        "required": [
-          "generated_at",
-          "item"
-        ],
-        "title": "UnitLedgerDetailResponse",
-        "type": "object"
-      },
-      "UnitLedgerItem": {
-        "properties": {
-          "amount_usd": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Amount Usd"
-          },
-          "balance_after": {
-            "minimum": 0.0,
-            "title": "Balance After",
-            "type": "integer"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "entry_id": {
-            "title": "Entry Id",
-            "type": "string"
-          },
-          "entry_type": {
-            "enum": [
-              "purchase",
-              "debit",
-              "credit",
-              "adjustment",
-              "refund"
-            ],
-            "title": "Entry Type",
-            "type": "string"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
-          },
-          "reference_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reference Id"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "units": {
-            "title": "Units",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "entry_id",
-          "timestamp",
-          "entry_type",
-          "units",
-          "balance_after",
-          "description"
-        ],
-        "title": "UnitLedgerItem",
-        "type": "object"
-      },
-      "UnitLedgerListResponse": {
-        "properties": {
-          "applied_filters": {
-            "additionalProperties": true,
-            "title": "Applied Filters",
-            "type": "object"
-          },
-          "generated_at": {
-            "title": "Generated At",
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/UnitLedgerItem"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "notes": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Notes",
-            "type": "array"
-          },
-          "total": {
-            "minimum": 0.0,
-            "title": "Total",
-            "type": "integer"
-          },
-          "totals": {
-            "$ref": "#/components/schemas/UnitLedgerTotalsView"
-          }
-        },
-        "required": [
-          "generated_at",
-          "total",
-          "totals"
-        ],
-        "title": "UnitLedgerListResponse",
-        "type": "object"
-      },
-      "UnitLedgerTotalsView": {
-        "properties": {
-          "adjustment_entries": {
-            "minimum": 0.0,
-            "title": "Adjustment Entries",
-            "type": "integer"
-          },
-          "credit_entries": {
-            "minimum": 0.0,
-            "title": "Credit Entries",
-            "type": "integer"
-          },
-          "current_balance_units": {
-            "minimum": 0.0,
-            "title": "Current Balance Units",
-            "type": "integer"
-          },
-          "debit_entries": {
-            "minimum": 0.0,
-            "title": "Debit Entries",
-            "type": "integer"
-          },
-          "purchase_entries": {
-            "minimum": 0.0,
-            "title": "Purchase Entries",
-            "type": "integer"
-          },
-          "refund_entries": {
-            "minimum": 0.0,
-            "title": "Refund Entries",
-            "type": "integer"
-          },
-          "total_consumed_units": {
-            "minimum": 0.0,
-            "title": "Total Consumed Units",
-            "type": "integer"
-          },
-          "total_credited_units": {
-            "minimum": 0.0,
-            "title": "Total Credited Units",
-            "type": "integer"
-          },
-          "total_entries": {
-            "minimum": 0.0,
-            "title": "Total Entries",
-            "type": "integer"
-          },
-          "total_purchase_amount_usd": {
-            "minimum": 0.0,
-            "title": "Total Purchase Amount Usd",
-            "type": "number"
-          },
-          "total_purchased_units": {
-            "minimum": 0.0,
-            "title": "Total Purchased Units",
-            "type": "integer"
-          },
-          "total_refunded_units": {
-            "minimum": 0.0,
-            "title": "Total Refunded Units",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "total_entries",
-          "purchase_entries",
-          "debit_entries",
-          "credit_entries",
-          "adjustment_entries",
-          "refund_entries",
-          "total_purchased_units",
-          "total_consumed_units",
-          "total_credited_units",
-          "total_refunded_units",
-          "total_purchase_amount_usd",
-          "current_balance_units"
-        ],
-        "title": "UnitLedgerTotalsView",
-        "type": "object"
-      },
-      "UnitPackageView": {
-        "properties": {
-          "active": {
-            "default": true,
-            "title": "Active",
-            "type": "boolean"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "effective_price_per_1k_units": {
-            "minimum": 0.0,
-            "title": "Effective Price Per 1K Units",
-            "type": "number"
-          },
-          "featured": {
-            "default": false,
-            "title": "Featured",
-            "type": "boolean"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "package_id": {
-            "title": "Package Id",
-            "type": "string"
-          },
-          "price_display": {
-            "title": "Price Display",
-            "type": "string"
-          },
-          "price_usd": {
-            "minimum": 0.0,
-            "title": "Price Usd",
-            "type": "number"
-          },
-          "tokens_per_unit": {
-            "minimum": 1.0,
-            "title": "Tokens Per Unit",
-            "type": "integer"
-          },
-          "unit_count": {
-            "minimum": 1.0,
-            "title": "Unit Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "package_id",
-          "name",
-          "unit_count",
-          "price_usd",
-          "price_display",
-          "effective_price_per_1k_units",
-          "tokens_per_unit"
-        ],
-        "title": "UnitPackageView",
-        "type": "object"
-      },
       "UnitPolicyView": {
         "properties": {
           "buyer_positioning": {
@@ -29546,194 +30031,6 @@
           "buyer_positioning"
         ],
         "title": "UnitPolicyView",
-        "type": "object"
-      },
-      "UnitPurchaseRequest": {
-        "properties": {
-          "package_id": {
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Package Id",
-            "type": "string"
-          },
-          "quantity": {
-            "default": 1,
-            "maximum": 100.0,
-            "minimum": 1.0,
-            "title": "Quantity",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "package_id"
-        ],
-        "title": "UnitPurchaseRequest",
-        "type": "object"
-      },
-      "UnitPurchaseResponse": {
-        "properties": {
-          "amount_usd": {
-            "minimum": 0.0,
-            "title": "Amount Usd",
-            "type": "number"
-          },
-          "credited_units": {
-            "minimum": 1.0,
-            "title": "Credited Units",
-            "type": "integer"
-          },
-          "ledger_entry": {
-            "$ref": "#/components/schemas/UnitLedgerItem"
-          },
-          "purchased_package": {
-            "$ref": "#/components/schemas/UnitPackageView"
-          },
-          "quantity": {
-            "minimum": 1.0,
-            "title": "Quantity",
-            "type": "integer"
-          },
-          "status": {
-            "const": "ok",
-            "title": "Status",
-            "type": "string"
-          },
-          "wallet": {
-            "$ref": "#/components/schemas/UnitWalletBalanceView"
-          }
-        },
-        "required": [
-          "status",
-          "purchased_package",
-          "quantity",
-          "credited_units",
-          "amount_usd",
-          "wallet",
-          "ledger_entry"
-        ],
-        "title": "UnitPurchaseResponse",
-        "type": "object"
-      },
-      "UnitUsageSummaryView": {
-        "properties": {
-          "average_units_per_request": {
-            "minimum": 0.0,
-            "title": "Average Units Per Request",
-            "type": "number"
-          },
-          "last_seen_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Seen At"
-          },
-          "total_requests": {
-            "minimum": 0.0,
-            "title": "Total Requests",
-            "type": "integer"
-          },
-          "total_units": {
-            "minimum": 0.0,
-            "title": "Total Units",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "total_requests",
-          "total_units",
-          "average_units_per_request"
-        ],
-        "title": "UnitUsageSummaryView",
-        "type": "object"
-      },
-      "UnitWalletBalanceView": {
-        "properties": {
-          "balance_units": {
-            "minimum": 0.0,
-            "title": "Balance Units",
-            "type": "integer"
-          },
-          "last_updated_at": {
-            "title": "Last Updated At",
-            "type": "string"
-          },
-          "lifetime_consumed_units": {
-            "minimum": 0.0,
-            "title": "Lifetime Consumed Units",
-            "type": "integer"
-          },
-          "lifetime_purchased_units": {
-            "minimum": 0.0,
-            "title": "Lifetime Purchased Units",
-            "type": "integer"
-          },
-          "pending_units": {
-            "minimum": 0.0,
-            "title": "Pending Units",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "balance_units",
-          "lifetime_purchased_units",
-          "lifetime_consumed_units",
-          "pending_units",
-          "last_updated_at"
-        ],
-        "title": "UnitWalletBalanceView",
-        "type": "object"
-      },
-      "UnitWalletResponse": {
-        "properties": {
-          "currency": {
-            "const": "USD",
-            "default": "USD",
-            "title": "Currency",
-            "type": "string"
-          },
-          "generated_at": {
-            "title": "Generated At",
-            "type": "string"
-          },
-          "notes": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Notes",
-            "type": "array"
-          },
-          "packages": {
-            "items": {
-              "$ref": "#/components/schemas/UnitPackageView"
-            },
-            "title": "Packages",
-            "type": "array"
-          },
-          "recent_ledger": {
-            "items": {
-              "$ref": "#/components/schemas/UnitLedgerItem"
-            },
-            "title": "Recent Ledger",
-            "type": "array"
-          },
-          "usage": {
-            "$ref": "#/components/schemas/UnitUsageSummaryView"
-          },
-          "wallet": {
-            "$ref": "#/components/schemas/UnitWalletBalanceView"
-          }
-        },
-        "required": [
-          "generated_at",
-          "wallet",
-          "usage"
-        ],
-        "title": "UnitWalletResponse",
         "type": "object"
       },
       "UpdateOrgMemberRequest": {
@@ -30293,10 +30590,6 @@
             "title": "Total Blocked",
             "type": "integer"
           },
-          "total_quarantined": {
-            "title": "Total Quarantined",
-            "type": "integer"
-          },
           "total_requests": {
             "title": "Total Requests",
             "type": "integer"
@@ -30326,7 +30619,6 @@
           "total_scans",
           "total_blocked",
           "total_warned",
-          "total_quarantined",
           "total_allowed",
           "unique_clients",
           "unique_sessions"
@@ -32453,81 +32745,6 @@
           "notes"
         ],
         "title": "IntegrationCompatibilityResponse",
-        "type": "object"
-      },
-      "app__api__integrations__IntegrationInstallRequest": {
-        "properties": {
-          "requested_by": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requested By"
-          }
-        },
-        "title": "IntegrationInstallRequest",
-        "type": "object"
-      },
-      "app__api__integrations__IntegrationInstallResponse": {
-        "properties": {
-          "installed": {
-            "title": "Installed",
-            "type": "boolean"
-          },
-          "installed_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Installed At"
-          },
-          "integration_id": {
-            "title": "Integration Id",
-            "type": "string"
-          },
-          "platform": {
-            "title": "Platform",
-            "type": "string"
-          },
-          "requested_by": {
-            "title": "Requested By",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "steps": {
-            "items": {
-              "$ref": "#/components/schemas/IntegrationInstallStepResponse"
-            },
-            "title": "Steps",
-            "type": "array"
-          },
-          "summary": {
-            "title": "Summary",
-            "type": "string"
-          }
-        },
-        "required": [
-          "integration_id",
-          "platform",
-          "status",
-          "installed",
-          "requested_by",
-          "steps",
-          "summary"
-        ],
-        "title": "IntegrationInstallResponse",
         "type": "object"
       },
       "app__api__integrations__IntegrationObservabilityResponse": {
@@ -36469,153 +36686,6 @@
         "title": "IntegrationCompatibilityResponse",
         "type": "object"
       },
-      "app__routes__integrations__installer__IntegrationInstallRequest": {
-        "properties": {
-          "adapter_version": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Adapter Version"
-          },
-          "dry_run": {
-            "default": false,
-            "title": "Dry Run",
-            "type": "boolean"
-          },
-          "force": {
-            "default": false,
-            "title": "Force",
-            "type": "boolean"
-          },
-          "initiated_by": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Initiated By"
-          },
-          "install_key": {
-            "anyOf": [
-              {
-                "maxLength": 1024,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Install Key"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
-          },
-          "owner_key": {
-            "anyOf": [
-              {
-                "maxLength": 512,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Owner Key"
-          },
-          "platform": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Platform"
-          }
-        },
-        "title": "IntegrationInstallRequest",
-        "type": "object"
-      },
-      "app__routes__integrations__installer__IntegrationInstallResponse": {
-        "properties": {
-          "adapter_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Adapter Version"
-          },
-          "installation": {
-            "$ref": "#/components/schemas/InstallationSummaryView"
-          },
-          "integration_id": {
-            "title": "Integration Id",
-            "type": "string"
-          },
-          "platform": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Platform"
-          },
-          "service": {
-            "title": "Service",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "steps": {
-            "items": {
-              "$ref": "#/components/schemas/InstallationStepView"
-            },
-            "title": "Steps",
-            "type": "array"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "service",
-          "timestamp",
-          "integration_id",
-          "installation"
-        ],
-        "title": "IntegrationInstallResponse",
-        "type": "object"
-      },
       "app__routes__integrations__observability__IntegrationObservabilityResponse": {
         "properties": {
           "alerts": {
@@ -37464,102 +37534,6 @@
         "title": "BillingUsageBucketView",
         "type": "object"
       },
-      "app__ui__billing__package__PackageCatalogueEntry": {
-        "properties": {
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "notes": {
-            "title": "Notes",
-            "type": "string"
-          },
-          "price_cents": {
-            "title": "Price Cents",
-            "type": "integer"
-          },
-          "price_usd": {
-            "title": "Price Usd",
-            "type": "integer"
-          },
-          "stripe_price_id": {
-            "default": "",
-            "title": "Stripe Price Id",
-            "type": "string"
-          },
-          "token_coverage": {
-            "title": "Token Coverage",
-            "type": "integer"
-          },
-          "tokens_per_unit": {
-            "title": "Tokens Per Unit",
-            "type": "integer"
-          },
-          "units": {
-            "title": "Units",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "label",
-          "units",
-          "price_usd",
-          "price_cents",
-          "tokens_per_unit",
-          "token_coverage",
-          "notes"
-        ],
-        "title": "PackageCatalogueEntry",
-        "type": "object"
-      },
-      "app__ui__billing__payment_methods__PackageCatalogueEntry": {
-        "properties": {
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "notes": {
-            "title": "Notes",
-            "type": "string"
-          },
-          "price_cents": {
-            "title": "Price Cents",
-            "type": "integer"
-          },
-          "price_usd": {
-            "title": "Price Usd",
-            "type": "integer"
-          },
-          "stripe_price_id": {
-            "title": "Stripe Price Id",
-            "type": "string"
-          },
-          "token_coverage": {
-            "title": "Token Coverage",
-            "type": "integer"
-          },
-          "tokens_per_unit": {
-            "title": "Tokens Per Unit",
-            "type": "integer"
-          },
-          "units": {
-            "title": "Units",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "label",
-          "units",
-          "price_usd",
-          "price_cents",
-          "tokens_per_unit",
-          "token_coverage",
-          "stripe_price_id",
-          "notes"
-        ],
-        "title": "PackageCatalogueEntry",
-        "type": "object"
-      },
       "app__ui__docs__quickstart__QuickstartStepView": {
         "properties": {
           "codeblock": {
@@ -38354,11 +38328,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
         "summary": "Executeaction",
         "tags": [
           "action-execution"
@@ -40452,6 +40421,33 @@
         ]
       }
     },
+    "/api/billing/api/billing/checkout/reconcile-recent": {
+      "post": {
+        "operationId": "reconcile_recent_checkout_sessions_api_api_billing_api_billing_checkout_reconcile_recent_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Reconcile Recent Checkout Sessions Api",
+        "tags": [
+          "billing",
+          "billing",
+          "billing",
+          "checkout"
+        ]
+      }
+    },
     "/api/billing/api/billing/checkout/sessions": {
       "post": {
         "operationId": "create_checkout_session_api_api_billing_api_billing_checkout_sessions_post",
@@ -40577,6 +40573,54 @@
           }
         ],
         "summary": "Complete Checkout Session Api",
+        "tags": [
+          "billing",
+          "billing",
+          "billing",
+          "checkout"
+        ]
+      }
+    },
+    "/api/billing/api/billing/checkout/sessions/{session_id}/reconcile": {
+      "post": {
+        "operationId": "reconcile_checkout_session_api_api_billing_api_billing_checkout_sessions__session_id__reconcile_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Reconcile Checkout Session Api",
         "tags": [
           "billing",
           "billing",
@@ -41069,98 +41113,6 @@
           }
         ],
         "summary": "List Payment Methods Api",
-        "tags": [
-          "billing",
-          "billing",
-          "billing",
-          "payment-methods"
-        ]
-      },
-      "post": {
-        "operationId": "attach_payment_method_api_alias_api_billing_api_billing_payment_methods_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AttachPaymentMethodRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Attach Payment Method Api Alias",
-        "tags": [
-          "billing",
-          "billing",
-          "billing",
-          "payment-methods"
-        ]
-      }
-    },
-    "/api/billing/api/billing/payment-methods/attach": {
-      "post": {
-        "operationId": "attach_payment_method_api_api_billing_api_billing_payment_methods_attach_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AttachPaymentMethodRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Attach Payment Method Api",
         "tags": [
           "billing",
           "billing",
@@ -41736,6 +41688,32 @@
         ]
       }
     },
+    "/api/billing/checkout/reconcile-recent": {
+      "post": {
+        "operationId": "reconcile_recent_checkout_sessions_api_billing_checkout_reconcile_recent_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Reconcile Recent Checkout Sessions",
+        "tags": [
+          "billing",
+          "billing",
+          "checkout"
+        ]
+      }
+    },
     "/api/billing/checkout/sessions": {
       "post": {
         "operationId": "create_checkout_session_api_billing_checkout_sessions_post",
@@ -41859,6 +41837,53 @@
           }
         ],
         "summary": "Complete Checkout Session",
+        "tags": [
+          "billing",
+          "billing",
+          "checkout"
+        ]
+      }
+    },
+    "/api/billing/checkout/sessions/{session_id}/reconcile": {
+      "post": {
+        "operationId": "reconcile_checkout_session_api_billing_checkout_sessions__session_id__reconcile_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Reconcile Checkout Session",
         "tags": [
           "billing",
           "billing",
@@ -42386,96 +42411,6 @@
           }
         ],
         "summary": "List Payment Methods",
-        "tags": [
-          "billing",
-          "billing",
-          "payment-methods"
-        ]
-      },
-      "post": {
-        "operationId": "attach_payment_method_alias_api_billing_payment_methods_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AttachPaymentMethodRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Attach Payment Method Alias",
-        "tags": [
-          "billing",
-          "billing",
-          "payment-methods"
-        ]
-      }
-    },
-    "/api/billing/payment-methods/attach": {
-      "post": {
-        "operationId": "attach_payment_method_api_billing_payment_methods_attach_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AttachPaymentMethodRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Attach Payment Method",
         "tags": [
           "billing",
           "billing",
@@ -43365,14 +43300,8 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
         "summary": "Process a Stripe checkout completion webhook for a pending purchase",
         "tags": [
-          "api",
           "billing"
         ]
       }
@@ -43380,18 +43309,24 @@
     "/api/billing/webhook/stripe": {
       "post": {
         "operationId": "handle_checkout_session_completed_webhook_legacy_api_billing_webhook_stripe_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Payload",
-                "type": "object"
-              }
+        "parameters": [
+          {
+            "in": "header",
+            "name": "stripe-signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stripe-Signature"
             }
-          },
-          "required": true
-        },
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -43416,14 +43351,8 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
         "summary": "Legacy Stripe webhook alias",
         "tags": [
-          "api",
           "billing"
         ]
       }
@@ -43445,6 +43374,52 @@
         "tags": [
           "billing",
           "billing"
+        ]
+      }
+    },
+    "/api/contact": {
+      "post": {
+        "operationId": "submit_contact_api_contact_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Submit Contact Api Contact Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit the public contact form",
+        "tags": [
+          "api",
+          "contact"
         ]
       }
     },
@@ -43713,6 +43688,28 @@
         "summary": "Get Customer Write Endpoint",
         "tags": [
           "customer-auth"
+        ]
+      }
+    },
+    "/api/cyber-news": {
+      "get": {
+        "operationId": "get_cyber_news_api_cyber_news_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CyberNewsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Cyber News",
+        "tags": [
+          "api",
+          "cyber-news"
         ]
       }
     },
@@ -45256,6 +45253,36 @@
         ]
       }
     },
+    "/api/install-key-events/self": {
+      "get": {
+        "description": "Authenticates with the caller's X-Install-Key only. Owner and key scope are derived from that key, never from caller-supplied headers. Returns the InstallKeysResponse shape used by the SDK.",
+        "operationId": "read_own_install_key_api_install_key_events_self_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Read Own Install Key Api Install Key Events Self Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Return the caller's own install-key status and usage",
+        "tags": [
+          "api",
+          "install-key-events"
+        ]
+      }
+    },
     "/api/integrations": {
       "get": {
         "operationId": "api_integrations_inventory_api_integrations_get",
@@ -45279,6 +45306,52 @@
         "tags": [
           "api",
           "api-inventory"
+        ]
+      }
+    },
+    "/api/integrations/install-claims/redeem": {
+      "post": {
+        "operationId": "redeem_install_key_claim_api_integrations_install_claims_redeem_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallKeyClaimRedeemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Redeem Install Key Claim Api Integrations Install Claims Redeem Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Redeem Install Key Claim",
+        "tags": [
+          "api",
+          "integration-routes"
         ]
       }
     },
@@ -45347,6 +45420,56 @@
           }
         },
         "summary": "Get Integration Installer",
+        "tags": [
+          "api",
+          "integration-routes"
+        ]
+      }
+    },
+    "/api/integrations/installers/{integration_id}/claim": {
+      "post": {
+        "operationId": "create_integration_install_claim_api_integrations_installers__integration_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "integration_id",
+            "required": true,
+            "schema": {
+              "title": "Integration Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Integration Install Claim Api Integrations Installers  Integration Id  Claim Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Create Integration Install Claim",
         "tags": [
           "api",
           "integration-routes"
@@ -45536,9 +45659,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Integrations Token Api Integrations Token Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/IntegrationsTokenResponse"
                 }
               }
             },
@@ -48583,146 +48704,6 @@
         ]
       }
     },
-    "/api/ui/billing/ledger": {
-      "get": {
-        "operationId": "get_unit_ledger_api_ui_billing_ledger_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "entry_type",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "purchase",
-                    "debit",
-                    "credit",
-                    "adjustment",
-                    "refund"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Entry Type"
-            }
-          },
-          {
-            "in": "query",
-            "name": "reference_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 120,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Reference Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnitLedgerListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Get Unit Ledger",
-        "tags": [
-          "api",
-          "unit-ledger"
-        ]
-      }
-    },
-    "/api/ui/billing/ledger/{entry_id}": {
-      "get": {
-        "operationId": "get_unit_ledger_entry_api_ui_billing_ledger__entry_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "entry_id",
-            "required": true,
-            "schema": {
-              "title": "Entry Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnitLedgerDetailResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Get Unit Ledger Entry",
-        "tags": [
-          "api",
-          "unit-ledger"
-        ]
-      }
-    },
     "/api/ui/billing/payment-methods": {
       "get": {
         "operationId": "billing_get_payment_methods",
@@ -48848,80 +48829,6 @@
         "summary": "Set Default Payment Method",
         "tags": [
           "billing-payment-methods"
-        ]
-      }
-    },
-    "/api/ui/billing/purchase": {
-      "post": {
-        "operationId": "purchase_units_api_ui_billing_purchase_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UnitPurchaseRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnitPurchaseResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Purchase Units",
-        "tags": [
-          "api",
-          "unit-wallet"
-        ]
-      }
-    },
-    "/api/ui/billing/wallet": {
-      "get": {
-        "operationId": "get_unit_wallet_api_ui_billing_wallet_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnitWalletResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Get Unit Wallet",
-        "tags": [
-          "api",
-          "unit-wallet"
         ]
       }
     },
@@ -50142,6 +50049,33 @@
         ]
       }
     },
+    "/billing/api/billing/checkout/reconcile-recent": {
+      "post": {
+        "operationId": "reconcile_recent_checkout_sessions_api_billing_api_billing_checkout_reconcile_recent_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Reconcile Recent Checkout Sessions Api",
+        "tags": [
+          "billing",
+          "billing",
+          "billing",
+          "checkout"
+        ]
+      }
+    },
     "/billing/api/billing/checkout/sessions": {
       "post": {
         "operationId": "create_checkout_session_api_billing_api_billing_checkout_sessions_post",
@@ -50267,6 +50201,54 @@
           }
         ],
         "summary": "Complete Checkout Session Api",
+        "tags": [
+          "billing",
+          "billing",
+          "billing",
+          "checkout"
+        ]
+      }
+    },
+    "/billing/api/billing/checkout/sessions/{session_id}/reconcile": {
+      "post": {
+        "operationId": "reconcile_checkout_session_api_billing_api_billing_checkout_sessions__session_id__reconcile_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Reconcile Checkout Session Api",
         "tags": [
           "billing",
           "billing",
@@ -50759,98 +50741,6 @@
           }
         ],
         "summary": "List Payment Methods Api",
-        "tags": [
-          "billing",
-          "billing",
-          "billing",
-          "payment-methods"
-        ]
-      },
-      "post": {
-        "operationId": "attach_payment_method_api_alias_billing_api_billing_payment_methods_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AttachPaymentMethodRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Attach Payment Method Api Alias",
-        "tags": [
-          "billing",
-          "billing",
-          "billing",
-          "payment-methods"
-        ]
-      }
-    },
-    "/billing/api/billing/payment-methods/attach": {
-      "post": {
-        "operationId": "attach_payment_method_api_billing_api_billing_payment_methods_attach_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AttachPaymentMethodRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Attach Payment Method Api",
         "tags": [
           "billing",
           "billing",
@@ -51426,6 +51316,32 @@
         ]
       }
     },
+    "/billing/checkout/reconcile-recent": {
+      "post": {
+        "operationId": "reconcile_recent_checkout_sessions_billing_checkout_reconcile_recent_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Reconcile Recent Checkout Sessions",
+        "tags": [
+          "billing",
+          "billing",
+          "checkout"
+        ]
+      }
+    },
     "/billing/checkout/sessions": {
       "post": {
         "operationId": "create_checkout_session_billing_checkout_sessions_post",
@@ -51549,6 +51465,53 @@
           }
         ],
         "summary": "Complete Checkout Session",
+        "tags": [
+          "billing",
+          "billing",
+          "checkout"
+        ]
+      }
+    },
+    "/billing/checkout/sessions/{session_id}/reconcile": {
+      "post": {
+        "operationId": "reconcile_checkout_session_billing_checkout_sessions__session_id__reconcile_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Reconcile Checkout Session",
         "tags": [
           "billing",
           "billing",
@@ -52075,96 +52038,6 @@
           }
         ],
         "summary": "List Payment Methods",
-        "tags": [
-          "billing",
-          "billing",
-          "payment-methods"
-        ]
-      },
-      "post": {
-        "operationId": "attach_payment_method_alias_billing_payment_methods_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AttachPaymentMethodRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Attach Payment Method Alias",
-        "tags": [
-          "billing",
-          "billing",
-          "payment-methods"
-        ]
-      }
-    },
-    "/billing/payment-methods/attach": {
-      "post": {
-        "operationId": "attach_payment_method_billing_payment_methods_attach_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AttachPaymentMethodRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Attach Payment Method",
         "tags": [
           "billing",
           "billing",
@@ -53048,11 +52921,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
         "summary": "Process a Stripe checkout completion webhook for a pending purchase",
         "tags": [
           "billing"
@@ -53062,18 +52930,24 @@
     "/billing/webhook/stripe": {
       "post": {
         "operationId": "handle_checkout_session_completed_webhook_legacy_billing_webhook_stripe_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "title": "Payload",
-                "type": "object"
-              }
+        "parameters": [
+          {
+            "in": "header",
+            "name": "stripe-signature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stripe-Signature"
             }
-          },
-          "required": true
-        },
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -53098,11 +52972,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
         "summary": "Legacy Stripe webhook alias",
         "tags": [
           "billing"
@@ -54756,28 +54625,26 @@
     },
     "/health": {
       "get": {
-        "description": "Compact health snapshot for readiness and operational dashboards.\n\nThis endpoint is designed to be:\n- Lightweight enough for frequent polling (readiness / uptime checks),\n- Structured enough to power the UI health snapshot panel,\n- Stable as a public contract for external monitoring tools.",
-        "operationId": "read_compact_health_health_get",
+        "operationId": "health_health_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HealthSnapshot"
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Health Get",
+                  "type": "object"
                 }
               }
             },
             "description": "Successful Response"
           }
         },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Read Compact Health",
+        "summary": "Health",
         "tags": [
-          "health"
+          "system"
         ]
       }
     },
@@ -54799,6 +54666,33 @@
         "summary": "Get Health Snapshot",
         "tags": [
           "health-snapshot"
+        ]
+      }
+    },
+    "/health/details": {
+      "get": {
+        "description": "Authenticated compact health snapshot for operational dashboards.\n\nServed at /health/details behind the protected dependencies in app.main.\nThe public /health, /health/liveness, and /health/readiness routes are\ndefined in app.main and must not be shadowed by this router.",
+        "operationId": "read_compact_health_health_details_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Read Compact Health",
+        "tags": [
+          "health"
         ]
       }
     },
@@ -55261,6 +55155,44 @@
         ]
       }
     },
+    "/install-gate/evaluate": {
+      "post": {
+        "operationId": "evaluate_install_install_gate_evaluate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallGateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallGateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Evaluate Install"
+      }
+    },
     "/install-key-events/ingest": {
       "post": {
         "description": "Receives runtime telemetry for install-key activity and mirrors it into the canonical install key registry and wallet ledger without generating install keys for customers. This route is reserved for dashboard sync, runtime security events, and usage accounting.",
@@ -55303,6 +55235,35 @@
           }
         ],
         "summary": "Ingest install-key telemetry for dashboard and wallet sync",
+        "tags": [
+          "install-key-events"
+        ]
+      }
+    },
+    "/install-key-events/self": {
+      "get": {
+        "description": "Authenticates with the caller's X-Install-Key only. Owner and key scope are derived from that key, never from caller-supplied headers. Returns the InstallKeysResponse shape used by the SDK.",
+        "operationId": "read_own_install_key_install_key_events_self_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Read Own Install Key Install Key Events Self Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Return the caller's own install-key status and usage",
         "tags": [
           "install-key-events"
         ]
@@ -55491,6 +55452,127 @@
         "summary": "Return the shared skills package capability manifest and guarded action categories",
         "tags": [
           "agent-skills"
+        ]
+      }
+    },
+    "/integrations/antigravity-cli/evaluate": {
+      "post": {
+        "description": "Accepts an Antigravity CLI prompt, workflow step, command, or tool-plan payload. Runs secret scanning before policy evaluation and returns a deterministic allow/block verdict with a full audit trail.",
+        "operationId": "evaluate_antigravity_cli_integrations_antigravity_cli_evaluate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AntigravityCliEvaluateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntigravityCliEvaluateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Evaluate an Antigravity CLI prompt, workflow step, command, or tool-plan action",
+        "tags": [
+          "antigravity-cli"
+        ]
+      }
+    },
+    "/integrations/antigravity-cli/handshake": {
+      "post": {
+        "description": "Validates Antigravity CLI connection health and returns the adapter capability manifest used to guard multi-step workflows, commands, and tool execution paths.",
+        "operationId": "antigravity_cli_handshake_integrations_antigravity_cli_handshake_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AntigravityCliHandshakeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntigravityCliHandshakeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Validate Antigravity CLI integration health and connection state",
+        "tags": [
+          "antigravity-cli"
+        ]
+      }
+    },
+    "/integrations/antigravity-cli/manifest": {
+      "get": {
+        "description": "Returns Antigravity CLI supported action types, guarded tool categories, and policy bindings used by the IronClaw guardrail layer.",
+        "operationId": "antigravity_cli_manifest_integrations_antigravity_cli_manifest_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntigravityCliManifestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Return Antigravity CLI capability manifest and guarded action categories",
+        "tags": [
+          "antigravity-cli"
         ]
       }
     },
@@ -55927,127 +56009,6 @@
         "summary": "Debug Token Introspect",
         "tags": [
           "integrations"
-        ]
-      }
-    },
-    "/integrations/gemini-cli/evaluate": {
-      "post": {
-        "description": "Accepts a Gemini CLI prompt, workflow step, command, or tool-plan payload. Runs secret scanning before policy evaluation and returns a deterministic allow/block verdict with a full audit trail.",
-        "operationId": "evaluate_gemini_cli_integrations_gemini_cli_evaluate_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GeminiCliEvaluateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GeminiCliEvaluateResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Evaluate a Gemini CLI prompt, workflow step, command, or tool-plan action",
-        "tags": [
-          "gemini-cli"
-        ]
-      }
-    },
-    "/integrations/gemini-cli/handshake": {
-      "post": {
-        "description": "Validates Gemini CLI connection health and returns the adapter capability manifest used to guard multi-step workflows, commands, and tool execution paths.",
-        "operationId": "gemini_cli_handshake_integrations_gemini_cli_handshake_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GeminiCliHandshakeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GeminiCliHandshakeResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Validate Gemini CLI integration health and connection state",
-        "tags": [
-          "gemini-cli"
-        ]
-      }
-    },
-    "/integrations/gemini-cli/manifest": {
-      "get": {
-        "description": "Returns Gemini CLI supported action types, guarded tool categories, and policy bindings used by the IronClaw guardrail layer.",
-        "operationId": "gemini_cli_manifest_integrations_gemini_cli_manifest_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GeminiCliManifestResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Return Gemini CLI capability manifest and guarded action categories",
-        "tags": [
-          "gemini-cli"
         ]
       }
     },
@@ -56877,32 +56838,6 @@
         ]
       }
     },
-    "/integrations/token": {
-      "get": {
-        "operationId": "get_integrations_token_integrations_token_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IntegrationTokenResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "APIKeyHeader": []
-          }
-        ],
-        "summary": "Get Integrations Token",
-        "tags": [
-          "integrations"
-        ]
-      }
-    },
     "/integrations/verifiers": {
       "get": {
         "operationId": "list_verifiers_integrations_verifiers_get",
@@ -57114,18 +57049,25 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/app__api__integrations__IntegrationInstallRequest"
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/IntegrationInstallRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__api__integrations__IntegrationInstallResponse"
+                  "$ref": "#/components/schemas/IntegrationInstallResponse"
                 }
               }
             },
@@ -57142,6 +57084,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Install Integration Route",
         "tags": [
           "integrations"
@@ -60547,6 +60494,82 @@
         "tags": [
           "restore"
         ]
+      }
+    },
+    "/return-gate/scan": {
+      "post": {
+        "operationId": "scan_return_output_return_gate_scan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnGateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnGateScanResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scan Return Output"
+      }
+    },
+    "/return-gate/transform": {
+      "post": {
+        "operationId": "transform_return_output_return_gate_transform_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnGateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnGateTransformResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Transform Return Output"
       }
     },
     "/review/item": {

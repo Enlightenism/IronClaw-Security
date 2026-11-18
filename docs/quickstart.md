@@ -30,7 +30,7 @@ ironclaw install \
   --provider-target claude_code \
   --provider-target cursor \
   --provider-target goose \
-  --provider-target gemini_cli \
+  --provider-target antigravity_cli \
   --provider-target copilot
 ```
 

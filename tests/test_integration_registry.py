@@ -66,7 +66,7 @@ def test_default_integrations_returns_expected_seed_data():
         "generic-agent",
         "cursor",
         "goose",
-        "gemini-cli",
+        "antigravity-cli",
         "copilot",
         "security-guardian",
         "hermes",
@@ -75,7 +75,7 @@ def test_default_integrations_returns_expected_seed_data():
     modern_runtime_matrix = {
         "cursor": "cursor",
         "goose": "goose",
-        "gemini-cli": "gemini-cli",
+        "antigravity-cli": "antigravity-cli",
         "copilot": "copilot",
         "security-guardian": "security-guardian",
         "hermes": "hermes",
@@ -87,7 +87,7 @@ def test_default_integrations_returns_expected_seed_data():
     assert platform_by_slug["hermes"] == "hermes"
     assert platform_by_slug["cursor"] == "cursor"
     assert platform_by_slug["goose"] == "goose"
-    assert platform_by_slug["gemini-cli"] == "gemini-cli"
+    assert platform_by_slug["antigravity-cli"] == "antigravity-cli"
     assert platform_by_slug["copilot"] == "copilot"
     assert platform_by_slug["security-guardian"] == "security-guardian"
     assert any(record.slug == "hermes" and record.platform == "hermes" and record.entrypoint == "app.adapters.hermes_adapter" for record in records)
@@ -265,7 +265,7 @@ def test_build_integration_adapters_view_tracks_supported_runtime_cards_and_inst
         "openclaw",
         "cursor",
         "goose",
-        "gemini_cli",
+        "antigravity_cli",
         "copilot",
         "hermes",
     } <= supported_runtime_programs

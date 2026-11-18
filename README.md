@@ -134,7 +134,7 @@ allowed to proceed.
 One locked, shipping mission:
 
 - **One-command install** into Claude Code, OpenClaw, Cursor, Hermes, Copilot,
-  Goose and Gemini CLI
+  Goose and Antigravity CLI
 - **Intercept every inbound agent return** before it reaches the user workflow.
 - **Sandbox-isolate** every artifact for evaluation.
 - **Local Prompt Guard classifier + policy engine** combine optional,
@@ -239,7 +239,7 @@ environment variables. They affect scoring, not the number of verdicts.
 | OpenClaw                   | `app/adapters/openclaw_adapter.py`, `app/api/routes/integrations.py`        | ✅ Active                  |
 | Cursor                     | `app/api/routes/integrations.py`, `ironclaw_installer.py`, `cli/install.py` | ✅ Active                  |
 | Goose                      | `app/api/routes/integrations.py`, `ironclaw_installer.py`, `cli/install.py` | ✅ Active                  |
-| Gemini CLI                 | `app/api/routes/integrations.py`, `ironclaw_installer.py`, `cli/install.py` | ✅ Active                  |
+| Antigravity CLI            | `app/api/routes/integrations.py`, `ironclaw_installer.py`, `cli/install.py` | ✅ Active                  |
 | GitHub Copilot             | `app/api/routes/integrations.py`, `ironclaw_installer.py`, `cli/install.py` | ✅ Active                  |
 | Hermes Agent               | `app/adapters/hermes_adapter.py`, `app/api/routes/integrations.py`          | ✅ Active                  |
 | Security Guardian          | `ironclaw_installer.py`, `app/api/routes/integrations.py`                   | ✅ Shared protection layer |

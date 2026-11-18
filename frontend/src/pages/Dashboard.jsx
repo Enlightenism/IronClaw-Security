@@ -49,9 +49,9 @@ const INSTALL_KEY_PROGRAMS = [
     tint: "violet",
   },
   {
-    program: "gemini_cli",
-    label: "Gemini CLI",
-    agentId: "gemini-cli",
+    program: "antigravity_cli",
+    label: "Antigravity CLI",
+    agentId: "antigravity-cli",
     tint: "emerald",
   },
   {
@@ -874,8 +874,8 @@ const Dashboard = () => {
           return "cursor-card";
         case "goose":
           return "goose-card";
-        case "gemini_cli":
-          return "gemini_cli-card";
+        case "antigravity_cli":
+          return "antigravity_cli-card";
         case "copilot":
           return "copilot-card";
         case "hermes":
@@ -911,6 +911,10 @@ const Dashboard = () => {
             : "",
         savedCommandClaimed:
           !revoked && metadata?.saved_command_claimed === true,
+        skillCommand:
+          !revoked && typeof tokens?.command_metadata?.[integrationId] === "string"
+            ? tokens.command_metadata[integrationId]
+            : "",
         onCreateClaim: createInstallClaim,
         tint,
         testid: toCardTestId(program),
@@ -1064,6 +1068,7 @@ const Dashboard = () => {
                   onCreateClaim={card.onCreateClaim}
                   savedCommand={card.savedCommand}
                   savedCommandClaimed={card.savedCommandClaimed}
+                  skillCommand={card.skillCommand}
                   tint={card.tint}
                   testid={card.testid}
                 />

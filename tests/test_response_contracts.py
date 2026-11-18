@@ -493,7 +493,7 @@ def test_dashboard_overview_filters_current_owner_paid_install_keys(dashboard_cl
         "claude_code",
         "cursor",
         "goose",
-        "gemini_cli",
+        "antigravity_cli",
         "copilot",
         "hermes",
     }

@@ -17,8 +17,6 @@ const DEFAULT_TINT_STYLE = TINT_STYLES.platinum;
 const CLAIM_TOKEN_PATTERN = /^ic_claim_[A-Za-z0-9_-]{20,128}$/;
 const RUNTIME_PROGRAM_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const COMMAND_MAX_LENGTH = 1024;
-const INSTALLER_SOURCE_COMMAND =
-  "python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.2";
 const PLACEHOLDER_TEXT = "Generate a one-time install command after purchase";
 const hashSeed = (text) => {
   let hash = 2166136261;
@@ -186,8 +184,14 @@ const validateInstallClaim = (claim, program, integrationId) => {
     return null;
   }
 
-  const expectedCommand = `${INSTALLER_SOURCE_COMMAND}\npython -m ironclaw_installer bootstrap --program ${program} --claim-token ${claim.claim_token}`;
-  if (claim.command !== expectedCommand) {
+  const commandLines = claim.command.trim().split("\n");
+  const expectedBootstrapLine =
+    `python -m ironclaw_installer bootstrap --program ${program} --claim-token ${claim.claim_token}`;
+  if (
+    commandLines.length !== 2 ||
+    !/^python -m pip install --upgrade git\+https:\/\/github\.com\/Enlightenism\/IronClaw-Security\.git@[^\s]+$/.test(commandLines[0]) ||
+    commandLines[1] !== expectedBootstrapLine
+  ) {
     return null;
   }
 
@@ -214,6 +218,7 @@ const IntegrationCard = ({
   onCreateClaim,
   savedCommand = "",
   savedCommandClaimed = false,
+  skillCommand = "",
   tint = "gold",
   testid,
 }) => {
@@ -334,6 +339,8 @@ const IntegrationCard = ({
   }
 
   const normalizedCommand = isAvailable ? installCommand : "";
+  const normalizedSkillCommand =
+    typeof skillCommand === "string" ? skillCommand.trim() : "";
   const isLocked = !normalizedCommand;
   const canGenerate = isAvailable && typeof onCreateClaim === "function";
 
@@ -556,6 +563,17 @@ const IntegrationCard = ({
           once it is redeemed.
         </p>
       )}
+
+      {normalizedSkillCommand ? (
+        <div className="mb-2" data-testid={`${testid}-skill-command`}>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">
+            Skill install command
+          </p>
+          <code className="font-tech block overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-white/10 bg-black/50 px-2 py-1.5 text-[10px] leading-relaxed text-white/90">
+            {normalizedSkillCommand}
+          </code>
+        </div>
+      ) : null}
 
       <div className="flex items-stretch gap-1.5">
         <code

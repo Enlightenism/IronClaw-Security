@@ -24,7 +24,7 @@ InstallKeyProgram = Literal[
     "claude_code",
     "cursor",
     "goose",
-    "gemini_cli",
+    "antigravity_cli",
     "copilot",
     "hermes",
     "security_guardian",

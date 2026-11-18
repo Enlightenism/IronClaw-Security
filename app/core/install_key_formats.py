@@ -6,7 +6,7 @@ from typing import Final, Literal
 
 IRONCLAW_GITHUB_REPOSITORY: Final[str] = "Enlightenism/IronClaw-Security"
 IRONCLAW_REPOSITORY_URL: Final[str] = f"https://github.com/{IRONCLAW_GITHUB_REPOSITORY}.git"
-IRONCLAW_INSTALLER_TAG: Final[str] = "v1.0.2"
+IRONCLAW_INSTALLER_TAG: Final[str] = "v1.0.3"
 IRONCLAW_INSTALLER_SOURCE_URL: Final[str] = f"git+{IRONCLAW_REPOSITORY_URL}@{IRONCLAW_INSTALLER_TAG}"
 IRONCLAW_PUBLIC_BASE_URL: Final[str] = "https://ironclaw-security.onrender.com"
 SECURITY_GUARDIAN_SKILL_NAME: Final[str] = "ironclaw-security"
@@ -20,10 +20,18 @@ _INSTALL_CLAIM_PREFIX_TEMPLATE: Final[str] = f"python -m pip install --upgrade {
 
 def _generic_install_command(agent_cli_id: str | None, program: str) -> str:
     if program == "hermes":
-        return f"hermes skills install {SECURITY_GUARDIAN_SKILL_URL} --name {SECURITY_GUARDIAN_SKILL_NAME}"
+        return (
+            f"hermes skills install {SECURITY_GUARDIAN_SKILL_URL} "
+            "--category software-development "
+            f"--name {SECURITY_GUARDIAN_SKILL_NAME} --yes"
+        )
     if agent_cli_id is None:
         return ""
-    return f"gh skill install {IRONCLAW_GITHUB_REPOSITORY} {SECURITY_GUARDIAN_SKILL_REPOSITORY_PATH} --agent {agent_cli_id} --scope user"
+    return (
+        f"gh skill install {IRONCLAW_GITHUB_REPOSITORY} "
+        f"{SECURITY_GUARDIAN_SKILL_REPOSITORY_PATH} "
+        f"--agent {agent_cli_id} --scope user --pin {IRONCLAW_INSTALLER_TAG}"
+    )
 
 
 RuntimeInstallKeyProgram = Literal[
@@ -31,7 +39,7 @@ RuntimeInstallKeyProgram = Literal[
     "claude_code",
     "cursor",
     "goose",
-    "gemini_cli",
+    "antigravity_cli",
     "copilot",
     "hermes",
 ]
@@ -43,7 +51,7 @@ RUNTIME_INSTALL_KEY_PROGRAMS: Final[tuple[RuntimeInstallKeyProgram, ...]] = (
     "claude_code",
     "cursor",
     "goose",
-    "gemini_cli",
+    "antigravity_cli",
     "copilot",
     "hermes",
 )
@@ -57,7 +65,7 @@ _INSTALL_KEY_PREFIX_OPENCLAW: Final[str] = "ic_install_openclaw_"
 _INSTALL_KEY_PREFIX_CLAUDE: Final[str] = "ic_install_claude_code_"
 _INSTALL_KEY_PREFIX_CURSOR: Final[str] = "ic_install_cursor_"
 _INSTALL_KEY_PREFIX_GOOSE: Final[str] = "ic_install_goose_"
-_INSTALL_KEY_PREFIX_GEMINI: Final[str] = "ic_install_gemini_cli_"
+_INSTALL_KEY_PREFIX_ANTIGRAVITY: Final[str] = "ic_install_antigravity_cli_"
 _INSTALL_KEY_PREFIX_COPILOT: Final[str] = "ic_install_copilot_"
 _INSTALL_KEY_PREFIX_HERMES: Final[str] = "ic_install_hermes_"
 _INSTALL_KEY_PREFIX_SECURITY_GUARDIAN: Final[str] = "ic_install_security_guardian_"
@@ -260,28 +268,28 @@ class InstallKeyFormatRegistry:
             ),
             agent_cli_id="goose",
         ),
-        "gemini_cli": InstallKeyFormatSpec(
-            family="gemini_cli",
-            program="gemini_cli",
-            display_name="Gemini CLI",
-            prefix=_INSTALL_KEY_PREFIX_GEMINI,
+        "antigravity_cli": InstallKeyFormatSpec(
+            family="antigravity_cli",
+            program="antigravity_cli",
+            display_name="Antigravity CLI",
+            prefix=_INSTALL_KEY_PREFIX_ANTIGRAVITY,
             aliases=(
-                "gemini_cli",
-                "gemini-cli",
-                "gemini cli",
-                "gemini",
-                "gemini_cli_agent",
-                "gemini-cli-agent",
+                "antigravity_cli",
+                "antigravity-cli",
+                "antigravity cli",
+                "antigravity",
+                "antigravity_cli_agent",
+                "antigravity-cli-agent",
             ),
             platform_aliases=(
-                "gemini_cli",
-                "gemini-cli",
-                "gemini cli",
-                "gemini",
-                "gemini_cli_agent",
-                "gemini-cli-agent",
+                "antigravity_cli",
+                "antigravity-cli",
+                "antigravity cli",
+                "antigravity",
+                "antigravity_cli_agent",
+                "antigravity-cli-agent",
             ),
-            agent_cli_id="gemini-cli",
+            agent_cli_id="antigravity-cli",
         ),
         "copilot": InstallKeyFormatSpec(
             family="copilot",
@@ -480,7 +488,7 @@ __all__ = [
     "_INSTALL_KEY_PREFIX_CLAUDE",
     "_INSTALL_KEY_PREFIX_CURSOR",
     "_INSTALL_KEY_PREFIX_GOOSE",
-    "_INSTALL_KEY_PREFIX_GEMINI",
+    "_INSTALL_KEY_PREFIX_ANTIGRAVITY",
     "_INSTALL_KEY_PREFIX_COPILOT",
     "_INSTALL_KEY_PREFIX_HERMES",
     "_INSTALL_KEY_PREFIX_SECURITY_GUARDIAN",

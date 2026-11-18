@@ -42,6 +42,22 @@ class InstallKeyClaimRedeemRequest(BaseModel):
     claim_token: str = Field(min_length=10, max_length=256, repr=False)
 
 
+class IntegrationsTokenResponse(BaseModel):
+    status: str
+    user_token: str
+    claude_code_command: str
+    openclaw_command: str
+    cursor_command: str
+    goose_command: str
+    antigravity_cli_command: str
+    copilot_command: str
+    hermes_command: str
+    security_guardian_command: str
+    supported_platforms: list[str]
+    command_metadata: dict[str, str]
+    install_metadata: dict[str, dict[str, Any]]
+
+
 def _resolve_install_owner(auth: Any) -> str | None:
     owner = resolve_authenticated_billing_owner(auth)
     return owner.strip().lower() if owner else None
@@ -250,7 +266,7 @@ def get_integration_observability(integration_id: str) -> dict[str, object]:
     }
 
 
-@router.get("/integrations/token")
+@router.get("/integrations/token", response_model=IntegrationsTokenResponse)
 async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[str, Any]:
     owner_key = _resolve_install_owner(auth)
     install_keys = _select_paid_install_key_records(owner_key) if owner_key else {}
@@ -268,7 +284,7 @@ async def get_integrations_token(auth: Any = Depends(get_auth_context)) -> dict[
         "openclaw_command": "",
         "cursor_command": "",
         "goose_command": "",
-        "gemini_cli_command": "",
+        "antigravity_cli_command": "",
         "copilot_command": "",
         "hermes_command": "",
         "security_guardian_command": "",

@@ -476,7 +476,7 @@ def test_provision_install_key_on_purchase_records_all_supported_platforms_for_p
     assert "claude_code" in payload
     assert "cursor" in payload
     assert "goose" in payload
-    assert "gemini_cli" in payload
+    assert "antigravity_cli" in payload
     assert "copilot" in payload
     assert "security_guardian" not in payload
 

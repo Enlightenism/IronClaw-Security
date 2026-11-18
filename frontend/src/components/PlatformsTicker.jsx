@@ -26,10 +26,10 @@ const PLATFORMS = [
     styleClass: "platform-style-github-copilot",
   },
   {
-    name: "Gemini CLI",
+    name: "Antigravity CLI",
     logo: "/images/platforms/gemini-cli.svg",
     mono: false,
-    styleClass: "platform-style-gemini-cli",
+    styleClass: "platform-style-antigravity-cli",
   },
   {
     name: "Cursor",

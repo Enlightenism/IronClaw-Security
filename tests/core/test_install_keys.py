@@ -31,7 +31,7 @@ _OPENCLAW_PREFIX = "ic_install_openclaw_"
 _CLAUDE_PREFIX = "ic_install_claude_code_"
 _CURSOR_PREFIX = "ic_install_cursor_"
 _GOOSE_PREFIX = "ic_install_goose_"
-_GEMINI_PREFIX = "ic_install_gemini_cli_"
+_ANTIGRAVITY_PREFIX = "ic_install_antigravity_cli_"
 _COPILOT_PREFIX = "ic_install_copilot_"
 _HERMES_PREFIX = "ic_install_hermes_"
 _SKILLS_PREFIX = "ic_install_security_guardian_"
@@ -121,14 +121,14 @@ class TestMaskKey(unittest.TestCase):
         raw_keys = (
             _CURSOR_PREFIX + "cursor_secret_value_123",
             _GOOSE_PREFIX + "goose_secret_value_123",
-            _GEMINI_PREFIX + "gemini_secret_value_123",
+            _ANTIGRAVITY_PREFIX + "antigravity_secret_value_123",
             _COPILOT_PREFIX + "copilot_secret_value_123",
             _HERMES_PREFIX + "hermes_secret_value_123",
             _SKILLS_PREFIX + "security_guardian_secret_123",
         )
 
         for raw in raw_keys:
-            prefix = next(item for item in (_CURSOR_PREFIX, _GOOSE_PREFIX, _GEMINI_PREFIX, _COPILOT_PREFIX, _HERMES_PREFIX, _SKILLS_PREFIX) if raw.startswith(item))
+            prefix = next(item for item in (_CURSOR_PREFIX, _GOOSE_PREFIX, _ANTIGRAVITY_PREFIX, _COPILOT_PREFIX, _HERMES_PREFIX, _SKILLS_PREFIX) if raw.startswith(item))
             secret = raw[len(prefix) :]
             masked = _mask_key(raw)
             assert masked.startswith(prefix)
@@ -155,8 +155,8 @@ class TestInstallKeyRecordPostInit(unittest.TestCase):
             normalized_program = "cursor"
         if normalized_program == "goose_agent":
             normalized_program = "goose"
-        if normalized_program == "gemini_cli":
-            normalized_program = "gemini_cli"
+        if normalized_program == "antigravity_cli":
+            normalized_program = "antigravity_cli"
         if normalized_program == "github_copilot":
             normalized_program = "copilot"
         if normalized_program == "security_guardian":
@@ -169,7 +169,7 @@ class TestInstallKeyRecordPostInit(unittest.TestCase):
             "claude_code": _CLAUDE_PREFIX,
             "cursor": _CURSOR_PREFIX,
             "goose": _GOOSE_PREFIX,
-            "gemini_cli": _GEMINI_PREFIX,
+            "antigravity_cli": _ANTIGRAVITY_PREFIX,
             "copilot": _COPILOT_PREFIX,
             "hermes": _HERMES_PREFIX,
             "security_guardian": _SKILLS_PREFIX,
@@ -215,7 +215,7 @@ class TestInstallKeyRecordPostInit(unittest.TestCase):
             "cursor-agent": "cursor",
             "goose": "goose",
             "goose-agent": "goose",
-            "gemini-cli": "gemini_cli",
+            "antigravity-cli": "antigravity_cli",
             "github-copilot": "copilot",
             "security-guardian": "security_guardian",
             "hermes-agent": "hermes",
@@ -262,8 +262,8 @@ class TestInstallKeyRecordPostInit(unittest.TestCase):
     def test_program_case_insensitive_aliases_normalize(self):
         record = self._valid_record(program="OpenClaw")
         assert record.program == "openclaw"
-        gemini = self._valid_record(program="GEMINI-CLI")
-        assert gemini.program == "gemini_cli"
+        antigravity = self._valid_record(program="ANTIGRAVITY-CLI")
+        assert antigravity.program == "antigravity_cli"
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +374,7 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
 
     def test_multi_platform_aliases_generate_canonical_keys(self):
         reg = self._registry()
-        for program in ("cursor", "goose", "gemini-cli", "github-copilot", "hermes"):
+        for program in ("cursor", "goose", "antigravity-cli", "github-copilot", "hermes"):
             record = reg.generate_for_paid_customer(
                 owner_key=_OWNER,
                 subscription_id=_SUB_ID,
@@ -385,12 +385,12 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
                 checkout_session_id=_CHECKOUT_SESSION_ID,
                 purchase_reference=_PURCHASE_REFERENCE,
             )
-            assert record.program in {"cursor", "goose", "gemini_cli", "copilot", "hermes"}
+            assert record.program in {"cursor", "goose", "antigravity_cli", "copilot", "hermes"}
             assert record.raw_key.startswith(
                 (
                     _CURSOR_PREFIX,
                     _GOOSE_PREFIX,
-                    _GEMINI_PREFIX,
+                    _ANTIGRAVITY_PREFIX,
                     _COPILOT_PREFIX,
                     _HERMES_PREFIX,
                 )
@@ -413,7 +413,7 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
 
     def test_runtime_family_aliases_require_paid_entitlement_before_generation(self):
         reg = self._registry()
-        for program in ("cursor", "goose", "gemini-cli", "github-copilot", "hermes"):
+        for program in ("cursor", "goose", "antigravity-cli", "github-copilot", "hermes"):
             with self.assertRaises(InstallKeyPaymentRequiredError):
                 reg.generate_for_paid_customer(
                     owner_key=_OWNER,

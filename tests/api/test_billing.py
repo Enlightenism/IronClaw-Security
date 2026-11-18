@@ -170,7 +170,7 @@ def test_pending_purchase_fulfills_into_paid_wallet_and_active_install_entitleme
         assert create.status_code == 201
         assert create.json()["wallet"]["balance_units"] == 0
 
-        runtime_programs = ("openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes")
+        runtime_programs = ("openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes")
         mock_registry = MagicMock()
         mock_registry.get_keys_for_owner.return_value = []
         mock_registry.generate_install_key.side_effect = [
@@ -461,7 +461,7 @@ def test_provision_install_keys_generates_all_supported_runtime_programs() -> No
         "claude_code",
         "cursor",
         "goose",
-        "gemini_cli",
+        "antigravity_cli",
         "copilot",
         "hermes",
     )

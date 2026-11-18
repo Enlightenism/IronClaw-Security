@@ -58,7 +58,7 @@ def test_integration_settings_contains_known_integrations():
     payload = response.json()
 
     names = {item["name"] for item in payload["providers"]}
-    assert {"OpenClaw", "Claude Code", "Cursor", "Goose", "Gemini CLI", "GitHub Copilot", "Hermes"} <= names
+    assert {"OpenClaw", "Claude Code", "Cursor", "Goose", "Antigravity CLI", "GitHub Copilot", "Hermes"} <= names
     assert "Security Guardian" not in names
 
 
@@ -71,7 +71,7 @@ def test_integration_settings_uses_canonical_install_key_family_labels():
     payload = response.json()
 
     programs = {item["installkeyprogram"] for item in payload["providers"] if item.get("installkeyprogram")}
-    assert {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"} <= programs
+    assert {"openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes"} <= programs
 
     names = {item["name"] for item in payload["providers"]}
     assert "GitHub Copilot" in names
@@ -79,7 +79,7 @@ def test_integration_settings_uses_canonical_install_key_family_labels():
     assert "Security Guardian" not in names
 
     family_names = {item["installkeyfamily"] for item in payload["settings"] if item.get("installkeyfamily")}
-    assert {"openclaw", "claude_code", "cursor", "goose", "gemini_cli", "copilot", "hermes"} <= family_names
+    assert {"openclaw", "claude_code", "cursor", "goose", "antigravity_cli", "copilot", "hermes"} <= family_names
     assert "security_guardian" not in family_names
 
 
@@ -112,7 +112,7 @@ def test_integration_settings_metadata_includes_hermes_and_modern_programs():
     for name, program, family, prefix in (
         ("Hermes", "hermes", "hermes", "ic_install_hermes_"),
         ("GitHub Copilot", "copilot", "copilot", "ic_install_copilot_"),
-        ("Gemini CLI", "gemini_cli", "gemini_cli", "ic_install_gemini_cli_"),
+        ("Antigravity CLI", "antigravity_cli", "antigravity_cli", "ic_install_antigravity_cli_"),
     ):
         item = providers_by_name[name]
         assert item["installkeyprogram"] == program
