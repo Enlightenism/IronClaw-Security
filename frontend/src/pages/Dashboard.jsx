@@ -934,22 +934,12 @@ const Dashboard = () => {
             : "",
         savedCommandClaimed:
           !revoked && metadata?.saved_command_claimed === true,
-        skillCommand:
-          !revoked &&
-          typeof tokens?.command_metadata?.[integrationId] === "string"
-            ? tokens.command_metadata[integrationId]
-            : "",
         onCreateClaim: createInstallClaim,
         tint,
         testid: toCardTestId(program),
       };
     });
-  }, [
-    createInstallClaim,
-    installKeyStatusByProgram,
-    tokens?.command_metadata,
-    tokens?.install_metadata,
-  ]);
+  }, [createInstallClaim, installKeyStatusByProgram, tokens?.install_metadata]);
 
   if (loading || (loadingData && !data)) {
     return (
@@ -1136,7 +1126,6 @@ const Dashboard = () => {
                   onCreateClaim={card.onCreateClaim}
                   savedCommand={card.savedCommand}
                   savedCommandClaimed={card.savedCommandClaimed}
-                  skillCommand={card.skillCommand}
                   tint={card.tint}
                   testid={card.testid}
                 />

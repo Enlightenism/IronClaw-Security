@@ -82,17 +82,28 @@ describe("IntegrationCard", () => {
     ).map((node) => node.textContent);
     expect(explanations).toHaveLength(runtimes.length);
     expect(new Set(explanations).size).toBe(1);
+    expect(explanations[0]).toBe(
+      "Your install commands will be available after purchase.",
+    );
   });
 
-  it("Claude Code renders only the Install and activate section", () => {
+  it("Claude Code renders the Claude-specific layout without a skill-only section", () => {
     renderCard();
 
     expect(
-      screen.queryByTestId("claude-code-card-skill-command"),
-    ).not.toBeInTheDocument();
-    expect(
       screen.getByTestId("claude-code-card-install-command"),
-    ).toHaveTextContent("Install and activate (run this)");
+    ).toHaveTextContent("Install IronClaw security");
+    expect(
+      screen.getByTestId("claude-code-card-prerequisites"),
+    ).toHaveTextContent("Python and Claude Code");
+    expect(
+      screen.getByTestId("claude-code-card-what-this-step-does"),
+    ).toHaveTextContent("Copies the IronClaw skill files");
+    expect(
+      screen.getByTestId("claude-code-card-after-it-finishes"),
+    ).toHaveTextContent(
+      "[ironclaw-installer] restart Claude Code if it was already open so it loads the skill",
+    );
   });
 
   it("Antigravity CLI uses the shared button labels", () => {
@@ -101,7 +112,6 @@ describe("IntegrationCard", () => {
       program: "antigravity_cli",
       integrationId: "antigravity-cli",
       testid: "antigravity-cli-card",
-      skillCommand: "gh skill install example",
     });
 
     expect(
@@ -141,7 +151,7 @@ describe("IntegrationCard", () => {
       screen.queryByTestId("claude-code-card-blocked-attacks"),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("claude-code-card")).toHaveTextContent(
-      "This runtime card uses a one-time install command",
+      "Your install commands will be available after purchase.",
     );
   });
 
@@ -168,6 +178,12 @@ describe("IntegrationCard", () => {
     });
     expect(onCreateClaim).toHaveBeenCalledWith("claude-code");
     expect(screen.getByTestId("claude-code-card-copy")).toBeEnabled();
+    expect(screen.getByTestId("claude-code-card-copy")).toHaveTextContent(
+      "Copy install command",
+    );
+    expect(
+      screen.getByTestId("claude-code-card-explanation"),
+    ).toHaveTextContent("Paste both lines into your terminal, in order.");
     expect(screen.queryByText(/expires/i)).not.toBeInTheDocument();
     expect(mockToastSuccess).toHaveBeenCalledWith(
       "One-time install command generated",

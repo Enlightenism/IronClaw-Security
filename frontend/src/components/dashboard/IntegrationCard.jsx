@@ -18,8 +18,37 @@ const CLAIM_TOKEN_PATTERN = /^ic_claim_[A-Za-z0-9_-]{20,128}$/;
 const RUNTIME_PROGRAM_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const COMMAND_MAX_LENGTH = 1024;
 const PLACEHOLDER_TEXT = "Generate a one-time install command after purchase";
-const RUNTIME_CARD_EXPLANATION =
-  "This runtime card uses a one-time install command that embeds a single-use key for your account and is cleared after redemption.";
+const VERIFIED_CARD_COPY =
+  "Paste both lines into your terminal, in order. The first installs the IronClaw installer. The second installs the IronClaw security skill and turns on protection for this platform. Your one-time key is used once here, and the install key it delivers stays linked to your account, so your balance, blocked threats, and daily usage keep updating on this dashboard.";
+const LOCKED_CARD_COPY =
+  "Your install commands will be available after purchase.";
+const PREREQUISITES_BY_PROGRAM = {
+  openclaw: "Python, GitHub CLI (gh), and the OpenClaw CLI",
+  claude_code: "Python and Claude Code",
+  cursor: "Python and GitHub CLI (gh)",
+  goose: "Python and GitHub CLI (gh)",
+  antigravity_cli: "Python and GitHub CLI (gh)",
+  copilot: "Python and GitHub CLI (gh)",
+  hermes: "Python and the Hermes CLI",
+};
+const ACTIONS_BY_PROGRAM = {
+  openclaw: "Installs and enables the IronClaw OpenClaw plugin.",
+  claude_code:
+    "Copies the IronClaw skill files and writes protection to Claude Code's user settings.",
+  cursor:
+    "Installs the IronClaw skill with gh, then writes protection to Cursor's user config.",
+  goose:
+    "Installs the IronClaw skill with gh, then adds Goose's native pre-tool hook.",
+  antigravity_cli:
+    "Installs the IronClaw skill with gh, then writes protection to ~/.gemini/config/hooks.json.",
+  copilot:
+    "Installs the IronClaw skill with gh, then writes protection to Copilot's user config.",
+  hermes:
+    "Installs the IronClaw skill with Hermes, then enables the IronClaw Hermes plugin.",
+};
+const BOOTSTRAP_SUCCESS_TEXT = "[ironclaw-installer] shared skill installed";
+const CLAUDE_RESTART_TEXT =
+  "[ironclaw-installer] restart Claude Code if it was already open so it loads the skill";
 const hashSeed = (text) => {
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
@@ -221,7 +250,6 @@ const IntegrationCard = ({
   onCreateClaim,
   savedCommand = "",
   savedCommandClaimed = false,
-  skillCommand = "",
   tint = "gold",
   testid,
 }) => {
@@ -342,8 +370,6 @@ const IntegrationCard = ({
   }
 
   const normalizedCommand = isAvailable ? installCommand : "";
-  const normalizedSkillCommand =
-    typeof skillCommand === "string" ? skillCommand.trim() : "";
   const isLocked = !normalizedCommand;
   const canGenerate = isAvailable && typeof onCreateClaim === "function";
 
@@ -545,7 +571,7 @@ const IntegrationCard = ({
         className="mb-2 text-[11px] leading-snug text-[#BFC1C2]"
         data-testid={`${testid}-explanation`}
       >
-        {RUNTIME_CARD_EXPLANATION}
+        {isLocked ? LOCKED_CARD_COPY : VERIFIED_CARD_COPY}
       </p>
 
       {isRevoked ? (
@@ -567,24 +593,9 @@ const IntegrationCard = ({
         </p>
       ) : null}
 
-      {normalizedSkillCommand ? (
-        <div className="mb-2" data-testid={`${testid}-skill-command`}>
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">
-            Skill only (optional, manual)
-          </p>
-          <code className="font-tech block overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-white/10 bg-black/50 px-2 py-1.5 text-[10px] leading-relaxed text-white/90">
-            {normalizedSkillCommand}
-          </code>
-          <p className="mt-1 text-[10px] leading-relaxed text-white/50">
-            The install step below already runs this command, so you only need
-            it if you want the skill without the full install.
-          </p>
-        </div>
-      ) : null}
-
       <div className="mb-2" data-testid={`${testid}-install-command`}>
         <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">
-          Install and activate (run this)
+          Install IronClaw security
         </p>
         <div className="flex items-stretch gap-1.5">
           <code
@@ -604,7 +615,7 @@ const IntegrationCard = ({
               onClick={copy}
               disabled={isLocked}
               data-testid={`${testid}-copy`}
-              className="flex w-7 shrink-0 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex w-auto shrink-0 items-center justify-center rounded-md border px-2 transition disabled:cursor-not-allowed disabled:opacity-50"
               style={{
                 borderColor: `${accent}55`,
                 background: `${accent}14`,
@@ -615,13 +626,46 @@ const IntegrationCard = ({
                   ? canGenerate
                     ? `Generate a one-time ${canonicalTitle} install command before copying`
                     : `${canonicalTitle} install command locked until purchase`
-                  : `Copy ${canonicalTitle} install command`
+                  : "Copy install command"
               }
             >
               {copied ? <Check size={12} /> : <Copy size={12} />}
+              <span className="ml-1">Copy install command</span>
             </button>
           )}
         </div>
+      </div>
+
+      <div className="mb-2" data-testid={`${testid}-prerequisites`}>
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">
+          Before you paste
+        </p>
+        <p className="text-[10px] leading-relaxed text-white/70">
+          {PREREQUISITES_BY_PROGRAM[program]}
+        </p>
+      </div>
+
+      <div className="mb-2" data-testid={`${testid}-what-this-step-does`}>
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">
+          What this step does
+        </p>
+        <p className="text-[10px] leading-relaxed text-white/70">
+          {ACTIONS_BY_PROGRAM[program]}
+        </p>
+      </div>
+
+      <div className="mb-2" data-testid={`${testid}-after-it-finishes`}>
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">
+          After it finishes
+        </p>
+        <p className="text-[10px] leading-relaxed text-white/70">
+          {BOOTSTRAP_SUCCESS_TEXT}
+        </p>
+        {program === "claude_code" ? (
+          <p className="mt-1 text-[10px] leading-relaxed text-white/70">
+            {CLAUDE_RESTART_TEXT}
+          </p>
+        ) : null}
       </div>
       {installClaimed && normalizedCommand ? (
         <p
