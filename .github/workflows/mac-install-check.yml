@@ -99,7 +99,6 @@ jobs:
         run: python -m ironclaw_installer bootstrap --help
 
       - name: Install platform CLI (macOS, same command the card gives users)
-        id: cli_mac
         if: runner.os == 'macOS'
         continue-on-error: true
         shell: bash
@@ -109,14 +108,13 @@ jobs:
             copilot) brew install copilot-cli ;;
             antigravity_cli) curl -fsSL https://antigravity.google/cli/install.sh | bash ;;
             goose) curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash ;;
-            openclaw) curl -fsSL https://openclaw.ai/install.sh | bash ;;
+            openclaw) curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard ;;
             hermes) curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash ;;
             cursor) echo "Cursor has no CLI install step" ;;
           esac
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install platform CLI (Windows, same command the card gives users)
-        id: cli_win
         if: runner.os == 'Windows'
         continue-on-error: true
         shell: pwsh
@@ -126,31 +124,54 @@ jobs:
             'copilot' { winget install --id GitHub.Copilot --accept-source-agreements --accept-package-agreements }
             'antigravity_cli' { irm https://antigravity.google/cli/install.ps1 | iex }
             'goose' {
+              $env:CONFIGURE = 'false'
               Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1' -OutFile 'download_cli.ps1'
               & .\download_cli.ps1
             }
-            'openclaw' { iwr -useb https://openclaw.ai/install.ps1 | iex }
+            'openclaw' { & ([scriptblock]::Create((iwr -useb https://openclaw.ai/install.ps1))) -NoOnboard }
             'hermes' { iex (irm https://hermes-agent.nousresearch.com/install.ps1) }
             'cursor' { Write-Host 'Cursor has no CLI install step' }
           }
-          "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Put the installed CLI on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $binary = switch ($env:RUNTIME) {
+            'claude_code' { 'claude' }
+            'copilot' { 'copilot' }
+            'antigravity_cli' { 'agy' }
+            'goose' { 'goose' }
+            'openclaw' { 'openclaw' }
+            'hermes' { 'hermes' }
+            default { '' }
+          }
+          if ($binary -and -not (Get-Command $binary -ErrorAction SilentlyContinue)) {
+            $roots = @($env:LOCALAPPDATA, $env:APPDATA, $env:USERPROFILE, 'C:\npm\prefix') | Where-Object { $_ -and (Test-Path $_) }
+            $hit = Get-ChildItem -Path $roots -Recurse -Depth 6 -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -in @("$binary.exe", "$binary.cmd") } | Select-Object -First 1
+            if ($hit) {
+              $hit.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+              Write-Host "Added $($hit.DirectoryName) to PATH for $binary"
+            } else {
+              Write-Host "Could not locate $binary under the standard install folders"
+            }
+          }
 
       - name: Check CLI, gh version, skill install, and live claim server
         shell: python
-        env:
-          CLI_OUTCOME: ${{ runner.os == 'macOS' && steps.cli_mac.outcome || steps.cli_win.outcome }}
         run: |
           import os
           import re
           import shutil
           import subprocess
           import sys
+          import time
           from pathlib import Path
 
           from app.core.install_key_formats import InstallKeyFormatRegistry
 
           runtime = os.environ["RUNTIME"]
-          cli_outcome = os.environ.get("CLI_OUTCOME", "")
           rows = []
           failures = []
 
@@ -177,8 +198,12 @@ jobs:
           }
           if runtime in cli_binaries:
               binary = cli_binaries[runtime]
-              record("Platform CLI install step succeeded", cli_outcome == "success", "outcome: " + cli_outcome)
-              record("Platform CLI '" + binary + "' is on PATH", shutil.which(binary) is not None, str(shutil.which(binary)))
+              found = shutil.which(binary)
+              record("Platform CLI '" + binary + "' is on PATH", found is not None, str(found))
+              if found:
+                  ver = subprocess.run(binary + " --version", shell=True, capture_output=True, text=True, timeout=120)
+                  ver_text = (ver.stdout + ver.stderr).strip()
+                  record("Platform CLI '" + binary + "' runs --version", ver.returncode == 0, "exit " + str(ver.returncode) + ": " + ver_text)
 
           if runtime == "claude_code":
               from ironclaw_installer import _install_claude_code_skill
@@ -199,12 +224,17 @@ jobs:
                   record("Skill install command", proc.returncode == 0, "exit " + str(proc.returncode) + ": " + output)
 
           token = "ic_claim_FAKEFAKEFAKEFAKEFAKEFAKE00"
-          boot = subprocess.run(
-              [sys.executable, "-m", "ironclaw_installer", "bootstrap", "--program", runtime, "--claim-token", token],
-              capture_output=True, text=True, timeout=300,
-          )
-          boot_text = (boot.stdout + boot.stderr).strip()
-          print(boot_text)
+          boot_text = ""
+          for attempt in range(3):
+              boot = subprocess.run(
+                  [sys.executable, "-m", "ironclaw_installer", "bootstrap", "--program", runtime, "--claim-token", token],
+                  capture_output=True, text=True, timeout=300,
+              )
+              boot_text = (boot.stdout + boot.stderr).strip()
+              print(boot_text)
+              if "Unable to reach" not in boot_text:
+                  break
+              time.sleep(30)
           record("Live claim server reached (fake token rejected)", "HTTP 401" in boot_text, boot_text)
 
           table = ["| Check | Result | Detail |", "|---|---|---|"]
@@ -227,7 +257,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Install frontend dependencies
-        run: npm ci
-      - name: Run all frontend tests (includes the activation-gating test once it exists)
+      - name: Install frontend dependencies (npm ci when a lockfile exists, otherwise npm install)
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi
+      - name: Run all frontend tests
         run: npm test -- --watchAll=false --ci
