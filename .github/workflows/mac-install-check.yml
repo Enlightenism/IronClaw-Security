@@ -61,3 +61,173 @@ jobs:
       - name: Run the exact pasted installer help command (no setup-python)
         working-directory: /tmp
         run: python -m ironclaw_installer bootstrap --help
+
+  pytest-install-paths:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the repo with dev dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Installer, key-format, install-key, and integration API tests
+        run: python -m pytest tests/testcliinstall.py tests/services/test_install_key_format_registry.py tests/core/test_install_keys.py tests/testintegrationsapi.py -q
+      - name: Runtime hook tests (fail-closed enforcement)
+        run: python -m pytest tests/sdk/test_runtime_hooks.py -q
+
+  install-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+        runtime: [claude_code, copilot, cursor, antigravity_cli, goose, openclaw, hermes]
+    runs-on: ${{ matrix.os }}
+    env:
+      RUNTIME: ${{ matrix.runtime }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Run the exact pasted pip command on the default runner Python
+        run: python -m pip install --upgrade "git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3"
+
+      - name: Run the exact pasted installer help command on the default runner Python
+        working-directory: ${{ runner.temp }}
+        run: python -m ironclaw_installer bootstrap --help
+
+      - name: Install platform CLI (macOS, same command the card gives users)
+        id: cli_mac
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        shell: bash
+        run: |
+          case "$RUNTIME" in
+            claude_code) curl -fsSL https://claude.ai/install.sh | bash ;;
+            copilot) brew install copilot-cli ;;
+            antigravity_cli) curl -fsSL https://antigravity.google/cli/install.sh | bash ;;
+            goose) curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash ;;
+            openclaw) curl -fsSL https://openclaw.ai/install.sh | bash ;;
+            hermes) curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash ;;
+            cursor) echo "Cursor has no CLI install step" ;;
+          esac
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install platform CLI (Windows, same command the card gives users)
+        id: cli_win
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          switch ($env:RUNTIME) {
+            'claude_code' { irm https://claude.ai/install.ps1 | iex }
+            'copilot' { winget install --id GitHub.Copilot --accept-source-agreements --accept-package-agreements }
+            'antigravity_cli' { irm https://antigravity.google/cli/install.ps1 | iex }
+            'goose' {
+              Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/aaif-goose/goose/main/download_cli.ps1' -OutFile 'download_cli.ps1'
+              & .\download_cli.ps1
+            }
+            'openclaw' { iwr -useb https://openclaw.ai/install.ps1 | iex }
+            'hermes' { iex (irm https://hermes-agent.nousresearch.com/install.ps1) }
+            'cursor' { Write-Host 'Cursor has no CLI install step' }
+          }
+          "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Check CLI, gh version, skill install, and live claim server
+        shell: python
+        env:
+          CLI_OUTCOME: ${{ runner.os == 'macOS' && steps.cli_mac.outcome || steps.cli_win.outcome }}
+        run: |
+          import os
+          import re
+          import shutil
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          from app.core.install_key_formats import InstallKeyFormatRegistry
+
+          runtime = os.environ["RUNTIME"]
+          cli_outcome = os.environ.get("CLI_OUTCOME", "")
+          rows = []
+          failures = []
+
+          def clean(text):
+              return " ".join(str(text).split()).replace("|", "/")[-300:]
+
+          def record(name, ok, detail):
+              rows.append((name, "pass" if ok else "fail", clean(detail)))
+              if not ok:
+                  failures.append(name)
+
+          gh = subprocess.run(["gh", "--version"], capture_output=True, text=True)
+          match = re.search(r"gh version (\d+)\.(\d+)\.(\d+)", gh.stdout)
+          gh_version = tuple(int(p) for p in match.groups()) if match else (0, 0, 0)
+          record("gh is 2.90.0 or later", gh_version >= (2, 90, 0), ".".join(str(p) for p in gh_version))
+
+          cli_binaries = {
+              "claude_code": "claude",
+              "copilot": "copilot",
+              "antigravity_cli": "agy",
+              "goose": "goose",
+              "openclaw": "openclaw",
+              "hermes": "hermes",
+          }
+          if runtime in cli_binaries:
+              binary = cli_binaries[runtime]
+              record("Platform CLI install step succeeded", cli_outcome == "success", "outcome: " + cli_outcome)
+              record("Platform CLI '" + binary + "' is on PATH", shutil.which(binary) is not None, str(shutil.which(binary)))
+
+          if runtime == "claude_code":
+              from ironclaw_installer import _install_claude_code_skill
+              try:
+                  skill_path = _install_claude_code_skill()
+                  record("Claude skill file written", Path(skill_path).is_file(), str(skill_path))
+              except Exception as exc:
+                  record("Claude skill file written", False, repr(exc))
+          else:
+              command = InstallKeyFormatRegistry.get_spec(runtime).generic_command
+              if not command:
+                  record("Skill install command", False, "registry has no command")
+              else:
+                  proc = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=600)
+                  output = (proc.stdout + proc.stderr).strip()
+                  print("--- " + command)
+                  print(output[-3000:])
+                  record("Skill install command", proc.returncode == 0, "exit " + str(proc.returncode) + ": " + output)
+
+          token = "ic_claim_FAKEFAKEFAKEFAKEFAKEFAKE00"
+          boot = subprocess.run(
+              [sys.executable, "-m", "ironclaw_installer", "bootstrap", "--program", runtime, "--claim-token", token],
+              capture_output=True, text=True, timeout=300,
+          )
+          boot_text = (boot.stdout + boot.stderr).strip()
+          print(boot_text)
+          record("Live claim server reached (fake token rejected)", "HTTP 401" in boot_text, boot_text)
+
+          table = ["| Check | Result | Detail |", "|---|---|---|"]
+          table += ["| " + name + " | " + result + " | " + detail + " |" for name, result, detail in rows]
+          block = "### " + os.environ.get("RUNNER_OS", "") + " / " + runtime + "\n\n" + "\n".join(table) + "\n"
+          summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_file:
+              with open(summary_file, "a", encoding="utf-8") as fh:
+                  fh.write(block)
+          print(block)
+          sys.exit(1 if failures else 0)
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Run all frontend tests (includes the activation-gating test once it exists)
+        run: npm test -- --watchAll=false --ci
