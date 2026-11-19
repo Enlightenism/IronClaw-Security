@@ -18,6 +18,8 @@ const CLAIM_TOKEN_PATTERN = /^ic_claim_[A-Za-z0-9_-]{20,128}$/;
 const RUNTIME_PROGRAM_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const COMMAND_MAX_LENGTH = 1024;
 const PLACEHOLDER_TEXT = "Generate a one-time install command after purchase";
+const RUNTIME_CARD_EXPLANATION =
+  "This runtime card uses a one-time install command that embeds a single-use key for your account and is cleared after redemption.";
 const hashSeed = (text) => {
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
@@ -539,6 +541,13 @@ const IntegrationCard = ({
         </h3>
       </div>
 
+      <p
+        className="mb-2 text-[11px] leading-snug text-[#BFC1C2]"
+        data-testid={`${testid}-explanation`}
+      >
+        {RUNTIME_CARD_EXPLANATION}
+      </p>
+
       {isRevoked ? (
         <p
           className="mb-2 text-[11px] leading-snug text-[#BFC1C2]"
@@ -553,64 +562,66 @@ const IntegrationCard = ({
           className="mb-2 text-[11px] leading-snug text-[#BFC1C2]"
           data-testid={`${testid}-unavailable-note`}
         >
-          Your install commands will be generated with an embedded unique user
-          key.
+          Purchase verification is required before this runtime can generate a
+          one-time command.
         </p>
-      ) : (
-        <p className="mb-2 text-[11px] leading-snug text-[#BFC1C2]">
-          After your purchase is verified, generate a one-time install command
-          for this platform. The command installs the shared IronClaw security
-          skill and embeds a single-use key for your account. The key is cleared
-          once it is redeemed.
-        </p>
-      )}
+      ) : null}
 
       {normalizedSkillCommand ? (
         <div className="mb-2" data-testid={`${testid}-skill-command`}>
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">
-            Skill install command
+            Skill only (optional, manual)
           </p>
           <code className="font-tech block overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-white/10 bg-black/50 px-2 py-1.5 text-[10px] leading-relaxed text-white/90">
             {normalizedSkillCommand}
           </code>
+          <p className="mt-1 text-[10px] leading-relaxed text-white/50">
+            The install step below already runs this command, so you only need
+            it if you want the skill without the full install.
+          </p>
         </div>
       ) : null}
 
-      <div className="flex items-stretch gap-1.5">
-        <code
-          className={`font-tech flex-1 overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-white/10 bg-black/50 px-2 py-1.5 text-[10px] leading-relaxed ${
-            isLocked ? "italic text-white/40" : "text-white/90"
-          }`}
-        >
-          {isRevoked
-            ? "Revoked"
-            : isLocked
-              ? PLACEHOLDER_TEXT
-              : normalizedCommand}
-        </code>
-        {isRevoked ? null : (
-          <button
-            type="button"
-            onClick={copy}
-            disabled={isLocked}
-            data-testid={`${testid}-copy`}
-            className="flex w-7 shrink-0 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-50"
-            style={{
-              borderColor: `${accent}55`,
-              background: `${accent}14`,
-              color: accent,
-            }}
-            aria-label={
-              isLocked
-                ? canGenerate
-                  ? `Generate a one-time ${canonicalTitle} install command before copying`
-                  : `${canonicalTitle} install command locked until purchase`
-                : `Copy ${canonicalTitle} install command`
-            }
+      <div className="mb-2" data-testid={`${testid}-install-command`}>
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">
+          Install and activate (run this)
+        </p>
+        <div className="flex items-stretch gap-1.5">
+          <code
+            className={`font-tech flex-1 overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-white/10 bg-black/50 px-2 py-1.5 text-[10px] leading-relaxed ${
+              isLocked ? "italic text-white/40" : "text-white/90"
+            }`}
           >
-            {copied ? <Check size={12} /> : <Copy size={12} />}
-          </button>
-        )}
+            {isRevoked
+              ? "Revoked"
+              : isLocked
+                ? PLACEHOLDER_TEXT
+                : normalizedCommand}
+          </code>
+          {isRevoked ? null : (
+            <button
+              type="button"
+              onClick={copy}
+              disabled={isLocked}
+              data-testid={`${testid}-copy`}
+              className="flex w-7 shrink-0 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-50"
+              style={{
+                borderColor: `${accent}55`,
+                background: `${accent}14`,
+                color: accent,
+              }}
+              aria-label={
+                isLocked
+                  ? canGenerate
+                    ? `Generate a one-time ${canonicalTitle} install command before copying`
+                    : `${canonicalTitle} install command locked until purchase`
+                  : `Copy ${canonicalTitle} install command`
+              }
+            >
+              {copied ? <Check size={12} /> : <Copy size={12} />}
+            </button>
+          )}
+        </div>
       </div>
       {installClaimed && normalizedCommand ? (
         <p

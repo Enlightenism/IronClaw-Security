@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.core.install_key_formats import InstallKeyFormatRegistry
 from app.core.install_keys import InstallKeyRecord, InstallKeyRegistry
 from app.persistencebootstrap import InMemoryPersistenceStore, SupabasePersistenceStore
 import app.services.install_key_handoff as install_key_handoff
@@ -285,7 +286,9 @@ def test_saved_command_is_encrypted_and_survives_until_redeemed() -> None:
         owner_key=record.owner_key,
         program=record.program,
     )
-    command = f"python -m ironclaw_installer redeem --program openclaw --claim-token {claim.claim_token}"
+    command = InstallKeyFormatRegistry.get_spec(record.program).format_command(
+        claim.claim_token,
+    )
 
     service.save_command(
         key_id=record.key_id,

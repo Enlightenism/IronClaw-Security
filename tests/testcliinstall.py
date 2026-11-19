@@ -14,6 +14,9 @@ from typing import Any
 
 import pytest
 
+from app.persistencebootstrap import InMemoryPersistenceStore
+from app.services.install_key_handoff import InstallKeyHandoffService
+
 MODULE_CANDIDATES = (
     "ironclaw_installer",
     "cli.install",
@@ -319,6 +322,41 @@ def test_runtime_skill_install_command_uses_canonical_host_metadata(
         install_module.InstallKeyFormatRegistry.get_spec(runtime_program).generic_command,
     )
     assert install_module._runtime_skill_install_command(runtime_program) == expected_command
+
+
+def test_saved_command_with_old_installer_tag_is_rebuilt_from_registry() -> None:
+    from app.core.install_key_formats import InstallKeyFormatRegistry
+
+    claim_token = "ic_claim_0123456789abcdefghij"
+    key_id = "ik_saved_old_tag_test"
+    owner_key = "buyer@test.invalid"
+    program = "openclaw"
+    raw_key = "ic_install_openclaw_saved_old_tag_test"
+    old_command = f"python -m pip install --upgrade git+https://github.com/Enlightenism/IronClaw-Security.git@v0.9.0\npython -m ironclaw_installer bootstrap --program {program} --claim-token {claim_token}"
+    service = InstallKeyHandoffService(
+        persistence_store=InMemoryPersistenceStore(fallback_enabled=False),
+        install_key_registry=SimpleNamespace(),
+        encryption_secret="test-install-key-encryption-secret",
+    )
+
+    service.store_secret(
+        key_id=key_id,
+        owner_key=owner_key,
+        program=program,
+        install_key=raw_key,
+    )
+    service.save_command(
+        key_id=key_id,
+        owner_key=owner_key,
+        program=program,
+        command=old_command,
+    )
+
+    saved = service.get_saved_commands(owner_key=owner_key)[program]
+    assert saved.command == InstallKeyFormatRegistry.get_spec(program).format_command(
+        claim_token,
+    )
+    assert "@v0.9.0" not in saved.command
 
 
 def test_run_bootstrap_claude_code_installs_skill_without_gh(

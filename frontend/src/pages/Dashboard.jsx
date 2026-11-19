@@ -174,6 +174,8 @@ const Dashboard = () => {
   const [data, setData] = useState(null);
   const [tokens, setTokens] = useState(null);
   const [loadingData, setLoadingData] = useState(true);
+  const [dashboardError, setDashboardError] = useState("");
+  const [staleData, setStaleData] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [purchasingId, setPurchasingId] = useState(null);
   const [pointerGlow, setPointerGlow] = useState({ x: 50, y: 25 });
@@ -182,6 +184,8 @@ const Dashboard = () => {
   const [contactOpen, setContactOpen] = useState(false);
   const polledRef = useRef(false);
   const paymentPollTimeoutRef = useRef(null);
+  const dataRef = useRef(null);
+  const tokensRef = useRef(null);
 
   const isAuthenticated = Boolean(user || session);
 
@@ -310,21 +314,40 @@ const Dashboard = () => {
   const fetchDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoadingData(true);
 
-    try {
-      const [dash, tok] = await Promise.all([
-        api.get("/dashboard/overview"),
-        api.get("/integrations/token"),
-      ]);
-      setData(dash.data);
-      setTokens(tok.data);
-      return { dashboard: dash.data, tokens: tok.data };
-    } catch {
-      // handled by interceptor
-      return null;
-    } finally {
+    const [dashResult, tokResult] = await Promise.allSettled([
+      api.get("/dashboard/overview"),
+      api.get("/integrations/token"),
+    ]);
+
+    const dash =
+      dashResult.status === "fulfilled" ? dashResult.value?.data : null;
+    const tok = tokResult.status === "fulfilled" ? tokResult.value?.data : null;
+    const hadCompleteData = Boolean(dataRef.current && tokensRef.current);
+
+    if (dashResult.status === "fulfilled") {
+      setData(dash);
+      dataRef.current = dash;
+    }
+    if (tokResult.status === "fulfilled") {
+      setTokens(tok);
+      tokensRef.current = tok;
+    }
+
+    if (dashResult.status === "rejected" || tokResult.status === "rejected") {
+      setDashboardError(
+        "Dashboard data could not be loaded. Retry to refresh the overview and runtime cards.",
+      );
+      setStaleData(hadCompleteData);
       setLoadingData(false);
       setRefreshing(false);
+      return null;
     }
+
+    setDashboardError("");
+    setStaleData(false);
+    setLoadingData(false);
+    setRefreshing(false);
+    return { dashboard: dash, tokens: tok };
   }, []);
 
   const createInstallClaim = useCallback(async (integrationId) => {
@@ -936,6 +959,27 @@ const Dashboard = () => {
     );
   }
 
+  if (dashboardError && !staleData) {
+    return (
+      <div
+        className="flex min-h-screen items-center justify-center bg-[#050607] px-6 text-white"
+        data-testid="dashboard-error-panel"
+      >
+        <div className="max-w-md rounded-lg border border-red-400/30 bg-red-950/20 p-6 text-center">
+          <h1 className="text-lg font-semibold">Dashboard unavailable</h1>
+          <p className="mt-2 text-sm text-[#BFC1C2]">{dashboardError}</p>
+          <button
+            type="button"
+            onClick={() => fetchDashboard()}
+            className="mt-4 rounded-md border border-[#FFD700]/50 px-4 py-2 text-sm font-semibold text-[#FFD700]"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="relative min-h-screen overflow-hidden bg-[#050607] text-white"
@@ -1053,6 +1097,24 @@ const Dashboard = () => {
             Refresh
           </button>
         </div>
+
+        {staleData ? (
+          <div
+            className="mb-6 flex items-center justify-between gap-4 rounded-lg border border-amber-400/30 bg-amber-950/20 px-4 py-3"
+            data-testid="dashboard-stale-notice"
+          >
+            <p className="text-sm text-[#E8D5A0]">
+              Showing the last known dashboard data. A live refresh failed.
+            </p>
+            <button
+              type="button"
+              onClick={() => fetchDashboard()}
+              className="shrink-0 rounded-md border border-amber-400/40 px-3 py-1.5 text-sm font-semibold text-[#FFD700]"
+            >
+              Retry
+            </button>
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <div className="space-y-6 order-1 lg:order-2">

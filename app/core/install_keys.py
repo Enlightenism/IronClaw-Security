@@ -777,23 +777,33 @@ class InstallKeyRegistry:
         rebuilt_by_id: dict[str, InstallKeyRecord] = {}
         rebuilt_hash_index: dict[str, str] = {}
         for row in rows:
-            record = _record_from_row(row)
-            pending = self._pending_revocations.get(record.key_id)
-            if pending is not None:
-                pending_record, pending_reason = pending
-                if record.active and record.revoked_at is None:
-                    record = pending_record
-                    if _persist_install_key_update(
-                        key_id=record.key_id,
-                        action="revocation_retry",
-                        callback=lambda r=pending_record, reason=pending_reason: _write_key_revocation(r, reason=reason),
-                    ):
+            try:
+                record = _record_from_row(row)
+                pending = self._pending_revocations.get(record.key_id)
+                if pending is not None:
+                    pending_record, pending_reason = pending
+                    if record.active and record.revoked_at is None:
+                        record = pending_record
+                        if _persist_install_key_update(
+                            key_id=record.key_id,
+                            action="revocation_retry",
+                            callback=lambda r=pending_record, reason=pending_reason: _write_key_revocation(r, reason=reason),
+                        ):
+                            self._pending_revocations.pop(record.key_id, None)
+                    else:
                         self._pending_revocations.pop(record.key_id, None)
-                else:
-                    self._pending_revocations.pop(record.key_id, None)
-            rebuilt_by_id[record.key_id] = record
-            if record.raw_key_hash:
-                rebuilt_hash_index[record.raw_key_hash] = record.key_id
+                rebuilt_by_id[record.key_id] = record
+                if record.raw_key_hash:
+                    rebuilt_hash_index[record.raw_key_hash] = record.key_id
+            except Exception as exc:
+                key_id = str(row.get("key_id") or "<unknown>")
+                program = str(row.get("program") or "<unknown>")
+                _logger.warning(
+                    "install_keys: skipping invalid Supabase row key_id=%s program=%s error=%s",
+                    key_id,
+                    program,
+                    exc,
+                )
         self._records_by_id = rebuilt_by_id
         self._key_id_by_hash = rebuilt_hash_index
         self._loaded = True
@@ -836,12 +846,23 @@ class InstallKeyRegistry:
             return
 
         for row in rows:
-            record = _record_from_row(row)
+            try:
+                record = _record_from_row(row)
+            except Exception:
+                self._rebuild_registry_from_rows(rows)
+                return
             cached = self._records_by_id.get(record.key_id)
             if cached is None:
                 self._rebuild_registry_from_rows(rows)
                 return
-            if cached.active != record.active or cached.payment_status != record.payment_status or cached.entitlements_status != record.entitlements_status or cached.revoked_at != record.revoked_at:
+            if (
+                cached.active != record.active
+                or cached.payment_status != record.payment_status
+                or cached.entitlements_status != record.entitlements_status
+                or cached.revoked_at != record.revoked_at
+                or cached.purchase_reference != record.purchase_reference
+                or cached.checkout_session_id != record.checkout_session_id
+            ):
                 self._rebuild_registry_from_rows(rows)
                 return
 

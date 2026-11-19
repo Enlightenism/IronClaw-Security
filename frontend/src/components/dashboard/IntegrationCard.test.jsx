@@ -50,6 +50,65 @@ describe("IntegrationCard", () => {
     delete window.IntersectionObserver;
   });
 
+  it("renders the same explanation for every runtime card", () => {
+    const runtimes = [
+      ["OpenClaw", "openclaw", "openclaw-card"],
+      ["Claude Code", "claude_code", "claude-code-card"],
+      ["Cursor", "cursor", "cursor-card"],
+      ["Goose", "goose", "goose-card"],
+      ["Antigravity CLI", "antigravity_cli", "antigravity_cli-card"],
+      ["GitHub Copilot", "copilot", "copilot-card"],
+      ["Hermes", "hermes", "hermes-card"],
+    ];
+
+    const { container } = render(
+      <>
+        {runtimes.map(([title, program, testid]) => (
+          <IntegrationCard
+            key={program}
+            title={title}
+            program={program}
+            integrationId={program.replace(/_/g, "-")}
+            available
+            onCreateClaim={jest.fn()}
+            testid={testid}
+          />
+        ))}
+      </>,
+    );
+
+    const explanations = Array.from(
+      container.querySelectorAll('[data-testid$="-explanation"]'),
+    ).map((node) => node.textContent);
+    expect(explanations).toHaveLength(runtimes.length);
+    expect(new Set(explanations).size).toBe(1);
+  });
+
+  it("Claude Code renders only the Install and activate section", () => {
+    renderCard();
+
+    expect(
+      screen.queryByTestId("claude-code-card-skill-command"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("claude-code-card-install-command"),
+    ).toHaveTextContent("Install and activate (run this)");
+  });
+
+  it("Antigravity CLI uses the shared button labels", () => {
+    renderCard({
+      title: "Antigravity CLI",
+      program: "antigravity_cli",
+      integrationId: "antigravity-cli",
+      testid: "antigravity-cli-card",
+      skillCommand: "gh skill install example",
+    });
+
+    expect(
+      screen.getByTestId("antigravity-cli-card-generate"),
+    ).toHaveTextContent("Generate one-time install command");
+  });
+
   it("does not show runtime coverage labels on platform cards", () => {
     renderCard({ program: "goose", testid: "goose-card" });
 
@@ -82,7 +141,7 @@ describe("IntegrationCard", () => {
       screen.queryByTestId("claude-code-card-blocked-attacks"),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("claude-code-card")).toHaveTextContent(
-      "generate a one-time install command for this platform",
+      "This runtime card uses a one-time install command",
     );
   });
 
@@ -219,9 +278,7 @@ describe("IntegrationCard", () => {
     expect(screen.getByTestId("claude-code-card-generate")).toBeDisabled();
     expect(
       screen.getByTestId("claude-code-card-unavailable-note"),
-    ).toHaveTextContent(
-      "Your install commands will be generated with an embedded unique user key.",
-    );
+    ).toHaveTextContent("Purchase verification is required");
     await user.click(screen.getByTestId("claude-code-card-generate"));
     expect(onCreateClaim).not.toHaveBeenCalled();
   });

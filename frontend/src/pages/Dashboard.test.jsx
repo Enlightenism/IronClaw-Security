@@ -494,6 +494,29 @@ describe("auth redirect", () => {
 // Loading spinner
 // =============================================================================
 
+describe("dashboard load errors", () => {
+  it("shows an error panel on failed overview load without a zero balance or cards", async () => {
+    mockApiGet.mockImplementation((url) => {
+      if (url === "/dashboard/overview") {
+        return Promise.reject(new Error("overview unavailable"));
+      }
+      if (url === "/integrations/token") {
+        return Promise.resolve({ data: DEFAULT_TOKENS });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    await renderDashboard();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("dashboard-error-panel")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByTestId("wallet-card")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("claude-code-card")).not.toBeInTheDocument();
+  });
+});
+
 describe("loading spinner", () => {
   it("renders Loader2 spinner when auth loading is true", async () => {
     mockAuthState = {

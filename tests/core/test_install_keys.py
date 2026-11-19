@@ -513,6 +513,51 @@ class TestInstallKeyRegistryGenerateInstallKey(unittest.TestCase):
                 purchase_reference="purchase_dup_001",
             )
 
+    def test_purchase_reference_change_triggers_registry_reload(self):
+        reg = self._registry()
+        existing = reg.generate_for_paid_customer(
+            owner_key=_OWNER,
+            subscription_id=_SUB_ID,
+            program="openclaw",
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+        )
+        changed_row = existing.to_db_row()
+        changed_row["purchase_reference"] = "sub_changed_001"
+        reg._last_write_at = None
+        reg._loaded = True
+        self._stub.table.return_value.select.return_value.execute.return_value.data = [changed_row]
+
+        reg._refresh_from_supabase(force=False)
+
+        reloaded = reg._records_by_id[existing.key_id]
+        assert reloaded.purchase_reference == "sub_changed_001"
+
+    def test_bad_supabase_row_is_skipped_without_dropping_other_rows(self):
+        reg = self._registry()
+        valid = reg.generate_for_paid_customer(
+            owner_key=_OWNER,
+            subscription_id=_SUB_ID,
+            program="openclaw",
+            payment_status="paid",
+            entitlements_status="active",
+            issued_after_payment=True,
+            checkout_session_id=_CHECKOUT_SESSION_ID,
+            purchase_reference=_PURCHASE_REFERENCE,
+        )
+        bad_row = {
+            "key_id": "ik_bad_row",
+            "program": "openclaw",
+        }
+
+        reg._rebuild_registry_from_rows([bad_row, valid.to_db_row()])
+
+        assert "ik_bad_row" not in reg._records_by_id
+        assert valid.key_id in reg._records_by_id
+
     def test_generate_for_paid_customer_raises_on_supabase_insert_failure(self):
         reg = self._registry()
         self._stub.table.return_value.insert.return_value.execute.side_effect = RuntimeError("db insert failed")

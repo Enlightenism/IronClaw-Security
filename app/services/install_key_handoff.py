@@ -4,6 +4,7 @@ import base64
 from dataclasses import dataclass, field
 import hashlib
 import logging
+import re
 import secrets
 from threading import RLock
 from typing import Any
@@ -311,6 +312,14 @@ class InstallKeyHandoffService:
                 # Postgres encode(..., 'base64') wraps lines every 76 characters.
                 encrypted_command = base64.b64decode("".join(str(row["encrypted_command_base64"]).split()), validate=True)
                 command = self._fernet().decrypt(encrypted_command).decode("utf-8")
+                token_match = re.search(
+                    r"--claim-token\s+(ic_claim_[A-Za-z0-9_-]+)",
+                    command,
+                )
+                if token_match:
+                    command = InstallKeyFormatRegistry.get_spec(program).format_command(
+                        token_match.group(1),
+                    )
             except (KeyError, ValueError, InvalidToken) as exc:
                 raise InstallKeyHandoffError("Saved install command could not be decrypted.") from exc
             saved[program] = InstallKeySavedCommand(
