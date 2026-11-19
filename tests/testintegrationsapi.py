@@ -16,6 +16,7 @@ from app.core.auth import get_auth_context
 from app.core.install_key_formats import (
     SECURITY_GUARDIAN_SKILL_FILE_PATH,
     SECURITY_GUARDIAN_SKILL_ROUTE,
+    InstallKeyFormatRegistry,
 )
 from app.main import app as production_app
 from app.routes.integrations.installer import router as installer_router
@@ -85,7 +86,7 @@ def test_public_security_skill_route_serves_the_canonical_skill_file() -> None:
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/markdown")
-    assert response.text == source_file.read_text(encoding="utf-8")
+    assert response.content == source_file.read_bytes()
 
 
 def test_integrations_router_exposes_expected_http_methods(client: TestClient) -> None:
@@ -489,6 +490,7 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
         principal_id="owner-456",
         org_id=None,
         key_type="personal",
+        metadata={"owner_key": "owner-456"},
     )
     registry = SimpleNamespace(
         get_keys_for_owner=lambda owner_key: [
@@ -527,25 +529,26 @@ def test_integration_token_uses_paid_install_keys_not_platform_api_key(client: T
     assert "security-guardian" not in payload["supported_platforms"]
     assert "security-guardian" not in payload["install_metadata"]
     assert payload["status"] == "ok"
-    assert all(
-        not payload[field]
-        for field in (
-            "claude_code_command",
-            "openclaw_command",
-            "cursor_command",
-            "goose_command",
-            "antigravity_cli_command",
-            "copilot_command",
-            "hermes_command",
-        )
-    )
+    assert payload["openclaw_command"] == InstallKeyFormatRegistry.get_spec("openclaw").generic_command
+    assert payload["claude_code_command"] == ""
+    assert payload["cursor_command"] == InstallKeyFormatRegistry.get_spec("cursor").generic_command
+    assert payload["goose_command"] == InstallKeyFormatRegistry.get_spec("goose").generic_command
+    assert payload["antigravity_cli_command"] == InstallKeyFormatRegistry.get_spec("antigravity_cli").generic_command
+    assert payload["copilot_command"] == InstallKeyFormatRegistry.get_spec("copilot").generic_command
+    assert payload["hermes_command"] == InstallKeyFormatRegistry.get_spec("hermes").generic_command
     assert payload["install_metadata"]["openclaw"]["available"] is True
     assert payload["install_metadata"]["openclaw"]["key_id"] == "ik_openclaw_123"
     assert "install_key" not in payload["install_metadata"]["openclaw"]
     assert payload["install_metadata"]["cursor"]["program"] == "cursor"
     assert payload["install_metadata"]["hermes"]["program"] == "hermes"
     assert payload["security_guardian_command"] == ""
-    assert all(not command for command in payload["command_metadata"].values())
+    assert payload["command_metadata"]["openclaw"] == InstallKeyFormatRegistry.get_spec("openclaw").generic_command
+    assert payload["command_metadata"]["claude-code"] == ""
+    assert payload["command_metadata"]["cursor"] == InstallKeyFormatRegistry.get_spec("cursor").generic_command
+    assert payload["command_metadata"]["goose"] == InstallKeyFormatRegistry.get_spec("goose").generic_command
+    assert payload["command_metadata"]["antigravity-cli"] == InstallKeyFormatRegistry.get_spec("antigravity_cli").generic_command
+    assert payload["command_metadata"]["copilot"] == InstallKeyFormatRegistry.get_spec("copilot").generic_command
+    assert payload["command_metadata"]["hermes"] == InstallKeyFormatRegistry.get_spec("hermes").generic_command
     assert "ic_install_" not in str(payload)
 
 
@@ -556,8 +559,8 @@ def test_integration_list_endpoints_expose_canonical_platform_metadata(client: T
         payload = response.json()
         platform_ids = [item["integration_id"] for item in payload["items"]]
         assert platform_ids == [
-            "claude-code",
             "openclaw",
+            "claude-code",
             "cursor",
             "goose",
             "antigravity-cli",
@@ -616,7 +619,7 @@ def test_integration_token_exposes_registry_normalized_platform_aliases(client: 
     assert payload["install_metadata"]["claude-code"]["available"] is True
     assert payload["install_metadata"]["antigravity-cli"]["available"] is True
     assert payload["command_metadata"]["claude-code"] == ""
-    assert payload["command_metadata"]["antigravity-cli"] == ""
+    assert payload["command_metadata"]["antigravity-cli"] == InstallKeyFormatRegistry.get_spec("antigravity_cli").generic_command
     assert "claude_code" not in payload["command_metadata"]
 
 
@@ -711,11 +714,22 @@ def test_integration_token_filters_out_non_runtime_and_shared_family_records(cli
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["openclaw_command"] == ""
+    assert payload["openclaw_command"] == InstallKeyFormatRegistry.get_spec("openclaw").generic_command
     assert payload["claude_code_command"] == ""
     assert payload["install_metadata"]["openclaw"]["available"] is True
     assert payload["install_metadata"]["claude-code"]["available"] is True
-    assert all(not command for command in payload["command_metadata"].values())
+    assert payload["command_metadata"]["openclaw"] == InstallKeyFormatRegistry.get_spec("openclaw").generic_command
+    assert all(
+        not payload["command_metadata"][platform]
+        for platform in (
+            "claude-code",
+            "cursor",
+            "goose",
+            "antigravity-cli",
+            "copilot",
+            "hermes",
+        )
+    )
     assert payload["security_guardian_command"] == ""
     assert all(platform not in payload["install_metadata"] for platform in ("security-guardian",))
     assert set(payload["command_metadata"]) == {

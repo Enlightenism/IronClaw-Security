@@ -155,6 +155,47 @@ jobs:
               Write-Host "Added $($hit.DirectoryName) to PATH for $binary"
             } else {
               Write-Host "Could not locate $binary under the standard install folders"
+              $fallbackHit = $null
+              if ($env:RUNTIME -eq 'hermes') {
+                $fallbackRoots = @()
+                if ($env:LOCALAPPDATA) {
+                  $fallbackRoots += Join-Path $env:LOCALAPPDATA 'hermes'
+                }
+                foreach ($fallbackRoot in $fallbackRoots) {
+                  Write-Host "Searched directory: $fallbackRoot"
+                  if (Test-Path $fallbackRoot) {
+                    $fallbackMatches = Get-ChildItem -LiteralPath $fallbackRoot -Recurse -File -ErrorAction SilentlyContinue |
+                      Where-Object { $_.Name -in @('hermes.exe', 'hermes.cmd') }
+                    foreach ($fallbackMatch in $fallbackMatches) {
+                      Write-Host "Match found: $($fallbackMatch.FullName)"
+                    }
+                    if (-not $fallbackHit) {
+                      $fallbackHit = $fallbackMatches | Select-Object -First 1
+                    }
+                  } else {
+                    Write-Host "Directory not found: $fallbackRoot"
+                  }
+                }
+              } elseif ($env:RUNTIME -eq 'antigravity_cli') {
+                $fallbackRoots = @($env:LOCALAPPDATA, $env:USERPROFILE) | Where-Object { $_ -and (Test-Path $_) }
+                foreach ($fallbackRoot in $fallbackRoots) {
+                  Write-Host "Searched directory: $fallbackRoot"
+                  $fallbackMatches = Get-ChildItem -LiteralPath $fallbackRoot -Recurse -File -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -in @('agy.exe', 'agy.cmd') }
+                  foreach ($fallbackMatch in $fallbackMatches) {
+                    Write-Host "Match found: $($fallbackMatch.FullName)"
+                  }
+                  if (-not $fallbackHit) {
+                    $fallbackHit = $fallbackMatches | Select-Object -First 1
+                  }
+                }
+              }
+              if ($fallbackHit) {
+                $fallbackHit.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+                Write-Host "Added $($fallbackHit.DirectoryName) to PATH for $binary"
+              } else {
+                Write-Host "Could not locate $binary under the fallback search roots"
+              }
             }
           }
 
