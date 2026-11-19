@@ -22,33 +22,22 @@ const VERIFIED_CARD_COPY =
   "Paste both lines into your terminal, in order. The first installs the IronClaw installer. The second installs the IronClaw security skill and turns on protection for this platform. Your one-time key is used once here, and the install key it delivers stays linked to your account, so your balance, blocked threats, and daily usage keep updating on this dashboard.";
 const LOCKED_CARD_COPY =
   "Your install commands will be available after purchase.";
-const PREREQUISITES_BY_PROGRAM = {
-  openclaw: "Python, GitHub CLI (gh), and the OpenClaw CLI",
-  claude_code: "Python and Claude Code",
-  cursor: "Python and GitHub CLI (gh)",
-  goose: "Python and GitHub CLI (gh)",
-  antigravity_cli: "Python and GitHub CLI (gh)",
-  copilot: "Python and GitHub CLI (gh)",
-  hermes: "Python and the Hermes CLI",
-};
-const ACTIONS_BY_PROGRAM = {
-  openclaw: "Installs and enables the IronClaw OpenClaw plugin.",
+const INSTRUCTIONS_BY_PROGRAM = {
+  openclaw:
+    "Open a terminal with Python, GitHub CLI (gh), and the OpenClaw CLI available. Paste the first command, then the second command, in order.",
   claude_code:
-    "Copies the IronClaw skill files and writes protection to Claude Code's user settings.",
+    "Open a terminal with Python and Claude Code available. Paste the first command, then the second command, in order. Restart Claude Code if it was already open.",
   cursor:
-    "Installs the IronClaw skill with gh, then writes protection to Cursor's user config.",
+    "Open a terminal with Python and GitHub CLI (gh) available, then paste the first command and the second command in order.",
   goose:
-    "Installs the IronClaw skill with gh, then adds Goose's native pre-tool hook.",
+    "Open a terminal with Python and GitHub CLI (gh) available, then paste the first command and the second command in order.",
   antigravity_cli:
-    "Installs the IronClaw skill with gh, then writes protection to ~/.gemini/config/hooks.json.",
+    "Open a terminal with Python and GitHub CLI (gh) available, then paste the first command and the second command in order.",
   copilot:
-    "Installs the IronClaw skill with gh, then writes protection to Copilot's user config.",
+    "Open a terminal with Python and GitHub CLI (gh) available, then paste the first command and the second command in order.",
   hermes:
-    "Installs the IronClaw skill with Hermes, then enables the IronClaw Hermes plugin.",
+    "Open a terminal with Python and the Hermes CLI available. Paste the first command, then the second command, in order.",
 };
-const BOOTSTRAP_SUCCESS_TEXT = "[ironclaw-installer] shared skill installed";
-const CLAUDE_RESTART_TEXT =
-  "[ironclaw-installer] restart Claude Code if it was already open so it loads the skill";
 const hashSeed = (text) => {
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
@@ -253,7 +242,7 @@ const IntegrationCard = ({
   tint = "gold",
   testid,
 }) => {
-  const [copied, setCopied] = useState(false);
+  const [copiedLine, setCopiedLine] = useState("");
   const [pressed, setPressed] = useState(false);
   const [generating, setGenerating] = useState(false);
   const isRevoked = revoked === true;
@@ -371,6 +360,17 @@ const IntegrationCard = ({
 
   const normalizedCommand = isAvailable ? installCommand : "";
   const isLocked = !normalizedCommand;
+  const commandLines = normalizedCommand ? normalizedCommand.split("\n") : [];
+  const skillCommandLine = isRevoked
+    ? "Revoked"
+    : isLocked
+      ? PLACEHOLDER_TEXT
+      : commandLines[0] || "";
+  const bootstrapCommandLine = isRevoked
+    ? "Revoked"
+    : isLocked
+      ? PLACEHOLDER_TEXT
+      : commandLines[1] || "";
   const canGenerate = isAvailable && typeof onCreateClaim === "function";
 
   const { surface, accent } = TINT_STYLES[tint] || DEFAULT_TINT_STYLE;
@@ -444,7 +444,7 @@ const IntegrationCard = ({
 
       setInstallCommand(validatedClaim.command);
       setInstallClaimed(false);
-      setCopied(false);
+      setCopiedLine("");
       toast.success("One-time install command generated");
     } catch {
       toast.error(
@@ -455,20 +455,20 @@ const IntegrationCard = ({
     }
   };
 
-  const copy = async () => {
-    if (isLocked) {
+  const copyLine = async (line, lineName) => {
+    if (isLocked || !line) {
       return;
     }
 
     try {
       if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(normalizedCommand);
+        await navigator.clipboard.writeText(line);
       } else {
         throw new Error("clipboard unavailable");
       }
     } catch {
       const ta = document.createElement("textarea");
-      ta.value = normalizedCommand;
+      ta.value = line;
       ta.setAttribute("readonly", "");
       ta.style.position = "fixed";
       ta.style.top = "-9999px";
@@ -480,9 +480,9 @@ const IntegrationCard = ({
         document.body.removeChild(ta);
       }
     }
-    setCopied(true);
+    setCopiedLine(lineName);
     toast.success("Install command copied");
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopiedLine(""), 2000);
   };
 
   return (
@@ -595,27 +595,20 @@ const IntegrationCard = ({
 
       <div className="mb-2" data-testid={`${testid}-install-command`}>
         <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">
-          Install IronClaw security
+          Install IronClaw-Security
         </p>
-        <div className="flex items-stretch gap-1.5">
-          <code
-            className={`font-tech flex-1 overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-white/10 bg-black/50 px-2 py-1.5 text-[10px] leading-relaxed ${
-              isLocked ? "italic text-white/40" : "text-white/90"
-            }`}
-          >
-            {isRevoked
-              ? "Revoked"
-              : isLocked
-                ? PLACEHOLDER_TEXT
-                : normalizedCommand}
-          </code>
+
+        <div
+          className="relative mb-7"
+          data-testid={`${testid}-skill-command-block`}
+        >
           {isRevoked ? null : (
             <button
               type="button"
-              onClick={copy}
+              onClick={() => copyLine(skillCommandLine, "skill")}
               disabled={isLocked}
-              data-testid={`${testid}-copy`}
-              className="flex w-auto shrink-0 items-center justify-center rounded-md border px-2 transition disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid={`${testid}-copy-skill`}
+              className="absolute -top-7 right-0 flex h-6 items-center justify-center rounded-md border px-2 text-[9px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
               style={{
                 borderColor: `${accent}55`,
                 background: `${accent}14`,
@@ -623,50 +616,74 @@ const IntegrationCard = ({
               }}
               aria-label={
                 isLocked
-                  ? canGenerate
-                    ? `Generate a one-time ${canonicalTitle} install command before copying`
-                    : `${canonicalTitle} install command locked until purchase`
-                  : "Copy install command"
+                  ? "Copy Install Skill Command unavailable until purchase"
+                  : "Copy Install Skill Command"
               }
             >
-              {copied ? <Check size={12} /> : <Copy size={12} />}
-              <span className="ml-1">Copy install command</span>
+              {copiedLine === "skill" ? (
+                <Check size={10} />
+              ) : (
+                <Copy size={10} />
+              )}
+              <span className="ml-1">Copy Install Skill Command</span>
             </button>
           )}
+          <code
+            className={`font-tech block w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-white/10 bg-black/50 px-2 py-2 text-[10px] leading-relaxed ${
+              isLocked ? "italic text-white/40" : "text-white/90"
+            }`}
+          >
+            {skillCommandLine}
+          </code>
+        </div>
+
+        <div
+          className="relative"
+          data-testid={`${testid}-bootstrap-command-block`}
+        >
+          {isRevoked ? null : (
+            <button
+              type="button"
+              onClick={() => copyLine(bootstrapCommandLine, "bootstrap")}
+              disabled={isLocked}
+              data-testid={`${testid}-copy`}
+              className="absolute -top-7 right-0 flex h-6 items-center justify-center rounded-md border px-2 text-[9px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
+              style={{
+                borderColor: `${accent}55`,
+                background: `${accent}14`,
+                color: accent,
+              }}
+              aria-label={
+                isLocked
+                  ? "Copy Installer Bootsrap Command unavailable until purchase"
+                  : "Copy Installer Bootsrap Command"
+              }
+            >
+              {copiedLine === "bootstrap" ? (
+                <Check size={10} />
+              ) : (
+                <Copy size={10} />
+              )}
+              <span className="ml-1">Copy Installer Bootsrap Command</span>
+            </button>
+          )}
+          <code
+            className={`font-tech block w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-white/10 bg-black/50 px-2 py-2 text-[10px] leading-relaxed ${
+              isLocked ? "italic text-white/40" : "text-white/90"
+            }`}
+          >
+            {bootstrapCommandLine}
+          </code>
         </div>
       </div>
 
-      <div className="mb-2" data-testid={`${testid}-prerequisites`}>
-        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">
-          Before you paste
-        </p>
-        <p className="text-[10px] leading-relaxed text-white/70">
-          {PREREQUISITES_BY_PROGRAM[program]}
-        </p>
-      </div>
+      <p
+        className="mt-3 mb-2 text-[10px] leading-relaxed text-white/70"
+        data-testid={`${testid}-instructions`}
+      >
+        {INSTRUCTIONS_BY_PROGRAM[program]}
+      </p>
 
-      <div className="mb-2" data-testid={`${testid}-what-this-step-does`}>
-        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">
-          What this step does
-        </p>
-        <p className="text-[10px] leading-relaxed text-white/70">
-          {ACTIONS_BY_PROGRAM[program]}
-        </p>
-      </div>
-
-      <div className="mb-2" data-testid={`${testid}-after-it-finishes`}>
-        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50">
-          After it finishes
-        </p>
-        <p className="text-[10px] leading-relaxed text-white/70">
-          {BOOTSTRAP_SUCCESS_TEXT}
-        </p>
-        {program === "claude_code" ? (
-          <p className="mt-1 text-[10px] leading-relaxed text-white/70">
-            {CLAUDE_RESTART_TEXT}
-          </p>
-        ) : null}
-      </div>
       {installClaimed && normalizedCommand ? (
         <p
           className="text-[10px] leading-relaxed text-white/50"

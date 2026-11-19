@@ -39,7 +39,14 @@ const renderCard = (props = {}) =>
   );
 
 const getDisplayedCommand = () =>
-  screen.getByTestId("claude-code-card").querySelector("code")?.textContent;
+  screen
+    .getByTestId("claude-code-card-skill-command-block")
+    .querySelector("code")?.textContent;
+
+const getDisplayedBootstrapCommand = () =>
+  screen
+    .getByTestId("claude-code-card-bootstrap-command-block")
+    .querySelector("code")?.textContent;
 
 describe("IntegrationCard", () => {
   beforeEach(() => {
@@ -92,17 +99,17 @@ describe("IntegrationCard", () => {
 
     expect(
       screen.getByTestId("claude-code-card-install-command"),
-    ).toHaveTextContent("Install IronClaw security");
+    ).toHaveTextContent("Install IronClaw-Security");
     expect(
-      screen.getByTestId("claude-code-card-prerequisites"),
-    ).toHaveTextContent("Python and Claude Code");
+      screen.getByTestId("claude-code-card-skill-command-block"),
+    ).toBeInTheDocument();
     expect(
-      screen.getByTestId("claude-code-card-what-this-step-does"),
-    ).toHaveTextContent("Copies the IronClaw skill files");
+      screen.getByTestId("claude-code-card-bootstrap-command-block"),
+    ).toBeInTheDocument();
     expect(
-      screen.getByTestId("claude-code-card-after-it-finishes"),
+      screen.getByTestId("claude-code-card-instructions"),
     ).toHaveTextContent(
-      "[ironclaw-installer] restart Claude Code if it was already open so it loads the skill",
+      "Paste the first command, then the second command, in order.",
     );
   });
 
@@ -174,12 +181,19 @@ describe("IntegrationCard", () => {
     await user.click(screen.getByTestId("claude-code-card-generate"));
 
     await waitFor(() => {
-      expect(getDisplayedCommand()).toBe(claim.command);
+      expect(getDisplayedCommand()).toBe(INSTALLER_SOURCE_COMMAND);
+      expect(getDisplayedBootstrapCommand()).toBe(
+        `python -m ironclaw_installer bootstrap --program claude_code --claim-token ${CLAIM_TOKEN}`,
+      );
     });
     expect(onCreateClaim).toHaveBeenCalledWith("claude-code");
     expect(screen.getByTestId("claude-code-card-copy")).toBeEnabled();
     expect(screen.getByTestId("claude-code-card-copy")).toHaveTextContent(
-      "Copy install command",
+      "Copy Installer Bootsrap Command",
+    );
+    expect(screen.getByTestId("claude-code-card-copy-skill")).toBeEnabled();
+    expect(screen.getByTestId("claude-code-card-copy-skill")).toHaveTextContent(
+      "Copy Install Skill Command",
     );
     expect(
       screen.getByTestId("claude-code-card-explanation"),
@@ -244,8 +258,17 @@ describe("IntegrationCard", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByTestId("hermes-card").querySelector("code")?.textContent,
-      ).toBe(hermesCommand);
+        screen
+          .getByTestId("hermes-card-skill-command-block")
+          .querySelector("code")?.textContent,
+      ).toBe(INSTALLER_SOURCE_COMMAND);
+      expect(
+        screen
+          .getByTestId("hermes-card-bootstrap-command-block")
+          .querySelector("code")?.textContent,
+      ).toBe(
+        `python -m ironclaw_installer bootstrap --program hermes --claim-token ${hermesToken}`,
+      );
     });
   });
 
@@ -323,14 +346,15 @@ describe("IntegrationCard", () => {
 
     await user.click(screen.getByTestId("claude-code-card-generate"));
     await waitFor(() => {
-      expect(getDisplayedCommand()).toBe(claim.command);
+      expect(getDisplayedCommand()).toBe(INSTALLER_SOURCE_COMMAND);
+      expect(getDisplayedBootstrapCommand()).toBe(claim.command.split("\n")[1]);
     });
     const copyButton = screen.getByTestId("claude-code-card-copy");
     expect(copyButton).toBeEnabled();
     await user.click(copyButton);
 
     await waitFor(() => {
-      expect(mockWriteText).toHaveBeenCalledWith(claim.command);
+      expect(mockWriteText).toHaveBeenCalledWith(claim.command.split("\n")[1]);
       expect(mockToastSuccess).toHaveBeenCalledWith("Install command copied");
     });
   });
@@ -346,7 +370,8 @@ describe("IntegrationCard", () => {
     await user.click(screen.getByTestId("claude-code-card-generate"));
 
     await waitFor(() => {
-      expect(getDisplayedCommand()).toBe(claim.command);
+      expect(getDisplayedCommand()).toBe(INSTALLER_SOURCE_COMMAND);
+      expect(getDisplayedBootstrapCommand()).toBe(claim.command.split("\n")[1]);
     });
     expect(screen.getByTestId("claude-code-card-copy")).toBeEnabled();
   });
@@ -356,7 +381,8 @@ describe("IntegrationCard", () => {
 
     renderCard({ savedCommand, savedCommandClaimed: true });
 
-    expect(getDisplayedCommand()).toBe(savedCommand);
+    expect(getDisplayedCommand()).toBe(savedCommand.split("\n")[0]);
+    expect(getDisplayedBootstrapCommand()).toBe(savedCommand.split("\n")[1]);
     expect(screen.getByTestId("claude-code-card-claimed-note")).toBeTruthy();
   });
 
