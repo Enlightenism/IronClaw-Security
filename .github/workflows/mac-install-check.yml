@@ -43,3 +43,21 @@ jobs:
           cat out.txt
           test "$code" -ne 0
           grep -q "Install claim redemption failed for claude_code (HTTP" out.txt
+
+  default-python:
+    runs-on: macos-latest
+    steps:
+      - name: Show which Python commands exist on the default runner
+        run: |
+          echo "python: $(command -v python || echo MISSING)"
+          echo "python3: $(command -v python3 || echo MISSING)"
+          python --version || echo "python --version failed"
+          python3 --version || echo "python3 --version failed"
+
+      - name: Run the exact pasted pip command (no setup-python)
+        working-directory: /tmp
+        run: python -m pip install --upgrade "git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3"
+
+      - name: Run the exact pasted installer help command (no setup-python)
+        working-directory: /tmp
+        run: python -m ironclaw_installer bootstrap --help
