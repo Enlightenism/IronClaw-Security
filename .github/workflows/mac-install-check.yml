@@ -329,6 +329,12 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       PKG: "git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3"
     steps:
+      - name: Use Node.js 24 for OpenClaw (documented minimum is 24.16.0)
+        if: matrix.runtime == 'openclaw'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
       - name: Create a virtual environment and install the pinned release (Ubuntu user path)
         working-directory: /tmp
         run: |
@@ -351,8 +357,12 @@ jobs:
             cursor) echo "Cursor has no CLI install step" ;;
           esac
 
-      - name: Put the user-local CLI folder on PATH
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Put the user-local and npm global CLI folders on PATH
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          if command -v npm >/dev/null 2>&1; then
+            echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          fi
 
       - name: Check CLI, gh version, skill install, and live claim server
         working-directory: /tmp
