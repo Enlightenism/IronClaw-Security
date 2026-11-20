@@ -129,7 +129,7 @@ jobs:
               & .\download_cli.ps1
             }
             'openclaw' { & ([scriptblock]::Create((iwr -useb https://openclaw.ai/install.ps1))) -NoOnboard }
-            'hermes' { iex (irm https://hermes-agent.nousresearch.com/install.ps1) }
+            'hermes' { & ([scriptblock]::Create((irm https://hermes-agent.nousresearch.com/install.ps1))) -NonInteractive -SkipSetup }
             'cursor' { Write-Host 'Cursor has no CLI install step' }
           }
 
@@ -146,55 +146,48 @@ jobs:
             'hermes' { 'hermes' }
             default { '' }
           }
+
+          if ($env:RUNTIME -eq 'hermes') {
+            $hermesRoot = Join-Path $env:LOCALAPPDATA 'hermes'
+            Write-Host "Hermes diagnostic: $hermesRoot exists = $(Test-Path $hermesRoot)"
+            if (Test-Path $hermesRoot) {
+              Get-ChildItem -Path $hermesRoot -Recurse -Depth 4 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $($_.FullName)" }
+            }
+          }
+
+          function Add-ToPath([string]$dir) {
+            $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+            Write-Host "Added $dir to PATH for $binary"
+          }
+
           if ($binary -and -not (Get-Command $binary -ErrorAction SilentlyContinue)) {
-            $roots = @($env:LOCALAPPDATA, $env:APPDATA, $env:USERPROFILE, 'C:\npm\prefix') | Where-Object { $_ -and (Test-Path $_) }
-            $hit = Get-ChildItem -Path $roots -Recurse -Depth 6 -File -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -in @("$binary.exe", "$binary.cmd") } | Select-Object -First 1
-            if ($hit) {
-              $hit.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-              Write-Host "Added $($hit.DirectoryName) to PATH for $binary"
-            } else {
-              Write-Host "Could not locate $binary under the standard install folders"
-              $fallbackHit = $null
-              if ($env:RUNTIME -eq 'hermes') {
-                $fallbackRoots = @()
-                if ($env:LOCALAPPDATA) {
-                  $fallbackRoots += Join-Path $env:LOCALAPPDATA 'hermes'
-                }
-                foreach ($fallbackRoot in $fallbackRoots) {
-                  Write-Host "Searched directory: $fallbackRoot"
-                  if (Test-Path $fallbackRoot) {
-                    $fallbackMatches = Get-ChildItem -LiteralPath $fallbackRoot -Recurse -File -ErrorAction SilentlyContinue |
-                      Where-Object { $_.Name -in @('hermes.exe', 'hermes.cmd') }
-                    foreach ($fallbackMatch in $fallbackMatches) {
-                      Write-Host "Match found: $($fallbackMatch.FullName)"
-                    }
-                    if (-not $fallbackHit) {
-                      $fallbackHit = $fallbackMatches | Select-Object -First 1
-                    }
-                  } else {
-                    Write-Host "Directory not found: $fallbackRoot"
-                  }
-                }
-              } elseif ($env:RUNTIME -eq 'antigravity_cli') {
-                $fallbackRoots = @($env:LOCALAPPDATA, $env:USERPROFILE) | Where-Object { $_ -and (Test-Path $_) }
-                foreach ($fallbackRoot in $fallbackRoots) {
-                  Write-Host "Searched directory: $fallbackRoot"
-                  $fallbackMatches = Get-ChildItem -LiteralPath $fallbackRoot -Recurse -File -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Name -in @('agy.exe', 'agy.cmd') }
-                  foreach ($fallbackMatch in $fallbackMatches) {
-                    Write-Host "Match found: $($fallbackMatch.FullName)"
-                  }
-                  if (-not $fallbackHit) {
-                    $fallbackHit = $fallbackMatches | Select-Object -First 1
-                  }
+            $found = $false
+
+            if ($env:RUNTIME -eq 'hermes') {
+              $candidates = @(
+                (Join-Path $env:LOCALAPPDATA 'hermes\hermes-agent\venv\Scripts'),
+                (Join-Path $env:LOCALAPPDATA 'hermes\bin')
+              )
+              foreach ($dir in $candidates) {
+                Write-Host "Checking $dir"
+                if (Test-Path (Join-Path $dir "$binary.exe")) {
+                  Add-ToPath $dir
+                  $found = $true
+                  break
                 }
               }
-              if ($fallbackHit) {
-                $fallbackHit.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-                Write-Host "Added $($fallbackHit.DirectoryName) to PATH for $binary"
+            }
+
+            if (-not $found) {
+              $roots = @($env:LOCALAPPDATA, $env:APPDATA, $env:USERPROFILE, 'C:\npm\prefix') | Where-Object { $_ -and (Test-Path $_) }
+              foreach ($root in $roots) { Write-Host "Searching $root (depth 6)" }
+              $hit = Get-ChildItem -Path $roots -Recurse -Depth 6 -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -in @("$binary.exe", "$binary.cmd") } | Select-Object -First 1
+              if ($hit) {
+                Write-Host "Match: $($hit.FullName)"
+                Add-ToPath $hit.DirectoryName
               } else {
-                Write-Host "Could not locate $binary under the fallback search roots"
+                Write-Host "Could not locate $binary under the search roots"
               }
             }
           }
