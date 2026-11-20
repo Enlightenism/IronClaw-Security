@@ -38,10 +38,15 @@ jobs:
         working-directory: /tmp
         run: |
           set +e
-          python3 -m ironclaw_installer bootstrap --program claude_code --claim-token ic_claim_FAKEFAKEFAKEFAKEFAKEFAKE00 > out.txt 2>&1
-          code=$?
-          cat out.txt
-          test "$code" -ne 0
+          for attempt in 1 2 3; do
+            python3 -m ironclaw_installer bootstrap --program claude_code --claim-token ic_claim_FAKEFAKEFAKEFAKEFAKEFAKE00 > out.txt 2>&1
+            cat out.txt
+            if grep -q "Install claim redemption failed for claude_code (HTTP" out.txt; then
+              break
+            fi
+            echo "Attempt $attempt did not reach the claim server; retrying in 30 seconds"
+            sleep 30
+          done
           grep -q "Install claim redemption failed for claude_code (HTTP" out.txt
 
   default-python:
