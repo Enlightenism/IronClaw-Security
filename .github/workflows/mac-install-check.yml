@@ -67,6 +67,38 @@ jobs:
         working-directory: /tmp
         run: python -m ironclaw_installer bootstrap --help
 
+  ubuntu:
+    runs-on: ubuntu-latest
+    env:
+      PKG: "git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pasted pip command with system python3 (Ubuntu PEP 668 test)
+        id: pip_system
+        continue-on-error: true
+        working-directory: /tmp
+        run: python3 -m pip install --upgrade "$PKG"
+
+      - name: Virtual environment install and installer help (what Ubuntu users must run)
+        id: venv
+        working-directory: /tmp
+        run: |
+          python3 -m venv "$HOME/ic-venv"
+          "$HOME/ic-venv/bin/python" -m pip install --upgrade "$PKG"
+          "$HOME/ic-venv/bin/python" -m ironclaw_installer bootstrap --help
+
+      - name: Import check in the virtual environment
+        working-directory: /tmp
+        run: |
+          "$HOME/ic-venv/bin/python" -c "import ironclaw_installer, ironclaw_sdk, app.core.install_key_formats; print('IMPORT OK')"
+
+      - name: Ubuntu summary
+        if: always()
+        run: |
+          echo "pip with system python3 (PEP 668 test): ${{ steps.pip_system.outcome }}"
+          echo "virtual environment install and help: ${{ steps.venv.outcome }}"
+
   pytest-install-paths:
     strategy:
       fail-fast: false
@@ -285,6 +317,140 @@ jobs:
                   fh.write(block)
           print(block)
           sys.exit(1 if failures else 0)
+
+  ubuntu-install-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [claude_code, copilot, cursor, antigravity_cli, goose, openclaw, hermes]
+    runs-on: ubuntu-latest
+    env:
+      RUNTIME: ${{ matrix.runtime }}
+      GH_TOKEN: ${{ github.token }}
+      PKG: "git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3"
+    steps:
+      - name: Create a virtual environment and install the pinned release (Ubuntu user path)
+        working-directory: /tmp
+        run: |
+          python3 -m venv "$HOME/ic-venv"
+          "$HOME/ic-venv/bin/python" -m pip install --upgrade "$PKG"
+          "$HOME/ic-venv/bin/python" -m ironclaw_installer bootstrap --help
+          echo "IC_PY=$HOME/ic-venv/bin/python" >> "$GITHUB_ENV"
+
+      - name: Install platform CLI (Ubuntu, same command the card gives users)
+        id: cli
+        continue-on-error: true
+        run: |
+          case "$RUNTIME" in
+            claude_code) curl -fsSL https://claude.ai/install.sh | bash ;;
+            copilot) curl -fsSL https://gh.io/copilot-install | bash ;;
+            antigravity_cli) curl -fsSL https://antigravity.google/cli/install.sh | bash ;;
+            goose) curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash ;;
+            openclaw) curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard ;;
+            hermes) curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash ;;
+            cursor) echo "Cursor has no CLI install step" ;;
+          esac
+
+      - name: Put the user-local CLI folder on PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Check CLI, gh version, skill install, and live claim server
+        working-directory: /tmp
+        env:
+          CLI_OUTCOME: ${{ steps.cli.outcome }}
+        run: |
+          set +e
+          FAILED=0
+          RESULTS="$RUNNER_TEMP/results.md"
+          : > "$RESULTS"
+
+          add_row() {
+            local name="$1" ok="$2" detail="$3" res="pass"
+            if [ "$ok" != "1" ]; then res="fail"; FAILED=1; fi
+            detail=$(printf '%s' "$detail" | tr '\n' ' ' | tr '|' '/' | cut -c1-300)
+            printf '| %s | %s | %s |\n' "$name" "$res" "$detail" >> "$RESULTS"
+          }
+
+          if [ "$CLI_OUTCOME" = "success" ]; then
+            add_row "Platform CLI install step succeeded" 1 "outcome: $CLI_OUTCOME"
+          else
+            add_row "Platform CLI install step succeeded" 0 "outcome: $CLI_OUTCOME"
+          fi
+
+          GH_VER=$(gh --version 2>/dev/null | sed -n 's/^gh version \([0-9.]*\).*/\1/p' | head -n1)
+          if [ -n "$GH_VER" ] && [ "$(printf '%s\n2.90.0\n' "$GH_VER" | sort -V | head -n1)" = "2.90.0" ]; then
+            add_row "gh is 2.90.0 or later" 1 "$GH_VER"
+          else
+            add_row "gh is 2.90.0 or later" 0 "${GH_VER:-not found}"
+          fi
+
+          case "$RUNTIME" in
+            claude_code) BIN=claude ;;
+            copilot) BIN=copilot ;;
+            antigravity_cli) BIN=agy ;;
+            goose) BIN=goose ;;
+            openclaw) BIN=openclaw ;;
+            hermes) BIN=hermes ;;
+            *) BIN="" ;;
+          esac
+          if [ -n "$BIN" ]; then
+            FOUND=$(command -v "$BIN")
+            if [ -n "$FOUND" ]; then
+              add_row "Platform CLI '$BIN' is on PATH" 1 "$FOUND"
+              VER=$("$BIN" --version 2>&1); RC=$?
+              if [ $RC -eq 0 ]; then
+                add_row "Platform CLI '$BIN' runs --version" 1 "$VER"
+              else
+                add_row "Platform CLI '$BIN' runs --version" 0 "exit $RC: $VER"
+              fi
+            else
+              add_row "Platform CLI '$BIN' is on PATH" 0 "not found"
+            fi
+          fi
+
+          if [ "$RUNTIME" = "claude_code" ]; then
+            OUT=$("$IC_PY" -c "from ironclaw_installer import _install_claude_code_skill as f; print(f())" 2>&1); RC=$?
+            if [ $RC -eq 0 ]; then
+              add_row "Claude skill file written" 1 "$OUT"
+            else
+              add_row "Claude skill file written" 0 "exit $RC: $OUT"
+            fi
+          else
+            CMD=$("$IC_PY" -c "from app.core.install_key_formats import InstallKeyFormatRegistry as R; print(R.get_spec('$RUNTIME').generic_command)" 2>&1)
+            echo "--- $CMD"
+            OUT=$(bash -c "$CMD" 2>&1); RC=$?
+            echo "$OUT" | tail -c 3000
+            if [ $RC -eq 0 ]; then
+              add_row "Skill install command" 1 "exit 0: $OUT"
+            else
+              add_row "Skill install command" 0 "exit $RC: $OUT"
+            fi
+          fi
+
+          BOOT=""
+          for attempt in 1 2 3; do
+            BOOT=$("$IC_PY" -m ironclaw_installer bootstrap --program "$RUNTIME" --claim-token ic_claim_FAKEFAKEFAKEFAKEFAKEFAKE00 2>&1)
+            echo "$BOOT"
+            if ! printf '%s' "$BOOT" | grep -q "Unable to reach"; then
+              break
+            fi
+            sleep 30
+          done
+          if printf '%s' "$BOOT" | grep -q "HTTP 401"; then
+            add_row "Live claim server reached (fake token rejected)" 1 "$BOOT"
+          else
+            add_row "Live claim server reached (fake token rejected)" 0 "$BOOT"
+          fi
+
+          {
+            echo "### Ubuntu / $RUNTIME"
+            echo
+            echo "| Check | Result | Detail |"
+            echo "|---|---|---|"
+            cat "$RESULTS"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RESULTS"
+          exit $FAILED
 
   frontend-tests:
     runs-on: ubuntu-latest
