@@ -416,7 +416,7 @@ def install_integration(
     except InvalidInstallKeyClaimError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Install claim is invalid, expired, or already redeemed.",
+            detail="Install claim is invalid, expired, or belongs to a replaced command.",
         ) from exc
     except InstallKeyHandoffError as exc:
         raise HTTPException(

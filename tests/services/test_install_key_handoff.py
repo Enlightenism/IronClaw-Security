@@ -61,7 +61,7 @@ def _make_record(*, active: bool = True) -> InstallKeyRecord:
     )
 
 
-def test_secret_is_encrypted_and_claim_can_only_be_redeemed_once() -> None:
+def test_secret_is_encrypted_and_claim_can_be_redeemed_repeatedly() -> None:
     record = _make_record()
     service = _build_service(record=record)
 
@@ -86,8 +86,7 @@ def test_secret_is_encrypted_and_claim_can_only_be_redeemed_once() -> None:
     redemption = service.redeem_claim(claim.claim_token)
     assert redemption.install_key == _RAW_KEY
     assert _RAW_KEY not in repr(redemption)
-    with pytest.raises(InvalidInstallKeyClaimError):
-        service.redeem_claim(claim.claim_token)
+    assert service.redeem_claim(claim.claim_token).install_key == _RAW_KEY
 
 
 def test_new_record_and_secret_are_persisted_atomically() -> None:
@@ -192,6 +191,30 @@ def test_claim_has_no_expiry_and_stays_redeemable_until_used() -> None:
 
     assert not hasattr(install_key_handoff._MEMORY_SECRETS[record.key_id], "claim_expires_at")
     assert service.redeem_claim(claim.claim_token).install_key == _RAW_KEY
+
+
+def test_revoked_key_claim_cannot_be_redeemed() -> None:
+    record = _make_record()
+    service = _build_service(record=record)
+    service.store_secret(
+        key_id=record.key_id,
+        owner_key=record.owner_key,
+        program=record.program,
+        install_key=_RAW_KEY,
+    )
+    claim = service.issue_claim(
+        key_id=record.key_id,
+        owner_key=record.owner_key,
+        program=record.program,
+    )
+    record.active = False
+    record.entitlements_status = "revoked"
+
+    with pytest.raises(
+        InvalidInstallKeyClaimError,
+        match="invalid, expired, or belongs to a replaced command",
+    ):
+        service.redeem_claim(claim.claim_token)
 
 
 def test_secret_cannot_be_stored_for_an_unsupported_runtime() -> None:
@@ -307,7 +330,7 @@ def test_saved_command_is_encrypted_and_survives_until_redeemed() -> None:
     assert saved[_PROGRAM].claimed is False
 
     service.redeem_claim(claim.claim_token)
-    assert service.get_saved_commands(owner_key=record.owner_key)[_PROGRAM].claimed is True
+    assert service.get_saved_commands(owner_key=record.owner_key)[_PROGRAM].claimed is False
 
 
 def test_saved_commands_are_scoped_to_the_owner() -> None:

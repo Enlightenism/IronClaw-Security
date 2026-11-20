@@ -905,7 +905,7 @@ def save_install_key(
     config_dir: Path | None = None,
     base_url: str = DEFAULT_BOOTSTRAP_BASE_URL,
 ) -> BootstrapResult:
-    """Store an install key that was already redeemed from a claim. Never redeems a claim."""
+    """Store an install key that was already stored. Never redeems a claim."""
     runtime_program = _canonical_program_name(program)
     if runtime_program is None or runtime_program not in _CANONICAL_RUNTIME_TARGETS:
         raise IronClawInstallerError(f"Unsupported runtime target for install-key storage: {program!r}")

@@ -122,7 +122,7 @@ class InstallKeyHandoffService:
     def _claim_hash(claim_token: str) -> str:
         candidate = str(claim_token).strip()
         if not candidate.startswith("ic_claim_") or len(candidate) > 256:
-            raise InvalidInstallKeyClaimError("Install claim is invalid, expired, or already redeemed.")
+            raise InvalidInstallKeyClaimError("Install claim is invalid, expired, or belongs to a replaced command.")
         return hashlib.sha256(candidate.encode("utf-8")).hexdigest()
 
     @staticmethod
@@ -283,7 +283,8 @@ class InstallKeyHandoffService:
                             "program": secret.program,
                             "key_version": _KEY_VERSION,
                             "encrypted_command_base64": base64.b64encode(secret.encrypted_command).decode("ascii"),
-                            "claimed": secret.claimed,
+                            # Claims are reusable; saved commands are never marked claimed.
+                            "claimed": False,
                         }
                     )
         else:
@@ -326,7 +327,8 @@ class InstallKeyHandoffService:
                 key_id=key_id,
                 program=program,
                 command=command,
-                claimed=bool(row["claimed"]),
+                # Claims are reusable, so saved commands never report claimed.
+                claimed=False,
             )
         return saved
 
@@ -390,10 +392,8 @@ class InstallKeyHandoffService:
                     None,
                 )
                 if match is None:
-                    raise InvalidInstallKeyClaimError("Install claim is invalid or already redeemed.")
+                    raise InvalidInstallKeyClaimError("Install claim is invalid, expired, or belongs to a replaced command.")
                 key_id, secret = match
-                secret.claim_token_hash = None
-                secret.claimed = True
                 row = {
                     "key_id": key_id,
                     "owner_key": secret.owner_key,
@@ -409,7 +409,7 @@ class InstallKeyHandoffService:
             )
             row = self._rpc_row(result)
             if row is None:
-                raise InvalidInstallKeyClaimError("Install claim is invalid, expired, or already redeemed.")
+                raise InvalidInstallKeyClaimError("Install claim is invalid, expired, or belongs to a replaced command.")
 
         try:
             key_id, owner_key, program = self._normalize_identity(
@@ -430,8 +430,8 @@ class InstallKeyHandoffService:
             raise InstallKeyHandoffError("Decrypted install key does not match the canonical runtime format.")
 
         record = self._install_key_registry.get_key_by_id(key_id)
-        if record is None or record.owner_key != owner_key or record.program != program or not record.active or record.payment_status != "paid" or record.entitlements_status != "active" or not record.issued_after_payment:
-            raise InvalidInstallKeyClaimError("Install claim is invalid, expired, or already redeemed.")
+        if record is None or record.owner_key != owner_key or record.program != program or not record.active or record.revoked_at is not None or record.payment_status != "paid" or record.entitlements_status != "active" or not record.issued_after_payment:
+            raise InvalidInstallKeyClaimError("Install claim is invalid, expired, or belongs to a replaced command.")
 
         return InstallKeyRedemption(
             key_id=key_id,

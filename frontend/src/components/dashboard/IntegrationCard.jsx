@@ -19,7 +19,7 @@ const RUNTIME_PROGRAM_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const COMMAND_MAX_LENGTH = 1024;
 const PLACEHOLDER_TEXT = "Generate a one-time install command after purchase";
 const VERIFIED_CARD_COPY =
-  "Paste both lines into your terminal, in order. The first installs the IronClaw installer. The second installs the IronClaw security skill and turns on protection for this platform. Your one-time key is used once here, and the install key it delivers stays linked to your account, so your balance, blocked threats, and daily usage keep updating on this dashboard.";
+  "Generating a new command replaces this key and stops older commands from working.";
 const LOCKED_CARD_COPY =
   "Your install commands will be available after purchase.";
 const INSTRUCTIONS_BY_PROGRAM = {
@@ -689,8 +689,8 @@ const IntegrationCard = ({
           className="text-[10px] leading-relaxed text-white/50"
           data-testid={`${testid}-claimed-note`}
         >
-          This key was already redeemed. Generate a new command to install on
-          another machine.
+          This command was already used. It still works on any machine. Generate
+          a new command to replace it and stop the old one.
         </p>
       ) : null}
       {isRevoked ? null : (

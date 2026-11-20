@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from app.core.auth import get_auth_context
 from app.core.billing import resolve_authenticated_billing_owner
 from app.core.install_key_formats import RUNTIME_INSTALL_KEY_PROGRAMS, InstallKeyFormatRegistry
-from app.core.install_keys import get_install_key_registry
+from app.core.install_keys import InstallKeyAlreadyExistsError, get_install_key_registry
 from app.services.install_key_handoff import (
     InstallKeyHandoffError,
     InstallKeySecretUnavailableError,
@@ -348,21 +348,50 @@ def create_integration_install_claim(
 
     try:
         handoff_service = get_install_key_handoff_service()
+        registry = get_install_key_registry()
+        new_record = registry.generate_for_paid_customer(
+            owner_key=owner_key,
+            subscription_id=record.subscription_id,
+            program=spec.program,
+            org_id=record.org_id,
+            customer_id=record.customer_id,
+            purchase_reference=record.purchase_reference,
+            checkout_session_id=record.checkout_session_id,
+            label=record.label,
+            metadata=dict(record.metadata or {}),
+            rotate_existing=True,
+            secure_record_persistor=handoff_service.persist_new_record,
+        )
         claim = handoff_service.issue_claim(
-            key_id=record.key_id,
+            key_id=new_record.key_id,
             owner_key=owner_key,
             program=spec.program,
         )
         command = spec.format_command(claim.claim_token)
         handoff_service.save_command(
-            key_id=record.key_id,
+            key_id=new_record.key_id,
             owner_key=owner_key,
             program=spec.program,
             command=command,
         )
+    except InstallKeyAlreadyExistsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A replacement install command could not be created. Try again.",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The install key could not be replaced for this runtime.",
+        ) from exc
     except InstallKeySecretUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except InstallKeyHandoffError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Secure install handoff is temporarily unavailable.",
+        ) from exc
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Secure install handoff is temporarily unavailable.",
@@ -373,7 +402,7 @@ def create_integration_install_claim(
     return {
         "integration_id": spec.canonical_slug,
         "program": spec.program,
-        "key_id": record.key_id,
+        "key_id": new_record.key_id,
         "claim_token": claim.claim_token,
         "command": command,
     }
@@ -391,7 +420,7 @@ def redeem_install_key_claim(
     except InvalidInstallKeyClaimError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Install claim is invalid, expired, or already redeemed.",
+            detail="Install claim is invalid, expired, or belongs to a replaced command.",
         ) from exc
     except InstallKeyHandoffError as exc:
         raise HTTPException(

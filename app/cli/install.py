@@ -139,11 +139,11 @@ def _validate_paid_cli_install_claim(
             {
                 "install_key_required": True,
                 "install_key_valid": False,
-                "reason": "install claim is invalid, expired, or already redeemed",
+                "reason": "install claim is invalid, expired, or belongs to a replaced command",
                 "owner_key": None,
                 "key_classification": "invalid_install_claim",
             },
-            "install claim is invalid, expired, or already redeemed",
+            "install claim is invalid, expired, or belongs to a replaced command",
             None,
         )
 

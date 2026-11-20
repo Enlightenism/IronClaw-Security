@@ -1013,6 +1013,7 @@ class InstallKeyRegistry:
         label: str = "",
         metadata: dict[str, Any] | None = None,
         secure_record_persistor: Callable[[InstallKeyRecord], None] | None = None,
+        rotate_existing: bool = False,
     ) -> InstallKeyRecord:
         """
         Authoritative install-key issuance path.
@@ -1041,20 +1042,24 @@ class InstallKeyRegistry:
             subscription_id=subscription_id,
         )
 
+        records_to_replace: list[InstallKeyRecord] = []
         with self._lock:
             self._ensure_loaded()
 
-            for rec in self._records_by_id.values():
-                if rec.owner_key == normalized_owner and rec.program == normalized_program and _is_current_paid_entitlement(rec):
-                    raise InstallKeyAlreadyExistsError(normalized_owner, normalized_program)
+            if rotate_existing:
+                records_to_replace = [rec for rec in self._records_by_id.values() if rec.owner_key == normalized_owner and rec.program == normalized_program and _is_current_paid_entitlement(rec)]
+            else:
+                for rec in self._records_by_id.values():
+                    if rec.owner_key == normalized_owner and rec.program == normalized_program and _is_current_paid_entitlement(rec):
+                        raise InstallKeyAlreadyExistsError(normalized_owner, normalized_program)
 
-            if self._has_replay_issue_for_purchase(
-                owner_key=normalized_owner,
-                program=normalized_program,
-                purchase_reference=purchase_reference,
-                checkout_session_id=checkout_session_id,
-            ):
-                raise InstallKeyAlreadyExistsError(normalized_owner, normalized_program)
+                if self._has_replay_issue_for_purchase(
+                    owner_key=normalized_owner,
+                    program=normalized_program,
+                    purchase_reference=purchase_reference,
+                    checkout_session_id=checkout_session_id,
+                ):
+                    raise InstallKeyAlreadyExistsError(normalized_owner, normalized_program)
 
             raw_key = _generate_raw_key(normalized_program)
             raw_key_hash = _hash_key(raw_key)
@@ -1162,6 +1167,8 @@ class InstallKeyRegistry:
                         purchase_reference=purchase_reference,
                         checkout_session_id=checkout_session_id,
                     )
+                    if rotate_existing:
+                        issue_event_id = f"{issue_event_id}:{key_id}"
                     _write_event_ledger_record(
                         event_id=issue_event_id,
                         event_type="install_key_issued",
@@ -1184,14 +1191,15 @@ class InstallKeyRegistry:
             self._last_write_at = _utc_now()
             self._last_sync_at = self._last_write_at
 
-            active_duplicate = next(
-                (existing for existing in self._records_by_id.values() if existing.key_id != key_id and existing.owner_key == normalized_owner and existing.program == normalized_program and _is_current_paid_entitlement(existing)),
-                None,
-            )
-            if active_duplicate is not None:
-                self._records_by_id.pop(key_id, None)
-                self._key_id_by_hash.pop(raw_key_hash, None)
-                raise InstallKeyAlreadyExistsError(normalized_owner, normalized_program)
+            if not rotate_existing:
+                active_duplicate = next(
+                    (existing for existing in self._records_by_id.values() if existing.key_id != key_id and existing.owner_key == normalized_owner and existing.program == normalized_program and _is_current_paid_entitlement(existing)),
+                    None,
+                )
+                if active_duplicate is not None:
+                    self._records_by_id.pop(key_id, None)
+                    self._key_id_by_hash.pop(raw_key_hash, None)
+                    raise InstallKeyAlreadyExistsError(normalized_owner, normalized_program)
 
             _logger.info(
                 "install_key_generated",
@@ -1205,7 +1213,27 @@ class InstallKeyRegistry:
                     "purchase_reference": purchase_reference,
                 },
             )
-            return record
+
+        if rotate_existing:
+            for existing_record in records_to_replace:
+                try:
+                    self.revoke_key(
+                        existing_record.key_id,
+                        reason="superseded_by_new_command",
+                    )
+                except Exception:
+                    _logger.error(
+                        "install_key_rotation_revoke_failed",
+                        extra={
+                            "key_id": existing_record.key_id,
+                            "owner_key": normalized_owner,
+                            "program": normalized_program,
+                        },
+                        exc_info=True,
+                    )
+                    raise
+
+        return record
 
     # ------------------------------------------------------------------
     # Backward-compatible wrapper
