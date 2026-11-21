@@ -188,7 +188,7 @@ class InstallKeyHandoffService:
         if not self._rpc_boolean(stored, "secret storage"):
             raise InstallKeySecretUnavailableError("Install-key secret could not be stored for secure delivery.")
 
-    def persist_new_record(self, record: InstallKeyRecord) -> None:
+    def _persist_record(self, record: InstallKeyRecord, rpc_name: str) -> None:
         key_id, owner_key, program = self._normalize_identity(
             record.key_id,
             record.owner_key,
@@ -210,7 +210,7 @@ class InstallKeyHandoffService:
         encrypted_key = self._encrypt_key(program, record.raw_key)
         try:
             persisted = store.rpc(
-                "issue_install_key_record_with_secret",
+                rpc_name,
                 {
                     "p_install_key_record": record.to_db_row(),
                     "p_encrypted_key_base64": base64.b64encode(encrypted_key).decode("ascii"),
@@ -230,6 +230,12 @@ class InstallKeyHandoffService:
             raise
         if not self._rpc_boolean(persisted, "record and secret persistence"):
             raise InstallKeySecretUnavailableError("Install-key record and secret could not be stored atomically for secure delivery.")
+
+    def persist_new_record(self, record: InstallKeyRecord) -> None:
+        self._persist_record(record, "issue_install_key_record_with_secret")
+
+    def persist_rotated_record(self, record: InstallKeyRecord) -> None:
+        self._persist_record(record, "rotate_install_key_record_with_secret")
 
     def save_command(self, *, key_id: str, owner_key: str, program: str, command: str) -> None:
         normalized_key_id, normalized_owner, normalized_program = self._normalize_identity(

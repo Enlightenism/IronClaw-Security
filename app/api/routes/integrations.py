@@ -360,7 +360,7 @@ def create_integration_install_claim(
             label=record.label,
             metadata=dict(record.metadata or {}),
             rotate_existing=True,
-            secure_record_persistor=handoff_service.persist_new_record,
+            secure_record_persistor=handoff_service.persist_rotated_record,
         )
         claim = handoff_service.issue_claim(
             key_id=new_record.key_id,

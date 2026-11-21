@@ -1221,6 +1221,17 @@ class InstallKeyRegistry:
                         existing_record.key_id,
                         reason="superseded_by_new_command",
                     )
+                    in_memory_record = self._records_by_id.get(existing_record.key_id)
+                    if in_memory_record is not None and in_memory_record.active:
+                        self.revoke_key(
+                            existing_record.key_id,
+                            reason="superseded_by_new_command",
+                        )
+                    in_memory_record = self._records_by_id.get(existing_record.key_id)
+                    if in_memory_record is None or in_memory_record.active:
+                        raise RuntimeError(
+                            f"rotation did not deactivate key {existing_record.key_id}",
+                        )
                 except Exception:
                     _logger.error(
                         "install_key_rotation_revoke_failed",
