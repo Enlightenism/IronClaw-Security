@@ -1,0 +1,59 @@
+name: real-claim-check
+on:
+  workflow_dispatch:
+
+jobs:
+  mac-real-claim-claude-code:
+    runs-on: macos-latest
+    env:
+      CLAIM_TOKEN: ${{ secrets.CLAIM_TOKEN_MAC }}
+    steps:
+      - name: Check the Mac secret is set
+        run: |
+          test -n "$CLAIM_TOKEN" || { echo "CLAIM_TOKEN_MAC is missing"; exit 1; }
+
+      - name: Install Claude Code (same command the Mac instructions use)
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+
+      - name: Add Claude Code to PATH for later steps
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Pasted line 1 (pip install)
+        run: |
+          python -m pip install --upgrade "git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3"
+
+      - name: Pasted line 2 (real claim for claude_code)
+        run: |
+          python -m ironclaw_installer bootstrap --program claude_code --claim-token "$CLAIM_TOKEN" > out.txt 2>&1
+          sed "s/$CLAIM_TOKEN/[REDACTED]/g" out.txt
+          grep -q "shared skill installed" out.txt
+
+  ubuntu-real-claim-cursor:
+    runs-on: ubuntu-latest
+    env:
+      CLAIM_TOKEN: ${{ secrets.CLAIM_TOKEN_UBUNTU }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check the Ubuntu secret is set
+        run: |
+          test -n "$CLAIM_TOKEN" || { echo "CLAIM_TOKEN_UBUNTU is missing"; exit 1; }
+
+      - name: Show GitHub CLI version (Cursor skill install uses gh)
+        run: |
+          gh --version
+
+      - name: Create the virtual environment (Ubuntu instructions)
+        run: |
+          python3 -m venv "$HOME/ironclaw-venv"
+
+      - name: Pasted line 1 (pip install in the virtual environment)
+        run: |
+          "$HOME/ironclaw-venv/bin/python" -m pip install --upgrade "git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3"
+
+      - name: Pasted line 2 (real claim for cursor)
+        run: |
+          "$HOME/ironclaw-venv/bin/python" -m ironclaw_installer bootstrap --program cursor --claim-token "$CLAIM_TOKEN" > out.txt 2>&1
+          sed "s/$CLAIM_TOKEN/[REDACTED]/g" out.txt
+          grep -q "shared skill installed" out.txt
