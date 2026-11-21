@@ -185,6 +185,16 @@ def list_security_audit_events() -> list[dict[str, Any]]:
         raise _wrap(operation, exc) from exc
 
 
+def count_blocked_threats_for_install_key(install_key_id: str) -> int:
+    operation = "count_blocked_threats_for_install_key"
+    try:
+        client = get_supabase_service_client()
+        response = client.table(_T_SECURITY_AUDIT_EVENTS).select("event_id").eq("verdict", "block").eq("metadata->>install_key_id", install_key_id).execute()
+        return len(response.data or []) if response.data is not None else 0
+    except (SupabaseAPIError, SupabaseClientError, SupabaseConfigurationError) as exc:
+        raise _wrap(operation, exc) from exc
+
+
 # ---------------------------------------------------------------------------
 # Telemetry
 # ---------------------------------------------------------------------------

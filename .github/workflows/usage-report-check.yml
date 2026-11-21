@@ -1,0 +1,56 @@
+name: usage-report-check
+on:
+  workflow_dispatch:
+
+jobs:
+  report-claude-code:
+    runs-on: ubuntu-latest
+    env:
+      CLAIM_TOKEN: ${{ secrets.CLAIM_TOKEN_MAC }}
+      BASE_URL: https://ironclaw-security.onrender.com
+    steps:
+      - name: Redeem the claim and read the install key
+        run: |
+          RESP=$(curl -fsS -X POST "$BASE_URL/api/integrations/install-claims/redeem" \
+            -H "Content-Type: application/json" \
+            -d "{\"claim_token\": \"$CLAIM_TOKEN\"}")
+          KEY=$(printf '%s' "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["install_key"])')
+          test -n "$KEY" || { echo "No install key returned"; exit 1; }
+          echo "::add-mask::$KEY"
+          echo "INSTALL_KEY=$KEY" >> "$GITHUB_ENV"
+
+      - name: Send one harmless action with the install key
+        run: |
+          STATUS=$(curl -sS -o body.json -w '%{http_code}' -X POST "$BASE_URL/api/action/execute" \
+            -H "Content-Type: application/json" \
+            -H "X-Install-Key: $INSTALL_KEY" \
+            -d '{"actiontype":"toolcall","target":"usage-report-check","content":"Read-only usage check from CI","riskscore":5,"clientid":"usage-report-check","sessionid":"ci-usage-check"}')
+          cat body.json
+          echo "HTTP status: $STATUS"
+          test "$STATUS" = "200"
+
+  report-cursor:
+    runs-on: ubuntu-latest
+    env:
+      CLAIM_TOKEN: ${{ secrets.CLAIM_TOKEN_UBUNTU }}
+      BASE_URL: https://ironclaw-security.onrender.com
+    steps:
+      - name: Redeem the claim and read the install key
+        run: |
+          RESP=$(curl -fsS -X POST "$BASE_URL/api/integrations/install-claims/redeem" \
+            -H "Content-Type: application/json" \
+            -d "{\"claim_token\": \"$CLAIM_TOKEN\"}")
+          KEY=$(printf '%s' "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["install_key"])')
+          test -n "$KEY" || { echo "No install key returned"; exit 1; }
+          echo "::add-mask::$KEY"
+          echo "INSTALL_KEY=$KEY" >> "$GITHUB_ENV"
+
+      - name: Send one harmless action with the install key
+        run: |
+          STATUS=$(curl -sS -o body.json -w '%{http_code}' -X POST "$BASE_URL/api/action/execute" \
+            -H "Content-Type: application/json" \
+            -H "X-Install-Key: $INSTALL_KEY" \
+            -d '{"actiontype":"toolcall","target":"usage-report-check","content":"Read-only usage check from CI","riskscore":5,"clientid":"usage-report-check","sessionid":"ci-usage-check"}')
+          cat body.json
+          echo "HTTP status: $STATUS"
+          test "$STATUS" = "200"

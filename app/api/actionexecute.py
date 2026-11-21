@@ -14,6 +14,7 @@ from app.config import (
     RISK_THRESHOLD_QUARANTINE_MIN,
 )
 from app.core.auth import AuthContext, InstallKeyAuthContext, get_runtime_auth_context
+from app.core.install_keys import get_install_key_registry
 from app.runtime.install_gate import gate_shell_payload
 from app.services.action_guard import ActionGuardDecision, analyze_action, normalize_action_type
 from app.services.actionexecuteservice import (
@@ -429,6 +430,15 @@ def executeaction(
             usage=usage,
             message="Action denied because the required protection units could not be consumed.",
         )
+
+    if install_key_id is not None and int(request.requestedunits) > 0:
+        try:
+            get_install_key_registry().record_key_usage(
+                install_key_id,
+                units=int(request.requestedunits),
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("actionexecute: install-key usage update failed for key %s", install_key_id)
 
     return ActionExecuteResponse(
         status="allowed",

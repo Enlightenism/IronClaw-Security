@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import logging
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -14,9 +15,12 @@ from app.core.install_keys import (
     InstallKeyUsageError,
     get_install_key_registry,
 )
+from app.core.supabase_persistence import count_blocked_threats_for_install_key
 from app.core.unit_wallet import UnitWalletRegistry, get_unit_wallet_registry
 from app.dependencies.hybrid_auth import HybridAuthResult, require_hybrid_auth
 from app.services.install_key_provisioning import InstallKeyProvisioningService, provision_install_key_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/dashboard",
@@ -69,6 +73,7 @@ class InstallKeyDashboardSlot(BaseModel):
     active: bool = False
     remaining_units: int = 0
     units_consumed: int = 0
+    blocked_threats: int = 0
     usage_by_action: dict[str, int] = Field(default_factory=dict)
     payment_status: str = "unpaid"
     entitlements_status: str = "not_active"
@@ -316,6 +321,12 @@ def _build_install_key_slots(
             status = "locked"
             remaining_units = 0
 
+        try:
+            blocked = count_blocked_threats_for_install_key(rec.key_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("dashboard: blocked threat count failed for key %s", rec.key_id)
+            blocked = 0
+
         metadata: dict[str, Any] = {
             "subscription_id": getattr(rec, "subscription_id", None),
             "checkout_session_id": getattr(rec, "checkout_session_id", None),
@@ -325,6 +336,7 @@ def _build_install_key_slots(
             "issued_after_payment": bool(getattr(rec, "issued_after_payment", False)),
             "owner_key": getattr(rec, "owner_key", normalized_owner),
             "usage_summary": payload,
+            "blocked_threats": blocked,
         }
         if status == "locked":
             metadata.update(
@@ -343,6 +355,7 @@ def _build_install_key_slots(
             active=bool(getattr(rec, "active", False)) and _record_is_paid_entitled(rec),
             remaining_units=remaining_units,
             units_consumed=units_consumed,
+            blocked_threats=blocked,
             usage_by_action=usage_by_action,
             payment_status=_norm_status(getattr(rec, "payment_status", "unpaid"), default="unpaid"),
             entitlements_status=_norm_status(getattr(rec, "entitlements_status", "not_active"), default="not_active"),
@@ -365,6 +378,7 @@ def _build_install_key_slots(
                 active=False,
                 remaining_units=0,
                 units_consumed=0,
+                blocked_threats=0,
                 usage_by_action={},
                 payment_status="unpaid",
                 entitlements_status="not_active",

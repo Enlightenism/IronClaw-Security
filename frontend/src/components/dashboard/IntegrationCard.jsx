@@ -234,6 +234,7 @@ const IntegrationCard = ({
   program,
   integrationId,
   available = false,
+  blocked = 0,
   revoked = false,
   revokedReason = "",
   onCreateClaim,
@@ -572,6 +573,13 @@ const IntegrationCard = ({
         data-testid={`${testid}-explanation`}
       >
         {isLocked ? LOCKED_CARD_COPY : VERIFIED_CARD_COPY}
+      </p>
+
+      <p
+        className="mb-2 text-[11px] leading-snug text-[#BFC1C2]"
+        data-testid={`${testid}-blocked-threats`}
+      >
+        Threats blocked: {blocked}
       </p>
 
       {isRevoked ? (

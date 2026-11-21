@@ -911,6 +911,9 @@ const Dashboard = () => {
     return INSTALL_KEY_PROGRAMS.map(({ program, label, agentId, tint }) => {
       const integrationId = program.replace(/_/g, "-");
       const metadata = tokens?.install_metadata?.[integrationId];
+      const slot = Array.isArray(data?.install_keys)
+        ? data.install_keys.find((key) => key?.program === program)
+        : null;
       const slotStatus = installKeyStatusByProgram[program];
       const revoked = slotStatus === "refunded" || slotStatus === "revoked";
       const available =
@@ -926,6 +929,7 @@ const Dashboard = () => {
         integrationId,
         agentId,
         available,
+        blocked: slot?.blocked_threats ?? 0,
         revoked,
         revokedReason: slotStatus === "refunded" ? "refunded" : "revoked",
         savedCommand:
@@ -939,7 +943,12 @@ const Dashboard = () => {
         testid: toCardTestId(program),
       };
     });
-  }, [createInstallClaim, installKeyStatusByProgram, tokens?.install_metadata]);
+  }, [
+    createInstallClaim,
+    data?.install_keys,
+    installKeyStatusByProgram,
+    tokens?.install_metadata,
+  ]);
 
   if (loading || (loadingData && !data)) {
     return (
@@ -1121,6 +1130,7 @@ const Dashboard = () => {
                   program={card.program}
                   integrationId={card.integrationId}
                   available={card.available}
+                  blocked={card.blocked}
                   revoked={card.revoked}
                   revokedReason={card.revokedReason}
                   onCreateClaim={card.onCreateClaim}
