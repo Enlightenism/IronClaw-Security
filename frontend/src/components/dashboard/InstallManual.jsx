@@ -133,6 +133,7 @@ const MANUAL_STEPS = {
           text: "Open Windows Terminal or PowerShell and type the line below. Wait for the cursor to return. Close it, open a new one, and type claude --version.",
           code: ["irm https://claude.ai/install.ps1 | iex"],
         },
+        { text: "If Claude Code was open, close it and open it again." },
         ...IRONCLAW_WINDOWS,
       ],
     },
@@ -148,6 +149,7 @@ const MANUAL_STEPS = {
             "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.zshrc",
           ],
         },
+        { text: "If Claude Code was open, close it and open it again." },
         ...IRONCLAW_MAC,
       ],
     },
@@ -162,6 +164,7 @@ const MANUAL_STEPS = {
             "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.bashrc",
           ],
         },
+        { text: "If Claude Code was open, close it and open it again." },
         ...IRONCLAW_UBUNTU,
       ],
     },
@@ -395,15 +398,6 @@ const MANUAL_STEPS = {
         {
           text: "Open Ubuntu from the Start menu and create a username and password.",
         },
-        ...UBU_SETUP,
-        ...UBU_GH,
-        {
-          text: "Open Terminal and type the line below. It installs Node if needed and may ask for your password. Close Terminal, open it again, and type openclaw --version.",
-          code: [
-            "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard",
-          ],
-        },
-        ...IRONCLAW_UBUNTU,
       ],
     },
     mac: {
@@ -419,6 +413,20 @@ const MANUAL_STEPS = {
           ],
         },
         ...IRONCLAW_MAC,
+      ],
+    },
+    ubuntu: {
+      intro: "Use Terminal.",
+      steps: [
+        ...UBU_SETUP,
+        ...UBU_GH,
+        {
+          text: "Open Terminal and type the line below. It installs Node if needed and may ask for your password. Close Terminal, open it again, and type openclaw --version.",
+          code: [
+            "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard",
+          ],
+        },
+        ...IRONCLAW_UBUNTU,
       ],
     },
   },
@@ -468,6 +476,7 @@ export default function InstallManual({
       ? [
           ["Windows (runs inside Ubuntu)", selected.windows],
           ["Mac", selected.mac],
+          ["Ubuntu", selected.ubuntu],
         ]
       : [
           ["Windows", selected.windows],
@@ -538,7 +547,7 @@ export default function InstallManual({
                           <button
                             type="button"
                             onClick={() => copyCode(code, codeId)}
-                            className="absolute -top-7 right-0 flex h-6 items-center justify-center rounded-md border px-2 text-[9px] font-semibold transition"
+                            className="absolute top-1 right-1 z-10 flex h-6 items-center justify-center rounded-md border px-2 text-[9px] font-semibold transition"
                             style={{
                               borderColor: "#FFD70055",
                               background: "#FFD70014",
@@ -553,7 +562,7 @@ export default function InstallManual({
                             )}
                             <span className="ml-1">Copy</span>
                           </button>
-                          <code className="font-tech block w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-white/10 bg-black/50 px-2 py-2 text-[10px] leading-relaxed text-white/90">
+                          <code className="font-tech block w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-white/10 bg-black/50 px-2 pt-8 pb-2 text-[10px] leading-relaxed text-white/90">
                             {code}
                           </code>
                         </div>
