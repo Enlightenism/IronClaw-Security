@@ -196,9 +196,7 @@ describe("IntegrationCard", () => {
     );
     expect(
       screen.getByTestId("claude-code-card-explanation"),
-    ).toHaveTextContent(
-      "Generating a new command replaces this key and stops older commands from working.",
-    );
+    ).toBeEmptyDOMElement();
     expect(screen.queryByText(/expires/i)).not.toBeInTheDocument();
     expect(mockToastSuccess).toHaveBeenCalledWith(
       "One-time install command generated",

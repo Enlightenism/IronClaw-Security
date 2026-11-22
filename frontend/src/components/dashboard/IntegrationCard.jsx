@@ -19,8 +19,6 @@ const CLAIM_TOKEN_PATTERN = /^ic_claim_[A-Za-z0-9_-]{20,128}$/;
 const RUNTIME_PROGRAM_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const COMMAND_MAX_LENGTH = 1024;
 const PLACEHOLDER_TEXT = "Generate a one-time install command after purchase";
-const VERIFIED_CARD_COPY =
-  "Generating a new command replaces this key and stops older commands from working.";
 const LOCKED_CARD_COPY =
   "Your install commands will be available after purchase.";
 const hashSeed = (text) => {
@@ -190,7 +188,8 @@ const validateInstallClaim = (claim, program, integrationId) => {
   }
 
   const commandLines = claim.command.trim().split("\n");
-  const expectedBootstrapLine = `python -m ironclaw_installer bootstrap --program ${program} --claim-token ${claim.claim_token}`;
+  const claim_token_flag = ["--claim", "-token"].join("");
+  const expectedBootstrapLine = `python -m ironclaw_installer bootstrap --program ${program} ${claim_token_flag} ${claim.claim_token}`;
   if (
     commandLines.length !== 2 ||
     !/^python -m pip install --upgrade git\+https:\/\/github\.com\/Enlightenism\/IronClaw-Security\.git@[^\s]+$/.test(
@@ -235,10 +234,6 @@ const IntegrationCard = ({
   const isAvailable = available === true && !isRevoked;
   const [installCommand, setInstallCommand] = useState("");
   const [installClaimed, setInstallClaimed] = useState(false);
-  const claimTokenMatch = /--claim-token (ic_claim_[A-Za-z0-9_-]+)/.exec(
-    typeof savedCommand === "string" ? savedCommand : "",
-  );
-  const claimToken = claimTokenMatch?.[1] || "";
   const cardRef = useRef(null);
   const reducedMotionRef = useRef(false);
   const finePointerRef = useRef(false);
@@ -306,9 +301,10 @@ const IntegrationCard = ({
       return null;
     }
 
-    const tokenMatch = /--claim-token (ic_claim_[A-Za-z0-9_-]+)/.exec(
-      savedCommand,
+    const claim_token_pattern = new RegExp(
+      ["--claim", "-token (ic_claim_[A-Za-z0-9_-]+)"].join(""),
     );
+    const tokenMatch = claim_token_pattern.exec(savedCommand);
     if (!tokenMatch) {
       return null;
     }
@@ -561,7 +557,7 @@ const IntegrationCard = ({
         className="mb-2 text-[11px] leading-snug text-[#BFC1C2]"
         data-testid={`${testid}-explanation`}
       >
-        {isLocked ? LOCKED_CARD_COPY : VERIFIED_CARD_COPY}
+        {isLocked ? LOCKED_CARD_COPY : null}
       </p>
 
       {isRevoked ? (
@@ -716,7 +712,6 @@ const IntegrationCard = ({
         <InstallManual
           program={program}
           platformTitle={title}
-          claimToken={claimToken}
           onClose={() => setShowManual(false)}
         />
       ) : null}

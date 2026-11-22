@@ -1,45 +1,51 @@
 import { useState } from "react";
 import { Check, Copy, X } from "lucide-react";
 
-const WIN_PYTHON = [
+const PY_WIN = [
   {
     text: "Install Python. Go to python.org/downloads and download the latest version. Open the file. At the bottom of the first screen, check 'Add python.exe to PATH.' Click Install Now, then Close.",
   },
 ];
 
-const WIN_GIT = [
+const GIT_WIN = [
   {
-    text: "Install Git. Go to git-scm.com/downloads/win. Open the file and click Next on each screen. Click Finish.",
+    text: "Install Git. Go to git-scm.com/downloads/win. Open the file, click Next on each screen, then click Finish.",
   },
 ];
 
-const WIN_GH = [
+const GH_WIN_1 = [
   {
     text: "Install GitHub CLI. Open Windows Terminal or PowerShell and type the line below. Then close it, open a new one, and type gh --version.",
     code: ["winget install --id GitHub.cli"],
   },
+];
+
+const GH_WIN_2 = [
   {
     text: "Log in to GitHub. Type gh auth login. Choose GitHub.com, then HTTPS, then Y, then Login with a web browser. Copy the code shown, press Enter, paste it in the browser, click Continue, and approve.",
   },
 ];
 
-const MAC_PYTHON = [
+const PY_MAC = [
   {
     text: "Install Python. Go to python.org/downloads and install the macOS version. Use this installer, not Homebrew.",
   },
 ];
 
-const MAC_GIT = [
+const GIT_MAC = [
   {
     text: "Install Git. Open Terminal and type the line below. Click Install, then Agree. When done, click Done.",
     code: ["xcode-select --install"],
   },
 ];
 
-const MAC_GH = [
+const GH_MAC_1 = [
   {
     text: "Install GitHub CLI. Go to cli.github.com, download the macOS installer, and open it. Click Continue, then Install.",
   },
+];
+
+const GH_MAC_2 = [
   {
     text: "Log in to GitHub. In Terminal, type gh auth login. Choose GitHub.com, then HTTPS, then Y, then Login with a web browser. Approve in the browser.",
   },
@@ -55,7 +61,7 @@ const UBU_SETUP = [
   },
 ];
 
-const UBU_GH = [
+const GH_UBU_1 = [
   {
     text: "Install GitHub CLI. Type each line below, pressing Enter after each, and wait for each to finish.",
     code: [
@@ -67,58 +73,57 @@ const UBU_GH = [
       "sudo apt install -y gh",
     ],
   },
-  {
-    text: "Log in to GitHub. Type gh auth login. Choose GitHub.com, then HTTPS, then Y, then Login with a web browser. Approve in the browser.",
-  },
 ];
 
-const IRONCLAW_WINDOWS = [
+const GH_UBU_2 = GH_MAC_2;
+
+const IRON_WIN = [
   {
-    text: "Open Windows Terminal or PowerShell and paste this line. Press Enter and wait for it to finish, which can take a few minutes.",
-    code: [
-      'python -m pip install --upgrade "git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3"',
-    ],
+    text: "Open Windows Terminal or PowerShell. Paste the Install Skill Command from your platform card and press Enter. Wait for it to finish, which can take a few minutes.",
   },
   {
-    text: "Paste this line and press Enter.",
-    code: [
-      "python -m ironclaw_installer bootstrap --program {PROGRAM} --claim-token {CLAIM_TOKEN}",
-    ],
+    text: "Paste the Installer Bootstrap Command from your platform card and press Enter.",
   },
   {
     text: "Success: the last line says shared skill installed. If you see 'not recognized,' close the terminal, open a new one, and try again.",
   },
 ];
 
-const IRONCLAW_MAC = [
+const IRON_MAC = [
   {
-    text: "Open Terminal and paste this line. Press Enter and wait for it to finish.",
-    code: [
-      'python -m pip install --upgrade "git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3"',
-    ],
+    text: "Open Terminal. Paste the Install Skill Command from your platform card and press Enter. Wait for it to finish.",
   },
   {
-    text: "Paste this line and press Enter.",
-    code: [
-      "python -m ironclaw_installer bootstrap --program {PROGRAM} --claim-token {CLAIM_TOKEN}",
-    ],
+    text: "Paste the Installer Bootstrap Command from your platform card and press Enter.",
   },
   {
     text: "Success: the last line says shared skill installed. If you see 'command not found: python,' install Python from step 1, then close Terminal and try again.",
   },
 ];
 
-const IRONCLAW_UBUNTU = [
+const IRON_UBU = [
   {
-    text: "Open Terminal. Type each line below, pressing Enter after each, and wait for each to finish.",
-    code: [
-      "python3 -m venv ~/ironclaw-venv",
-      '~/ironclaw-venv/bin/python -m pip install --upgrade "git+https://github.com/Enlightenism/IronClaw-Security.git@v1.0.3"',
-      "~/ironclaw-venv/bin/python -m ironclaw_installer bootstrap --program {PROGRAM} --claim-token {CLAIM_TOKEN}",
-    ],
+    text: "Open Terminal. Type this line once to create the IronClaw environment, and press Enter.",
+    code: ["python3 -m venv ~/ironclaw-venv"],
   },
   {
-    text: "Success: the last line says shared skill installed. If you see 'No module named venv,' type sudo apt install -y python3-venv, press Enter, then repeat the first line.",
+    text: "Every time you open a new Terminal window, type this line first and press Enter, before anything else.",
+    code: ["source ~/ironclaw-venv/bin/activate"],
+  },
+  {
+    text: "Paste the Install Skill Command from your platform card and press Enter. Wait for it to finish.",
+  },
+  {
+    text: "Paste the Installer Bootstrap Command from your platform card and press Enter.",
+  },
+  {
+    text: "Success: the last line says shared skill installed. If you see 'No module named venv,' type sudo apt install -y python3-venv, press Enter, then create the environment again.",
+  },
+];
+
+const CLAUDE_RESTART = [
+  {
+    text: "If Claude Code was open while you did this, close it and open it again.",
   },
 ];
 
@@ -127,21 +132,21 @@ const MANUAL_STEPS = {
     windows: {
       intro: "Use Windows Terminal or PowerShell.",
       steps: [
-        ...WIN_PYTHON,
-        ...WIN_GIT,
+        ...PY_WIN,
+        ...GIT_WIN,
         {
           text: "Open Windows Terminal or PowerShell and type the line below. Wait for the cursor to return. Close it, open a new one, and type claude --version.",
           code: ["irm https://claude.ai/install.ps1 | iex"],
         },
-        { text: "If Claude Code was open, close it and open it again." },
-        ...IRONCLAW_WINDOWS,
+        ...IRON_WIN,
+        ...CLAUDE_RESTART,
       ],
     },
     mac: {
       intro: "Use Terminal.",
       steps: [
-        ...MAC_PYTHON,
-        ...MAC_GIT,
+        ...PY_MAC,
+        ...GIT_MAC,
         {
           text: "Open Terminal and type the line below. Wait for the cursor to return. Close Terminal, open it again, and type claude --version. If you see 'command not found,' type the second line, then close and reopen Terminal.",
           code: [
@@ -149,8 +154,8 @@ const MANUAL_STEPS = {
             "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.zshrc",
           ],
         },
-        { text: "If Claude Code was open, close it and open it again." },
-        ...IRONCLAW_MAC,
+        ...IRON_MAC,
+        ...CLAUDE_RESTART,
       ],
     },
     ubuntu: {
@@ -164,8 +169,8 @@ const MANUAL_STEPS = {
             "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.bashrc",
           ],
         },
-        { text: "If Claude Code was open, close it and open it again." },
-        ...IRONCLAW_UBUNTU,
+        ...IRON_UBU,
+        ...CLAUDE_RESTART,
       ],
     },
   },
@@ -173,32 +178,35 @@ const MANUAL_STEPS = {
     windows: {
       intro: "Use Windows Terminal or PowerShell.",
       steps: [
-        ...WIN_PYTHON,
-        ...WIN_GIT,
-        ...WIN_GH,
+        ...PY_WIN,
+        ...GIT_WIN,
         { text: "Go to cursor.com and install Cursor." },
-        ...IRONCLAW_WINDOWS,
+        ...GH_WIN_1,
+        ...GH_WIN_2,
+        ...IRON_WIN,
       ],
     },
     mac: {
       intro: "Use Terminal.",
       steps: [
-        ...MAC_PYTHON,
-        ...MAC_GIT,
-        ...MAC_GH,
+        ...PY_MAC,
+        ...GIT_MAC,
         { text: "Go to cursor.com and install Cursor." },
-        ...IRONCLAW_MAC,
+        ...GH_MAC_1,
+        ...GH_MAC_2,
+        ...IRON_MAC,
       ],
     },
     ubuntu: {
       intro: "Use Terminal.",
       steps: [
         ...UBU_SETUP,
-        ...UBU_GH,
         {
           text: "Go to cursor.com, download the Linux version, and install it.",
         },
-        ...IRONCLAW_UBUNTU,
+        ...GH_UBU_1,
+        ...GH_UBU_2,
+        ...IRON_UBU,
       ],
     },
   },
@@ -206,9 +214,8 @@ const MANUAL_STEPS = {
     windows: {
       intro: "Use Windows Terminal or PowerShell.",
       steps: [
-        ...WIN_PYTHON,
-        ...WIN_GIT,
-        ...WIN_GH,
+        ...PY_WIN,
+        ...GIT_WIN,
         {
           text: "Open Windows Terminal or PowerShell and type these lines one at a time, pressing Enter after each.",
           code: [
@@ -218,36 +225,40 @@ const MANUAL_STEPS = {
           ],
         },
         { text: "Close it, open a new one, and type goose --version." },
-        ...IRONCLAW_WINDOWS,
+        ...GH_WIN_1,
+        ...GH_WIN_2,
+        ...IRON_WIN,
       ],
     },
     mac: {
       intro: "Use Terminal.",
       steps: [
-        ...MAC_PYTHON,
-        ...MAC_GIT,
-        ...MAC_GH,
+        ...PY_MAC,
+        ...GIT_MAC,
         {
           text: "Open Terminal and type the line below. Close Terminal, open it again, and type goose --version.",
           code: [
             "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash",
           ],
         },
-        ...IRONCLAW_MAC,
+        ...GH_MAC_1,
+        ...GH_MAC_2,
+        ...IRON_MAC,
       ],
     },
     ubuntu: {
       intro: "Use Terminal.",
       steps: [
         ...UBU_SETUP,
-        ...UBU_GH,
         {
           text: "Open Terminal and type the line below. Close Terminal, open it again, and type goose --version.",
           code: [
             "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash",
           ],
         },
-        ...IRONCLAW_UBUNTU,
+        ...GH_UBU_1,
+        ...GH_UBU_2,
+        ...IRON_UBU,
       ],
     },
   },
@@ -255,39 +266,42 @@ const MANUAL_STEPS = {
     windows: {
       intro: "Use Windows Terminal or PowerShell.",
       steps: [
-        ...WIN_PYTHON,
-        ...WIN_GIT,
-        ...WIN_GH,
+        ...PY_WIN,
+        ...GIT_WIN,
         {
           text: "Open Windows Terminal or PowerShell and type the line below. Close it, open a new one, and type agy --version.",
           code: ["irm https://antigravity.google/cli/install.ps1 | iex"],
         },
-        ...IRONCLAW_WINDOWS,
+        ...GH_WIN_1,
+        ...GH_WIN_2,
+        ...IRON_WIN,
       ],
     },
     mac: {
       intro: "Use Terminal.",
       steps: [
-        ...MAC_PYTHON,
-        ...MAC_GIT,
-        ...MAC_GH,
+        ...PY_MAC,
+        ...GIT_MAC,
         {
           text: "Open Terminal and type the line below. Close Terminal, open it again, and type agy --version.",
           code: ["curl -fsSL https://antigravity.google/cli/install.sh | bash"],
         },
-        ...IRONCLAW_MAC,
+        ...GH_MAC_1,
+        ...GH_MAC_2,
+        ...IRON_MAC,
       ],
     },
     ubuntu: {
       intro: "Use Terminal.",
       steps: [
         ...UBU_SETUP,
-        ...UBU_GH,
         {
           text: "Open Terminal and type the line below. Close Terminal, open it again, and type agy --version.",
           code: ["curl -fsSL https://antigravity.google/cli/install.sh | bash"],
         },
-        ...IRONCLAW_UBUNTU,
+        ...GH_UBU_1,
+        ...GH_UBU_2,
+        ...IRON_UBU,
       ],
     },
   },
@@ -295,9 +309,8 @@ const MANUAL_STEPS = {
     windows: {
       intro: "Use Windows Terminal or PowerShell.",
       steps: [
-        ...WIN_PYTHON,
-        ...WIN_GIT,
-        ...WIN_GH,
+        ...PY_WIN,
+        ...GIT_WIN,
         {
           text: "You need an active GitHub Copilot subscription at github.com/features/copilot. Open Windows Terminal or PowerShell and type the line below.",
           code: ["winget install GitHub.Copilot"],
@@ -305,32 +318,36 @@ const MANUAL_STEPS = {
         {
           text: "Close it, open a new one, type copilot, and sign in with /login. Then type /exit.",
         },
-        ...IRONCLAW_WINDOWS,
+        ...GH_WIN_1,
+        ...GH_WIN_2,
+        ...IRON_WIN,
       ],
     },
     mac: {
       intro: "Use Terminal.",
       steps: [
-        ...MAC_PYTHON,
-        ...MAC_GIT,
-        ...MAC_GH,
+        ...PY_MAC,
+        ...GIT_MAC,
         {
           text: "You need an active GitHub Copilot subscription at github.com/features/copilot. Open Terminal and type the line below. Close Terminal, open it again, type copilot, and sign in with /login. Then type /exit.",
           code: ["curl -fsSL https://gh.io/copilot-install | bash"],
         },
-        ...IRONCLAW_MAC,
+        ...GH_MAC_1,
+        ...GH_MAC_2,
+        ...IRON_MAC,
       ],
     },
     ubuntu: {
       intro: "Use Terminal.",
       steps: [
         ...UBU_SETUP,
-        ...UBU_GH,
         {
           text: "You need an active GitHub Copilot subscription at github.com/features/copilot. Open Terminal and type the line below. Close Terminal, open it again, type copilot, and sign in with /login. Then type /exit.",
           code: ["curl -fsSL https://gh.io/copilot-install | bash"],
         },
-        ...IRONCLAW_UBUNTU,
+        ...GH_UBU_1,
+        ...GH_UBU_2,
+        ...IRON_UBU,
       ],
     },
   },
@@ -338,8 +355,8 @@ const MANUAL_STEPS = {
     windows: {
       intro: "Use Windows Terminal or PowerShell.",
       steps: [
-        ...WIN_PYTHON,
-        ...WIN_GIT,
+        ...PY_WIN,
+        ...GIT_WIN,
         {
           text: "Open Windows Terminal or PowerShell and type the line below.",
           code: [
@@ -350,14 +367,14 @@ const MANUAL_STEPS = {
         {
           text: "Optional, before first use: type hermes setup and answer the questions.",
         },
-        ...IRONCLAW_WINDOWS,
+        ...IRON_WIN,
       ],
     },
     mac: {
       intro: "Use Terminal.",
       steps: [
-        ...MAC_PYTHON,
-        ...MAC_GIT,
+        ...PY_MAC,
+        ...GIT_MAC,
         {
           text: "Open Terminal and type the line below. Close Terminal, open it again, and type hermes --version.",
           code: [
@@ -367,7 +384,7 @@ const MANUAL_STEPS = {
         {
           text: "Optional, before first use: type hermes setup and answer the questions.",
         },
-        ...IRONCLAW_MAC,
+        ...IRON_MAC,
       ],
     },
     ubuntu: {
@@ -383,7 +400,7 @@ const MANUAL_STEPS = {
         {
           text: "Optional, before first use: type hermes setup and answer the questions.",
         },
-        ...IRONCLAW_UBUNTU,
+        ...IRON_UBU,
       ],
     },
   },
@@ -396,58 +413,56 @@ const MANUAL_STEPS = {
           code: ["wsl --install -d Ubuntu"],
         },
         {
-          text: "Open Ubuntu from the Start menu and create a username and password.",
+          text: "Open Ubuntu from the Start menu and create a username and password. From here on, every step is in the Ubuntu window.",
         },
-      ],
-    },
-    mac: {
-      intro: "Use Terminal.",
-      steps: [
-        ...MAC_PYTHON,
-        ...MAC_GIT,
-        ...MAC_GH,
-        {
-          text: "Open Terminal and type the line below. It installs Node if needed and may ask for your Mac password. Close Terminal, open it again, and type openclaw --version.",
-          code: [
-            "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard",
-          ],
-        },
-        ...IRONCLAW_MAC,
-      ],
-    },
-    ubuntu: {
-      intro: "Use Terminal.",
-      steps: [
         ...UBU_SETUP,
-        ...UBU_GH,
+        ...GH_UBU_1,
+        ...GH_UBU_2,
         {
           text: "Open Terminal and type the line below. It installs Node if needed and may ask for your password. Close Terminal, open it again, and type openclaw --version.",
           code: [
             "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard",
           ],
         },
-        ...IRONCLAW_UBUNTU,
+        ...IRON_UBU,
+      ],
+    },
+    mac: {
+      intro: "Use Terminal.",
+      steps: [
+        ...PY_MAC,
+        ...GIT_MAC,
+        ...GH_MAC_1,
+        ...GH_MAC_2,
+        {
+          text: "Open Terminal and type the line below. It installs Node if needed and may ask for your Mac password. Close Terminal, open it again, and type openclaw --version.",
+          code: [
+            "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard",
+          ],
+        },
+        ...IRON_MAC,
+      ],
+    },
+    ubuntu: {
+      intro: "Use Terminal.",
+      steps: [
+        ...UBU_SETUP,
+        ...GH_UBU_1,
+        ...GH_UBU_2,
+        {
+          text: "Open Terminal and type the line below. It installs Node if needed and may ask for your password. Close Terminal, open it again, and type openclaw --version.",
+          code: [
+            "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard",
+          ],
+        },
+        ...IRON_UBU,
       ],
     },
   },
 };
 
-const replacePlaceholders = (value, program, claimToken) =>
-  value
-    .replaceAll("{PROGRAM}", program)
-    .replaceAll("{CLAIM_TOKEN}", claimToken);
-
-export default function InstallManual({
-  program,
-  platformTitle,
-  claimToken,
-  onClose,
-}) {
+export default function InstallManual({ program, platformTitle, onClose }) {
   const [copiedCode, setCopiedCode] = useState("");
-  const selectedClaimToken =
-    typeof claimToken === "string" && claimToken
-      ? claimToken
-      : "your-claim-token";
   const selected = MANUAL_STEPS[program] || MANUAL_STEPS.openclaw;
 
   const copyCode = async (code, codeId) => {
@@ -471,18 +486,15 @@ export default function InstallManual({
     setTimeout(() => setCopiedCode(""), 2000);
   };
 
-  const sections =
-    program === "openclaw"
-      ? [
-          ["Windows (runs inside Ubuntu)", selected.windows],
-          ["Mac", selected.mac],
-          ["Ubuntu", selected.ubuntu],
-        ]
-      : [
-          ["Windows", selected.windows],
-          ["Mac", selected.mac],
-          ["Ubuntu", selected.ubuntu],
-        ];
+  const sections = [
+    ["Windows", selected.windows],
+    ["Mac", selected.mac],
+    ["Ubuntu", selected.ubuntu],
+  ];
+
+  if (program === "openclaw") {
+    sections[0][0] = "Windows (runs inside Ubuntu)";
+  }
 
   return (
     <div
@@ -500,7 +512,7 @@ export default function InstallManual({
             <button
               type="button"
               onClick={onClose}
-              className="flex h-7 w-7 items-center justify-center rounded-md border border-[#FFD700]/55 bg-[#FFD700]/10 text-[#FFD700] transition"
+              className="flex h-7 w-7 items-center justify-center rounded-md border border-[#FFD70055] bg-[#FFD70014] text-[#FFD700]"
               aria-label="Close install guide"
             >
               <X size={14} />
@@ -519,57 +531,49 @@ export default function InstallManual({
                 {section.intro}
               </p>
               <ol className="space-y-4">
-                {section.steps.map((step, stepIndex) => {
-                  const code = (step.code || [])
-                    .map((line) =>
-                      replacePlaceholders(line, program, selectedClaimToken),
-                    )
-                    .join("\n");
-                  const codeId = `${heading}-${stepIndex}`;
-
-                  return (
-                    <li
-                      key={`${heading}-${stepIndex}`}
-                      className="text-[11px] leading-relaxed text-[#BFC1C2]"
-                    >
-                      <p>
-                        <span className="mr-2 font-semibold text-white/80">
-                          {stepIndex + 1}.
-                        </span>
-                        {replacePlaceholders(
-                          step.text,
-                          program,
-                          selectedClaimToken,
-                        )}
-                      </p>
-                      {step.code?.length ? (
-                        <div className="relative mt-2">
-                          <button
-                            type="button"
-                            onClick={() => copyCode(code, codeId)}
-                            className="absolute top-1 right-1 z-10 flex h-6 items-center justify-center rounded-md border px-2 text-[9px] font-semibold transition"
-                            style={{
-                              borderColor: "#FFD70055",
-                              background: "#FFD70014",
-                              color: "#FFD700",
-                            }}
-                            aria-label="Copy install guide code"
-                          >
-                            {copiedCode === codeId ? (
-                              <Check size={10} />
-                            ) : (
-                              <Copy size={10} />
-                            )}
-                            <span className="ml-1">Copy</span>
-                          </button>
-                          <code className="font-tech block w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-white/10 bg-black/50 px-2 pt-8 pb-2 text-[10px] leading-relaxed text-white/90">
-                            {code}
-                          </code>
-                        </div>
-                      ) : null}
-                    </li>
-                  );
-                })}
+                {section.steps.map((step, stepIndex) => (
+                  <li
+                    key={`${heading}-${stepIndex}`}
+                    className="text-[11px] leading-relaxed text-[#BFC1C2]"
+                  >
+                    <p>
+                      <span className="mr-2 font-semibold text-white/80">
+                        {stepIndex + 1}.
+                      </span>
+                      {step.text}
+                    </p>
+                    {step.code?.length ? (
+                      <div className="relative mt-2 rounded-md border border-white/10 bg-black/50">
+                        <code className="font-tech block w-full overflow-x-auto whitespace-pre-wrap break-words px-2 pt-2 pb-8 pr-20 text-[10px] leading-relaxed text-white/90">
+                          {step.code.join("\n")}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            copyCode(
+                              step.code.join("\n"),
+                              `${heading}-${stepIndex}`,
+                            )
+                          }
+                          className="absolute right-1 bottom-1 flex h-6 items-center justify-center rounded-md border px-2 text-[9px] font-semibold transition"
+                          style={{
+                            borderColor: "#FFD70055",
+                            background: "#FFD70014",
+                            color: "#FFD700",
+                          }}
+                          aria-label="Copy"
+                        >
+                          {copiedCode === `${heading}-${stepIndex}` ? (
+                            <Check size={10} />
+                          ) : (
+                            <Copy size={10} />
+                          )}
+                          <span className="ml-1">Copy</span>
+                        </button>
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
               </ol>
             </section>
           ))}
