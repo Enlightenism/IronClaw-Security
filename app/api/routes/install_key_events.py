@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import hashlib
+import logging
 import os
 from threading import Lock
 from typing import Any, Literal
@@ -19,6 +20,9 @@ from app.core.unit_wallet import (
 )
 from app.persistencebootstrap import get_persistence_store
 from app.services.audit_store import record_gate_audit_event
+from app.services.threat_generator import get_threat_generator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/install-key-events",
@@ -409,6 +413,14 @@ def _apply_event(
             action_type=payload.action_type or "telemetry",
             metadata=metadata,
         )
+        try:
+            get_threat_generator().record_agent_use(
+                owner_key=owner_key,
+                install_key_id=key_id,
+                platform=program,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("install_key_events: threat generator update failed for key %s", key_id)
         return True, {"event_type": event_name, "balance_update": "debit"}
 
     if event_name == "install_key_reported":

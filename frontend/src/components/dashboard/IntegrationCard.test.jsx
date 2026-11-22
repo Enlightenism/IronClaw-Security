@@ -107,10 +107,9 @@ describe("IntegrationCard", () => {
       screen.getByTestId("claude-code-card-bootstrap-command-block"),
     ).toBeInTheDocument();
     expect(
-      screen.getByTestId("claude-code-card-instructions"),
-    ).toHaveTextContent(
-      "Paste the first command, then the second command, in order.",
-    );
+      screen.queryByTestId("claude-code-card-instructions"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("claude-code-card-manual")).toBeEnabled();
   });
 
   it("Antigravity CLI uses the shared button labels", () => {
@@ -123,7 +122,7 @@ describe("IntegrationCard", () => {
 
     expect(
       screen.getByTestId("antigravity-cli-card-generate"),
-    ).toHaveTextContent("Generate one-time install command");
+    ).toHaveTextContent("Generate New Install Commands");
   });
 
   it("does not show runtime coverage labels on platform cards", () => {

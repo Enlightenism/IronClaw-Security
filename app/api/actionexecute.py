@@ -22,6 +22,7 @@ from app.services.actionexecuteservice import (
     get_action_execute_service,
 )
 from app.services.audit_store import record_gate_audit_event
+from app.services.threat_generator import get_threat_generator
 
 router = APIRouter(prefix="/action", tags=["action-execution"])
 logger = logging.getLogger(__name__)
@@ -439,6 +440,16 @@ def executeaction(
             )
         except Exception:  # noqa: BLE001
             logger.exception("actionexecute: install-key usage update failed for key %s", install_key_id)
+
+    if install_key_id is not None:
+        try:
+            get_threat_generator().record_agent_use(
+                owner_key=owner_key,
+                install_key_id=install_key_id,
+                platform=install_program,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("actionexecute: threat generator update failed for key %s", install_key_id)
 
     return ActionExecuteResponse(
         status="allowed",

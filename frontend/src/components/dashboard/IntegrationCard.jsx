@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Check, Terminal } from "lucide-react";
 import { toast } from "sonner";
+import InstallManual from "./InstallManual";
 
 const TINT_STYLES = {
   gold: { surface: "glass-gold", accent: "#FFD700" },
@@ -22,22 +23,6 @@ const VERIFIED_CARD_COPY =
   "Generating a new command replaces this key and stops older commands from working.";
 const LOCKED_CARD_COPY =
   "Your install commands will be available after purchase.";
-const INSTRUCTIONS_BY_PROGRAM = {
-  openclaw:
-    "Open a terminal with Python, GitHub CLI (gh), and the OpenClaw CLI available. Paste the first command, then the second command, in order.",
-  claude_code:
-    "Open a terminal with Python and Claude Code available. Paste the first command, then the second command, in order. Restart Claude Code if it was already open.",
-  cursor:
-    "Open a terminal with Python and GitHub CLI (gh) available, then paste the first command and the second command in order.",
-  goose:
-    "Open a terminal with Python and GitHub CLI (gh) available, then paste the first command and the second command in order.",
-  antigravity_cli:
-    "Open a terminal with Python and GitHub CLI (gh) available, then paste the first command and the second command in order.",
-  copilot:
-    "Open a terminal with Python and GitHub CLI (gh) available, then paste the first command and the second command in order.",
-  hermes:
-    "Open a terminal with Python and the Hermes CLI available. Paste the first command, then the second command, in order.",
-};
 const hashSeed = (text) => {
   let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) {
@@ -234,7 +219,6 @@ const IntegrationCard = ({
   program,
   integrationId,
   available = false,
-  blocked = 0,
   revoked = false,
   revokedReason = "",
   onCreateClaim,
@@ -246,10 +230,15 @@ const IntegrationCard = ({
   const [copiedLine, setCopiedLine] = useState("");
   const [pressed, setPressed] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [showManual, setShowManual] = useState(false);
   const isRevoked = revoked === true;
   const isAvailable = available === true && !isRevoked;
   const [installCommand, setInstallCommand] = useState("");
   const [installClaimed, setInstallClaimed] = useState(false);
+  const claimTokenMatch = /--claim-token (ic_claim_[A-Za-z0-9_-]+)/.exec(
+    typeof savedCommand === "string" ? savedCommand : "",
+  );
+  const claimToken = claimTokenMatch?.[1] || "";
   const cardRef = useRef(null);
   const reducedMotionRef = useRef(false);
   const finePointerRef = useRef(false);
@@ -575,13 +564,6 @@ const IntegrationCard = ({
         {isLocked ? LOCKED_CARD_COPY : VERIFIED_CARD_COPY}
       </p>
 
-      <p
-        className="mb-2 text-[11px] leading-snug text-[#BFC1C2]"
-        data-testid={`${testid}-blocked-threats`}
-      >
-        Threats blocked: {blocked}
-      </p>
-
       {isRevoked ? (
         <p
           className="mb-2 text-[11px] leading-snug text-[#BFC1C2]"
@@ -685,13 +667,6 @@ const IntegrationCard = ({
         </div>
       </div>
 
-      <p
-        className="mt-3 mb-2 text-[10px] leading-relaxed text-white/70"
-        data-testid={`${testid}-instructions`}
-      >
-        {INSTRUCTIONS_BY_PROGRAM[program]}
-      </p>
-
       {installClaimed && normalizedCommand ? (
         <p
           className="text-[10px] leading-relaxed text-white/50"
@@ -702,25 +677,49 @@ const IntegrationCard = ({
         </p>
       ) : null}
       {isRevoked ? null : (
-        <button
-          type="button"
-          onClick={generate}
-          disabled={!canGenerate || generating}
-          data-testid={`${testid}-generate`}
-          className="mt-2 rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
-          style={{
-            borderColor: `${accent}55`,
-            background: `${accent}14`,
-            color: accent,
-          }}
-        >
-          {generating
-            ? "Generating..."
-            : normalizedCommand
-              ? "Generate a new one-time command"
-              : "Generate one-time install command"}
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={() => setShowManual(true)}
+            disabled={!canGenerate || generating}
+            data-testid={`${testid}-manual`}
+            className="mt-2 block rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
+            style={{
+              borderColor: `${accent}55`,
+              background: `${accent}14`,
+              color: accent,
+            }}
+          >
+            Install Guide
+          </button>
+          <button
+            type="button"
+            onClick={generate}
+            disabled={!canGenerate || generating}
+            data-testid={`${testid}-generate`}
+            className="mt-2 block rounded-md border px-2 py-1 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
+            style={{
+              borderColor: `${accent}55`,
+              background: `${accent}14`,
+              color: accent,
+            }}
+          >
+            {generating ? "Generating..." : "Generate New Install Commands"}
+          </button>
+          <p className="mt-2 mb-2 text-[10px] leading-relaxed text-white/50">
+            Generating new install commands automatically replace the old keys
+            and stop them from working.
+          </p>
+        </>
       )}
+      {showManual && !isLocked ? (
+        <InstallManual
+          program={program}
+          platformTitle={title}
+          claimToken={claimToken}
+          onClose={() => setShowManual(false)}
+        />
+      ) : null}
     </div>
   );
 };

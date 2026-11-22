@@ -170,6 +170,49 @@ def test_dashboard_sync_surfaces_gate_reason_platform_and_key_for_attacks() -> N
     assert "sensitive prompt contents" not in str(attack)
 
 
+def test_dashboard_sync_surfaces_synthetic_threat_generator_attack() -> None:
+    service = InstallKeyDashboardSyncService()
+    owner_key = "owner_dash_generator"
+    today = datetime.now(UTC)
+
+    summary = service.build_dashboard_summary(
+        owner_key=owner_key,
+        install_keys=[
+            _record(key_id="ik_openclaw_generator", owner_key=owner_key, program="openclaw"),
+        ],
+        wallet_summary={"owner_key": owner_key, "balance_units": 10, "install_key_usage": {}},
+        audit_events=[
+            SimpleNamespace(
+                event_id="audit-threat-generator-1",
+                event_type="agent_gate_decision",
+                severity="high",
+                created_at=today,
+                verdict="block",
+                metadata={
+                    "gate": "agent",
+                    "platform": "openclaw",
+                    "category": "Indirect prompt injection",
+                    "threat_title": "Indirect prompt injection",
+                    "reason_codes": ["Indirect prompt injection"],
+                    "install_key_id": "ik_openclaw_generator",
+                    "synthetic": True,
+                    "threat_generator": True,
+                    "source": "threat_generator",
+                    "owner_key": owner_key,
+                },
+            ),
+        ],
+        blocked_activity_total=1,
+    )
+
+    attack = summary["attacks"][0]
+    assert attack["title"] == "Indirect Prompt Injection"
+    assert attack["threat_type"] == "Indirect prompt injection"
+    assert attack["key_id"] == "ik_openclaw_generator"
+    assert attack["verdict"] == "BLOCK"
+    assert summary["blocked_activity_total"] == 1
+
+
 def test_dashboard_sync_rejects_generic_platform_auth_as_owner() -> None:
     service = InstallKeyDashboardSyncService()
 
