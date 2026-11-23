@@ -79,10 +79,10 @@ const GH_UBU_2 = GH_MAC_2;
 
 const IRON_WIN = [
   {
-    text: "Open Windows Terminal or PowerShell. Paste the Install Skill Command from your platform card and press Enter. Wait for it to finish, which can take a few minutes.",
+    text: "Open Windows Terminal or PowerShell. Paste the Install Skill Command from this platform's card and press Enter. Wait for it to finish, which can take a few minutes.",
   },
   {
-    text: "Paste the Installer Bootstrap Command from your platform card and press Enter.",
+    text: "Paste the Installer Bootstrap Command from this platform's card and press Enter.",
   },
   {
     text: "Success: the last line says shared skill installed. If you see 'not recognized,' close the terminal, open a new one, and try again.",
@@ -91,10 +91,10 @@ const IRON_WIN = [
 
 const IRON_MAC = [
   {
-    text: "Open Terminal. Paste the Install Skill Command from your platform card and press Enter. Wait for it to finish.",
+    text: "Open Terminal. Paste the Install Skill Command from this platform's card and press Enter. Wait for it to finish.",
   },
   {
-    text: "Paste the Installer Bootstrap Command from your platform card and press Enter.",
+    text: "Paste the Installer Bootstrap Command from this platform's card and press Enter.",
   },
   {
     text: "Success: the last line says shared skill installed. If you see 'command not found: python,' install Python from step 1, then close Terminal and try again.",
@@ -111,10 +111,10 @@ const IRON_UBU = [
     code: ["source ~/ironclaw-venv/bin/activate"],
   },
   {
-    text: "Paste the Install Skill Command from your platform card and press Enter. Wait for it to finish.",
+    text: "Paste the Install Skill Command from this platform's card and press Enter. Wait for it to finish.",
   },
   {
-    text: "Paste the Installer Bootstrap Command from your platform card and press Enter.",
+    text: "Paste the Installer Bootstrap Command from this platform's card and press Enter.",
   },
   {
     text: "Success: the last line says shared skill installed. If you see 'No module named venv,' type sudo apt install -y python3-venv, press Enter, then create the environment again.",
@@ -135,10 +135,18 @@ const MANUAL_STEPS = {
         ...PY_WIN,
         ...GIT_WIN,
         {
-          text: "Open Windows Terminal or PowerShell and type the line below. Wait for the cursor to return. Close it, open a new one, and type claude --version.",
+          text: "Open Windows Terminal or PowerShell and type the line below. Wait for the cursor to return. Then close it, open a new one, and type claude --version.",
           code: ["irm https://claude.ai/install.ps1 | iex"],
         },
-        ...IRON_WIN,
+        {
+          text: "Open Windows Terminal or PowerShell. Paste the Install Skill Command from this platform's card and press Enter. Wait for it to finish, which can take a few minutes.",
+        },
+        {
+          text: "Paste the Installer Bootstrap Command from this platform's card and press Enter.",
+        },
+        {
+          text: "The last line says shared skill installed. If you see 'not recognized,' close the terminal, open a new one, and try again.",
+        },
         ...CLAUDE_RESTART,
       ],
     },
