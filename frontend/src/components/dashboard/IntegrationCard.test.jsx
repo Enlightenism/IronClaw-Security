@@ -112,6 +112,17 @@ describe("IntegrationCard", () => {
     expect(screen.getByTestId("claude-code-card-manual")).toBeEnabled();
   });
 
+  it("opens the install guide after purchase before a command is generated", async () => {
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.click(screen.getByTestId("claude-code-card-manual"));
+
+    expect(
+      screen.getByRole("dialog", { name: "Claude Code Install Guide" }),
+    ).toBeInTheDocument();
+  });
+
   it("Antigravity CLI uses the shared button labels", () => {
     renderCard({
       title: "Antigravity CLI",
@@ -314,6 +325,7 @@ describe("IntegrationCard", () => {
     renderCard({ available: false, onCreateClaim });
 
     expect(screen.getByTestId("claude-code-card-generate")).toBeDisabled();
+    expect(screen.getByTestId("claude-code-card-manual")).toBeDisabled();
     expect(
       screen.getByTestId("claude-code-card-unavailable-note"),
     ).toHaveTextContent("Purchase verification is required");

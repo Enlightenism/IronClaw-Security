@@ -708,7 +708,7 @@ const IntegrationCard = ({
           </p>
         </>
       )}
-      {showManual && !isLocked ? (
+      {showManual && canGenerate ? (
         <InstallManual
           program={program}
           platformTitle={title}
