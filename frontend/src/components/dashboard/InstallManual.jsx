@@ -404,25 +404,19 @@ const MANUAL_STEPS = {
   },
   openclaw: {
     windows: {
-      intro: "Use PowerShell as Administrator, then Ubuntu.",
+      intro: "Use Windows Terminal or PowerShell.",
       steps: [
+        ...PY_WIN,
+        ...GIT_WIN,
         {
-          text: "Open PowerShell as Administrator. Type the line below, press Enter, and restart when asked.",
-          code: ["wsl --install -d Ubuntu"],
-        },
-        {
-          text: "Open Ubuntu from the Start menu and create a username and password. From here on, every step is in the Ubuntu window.",
-        },
-        ...UBU_SETUP,
-        ...GH_UBU_1,
-        ...GH_UBU_2,
-        {
-          text: "Open Terminal and type the line below. It installs Node if needed and may ask for your password. Close Terminal, open it again, and type openclaw --version.",
+          text: "Open Windows Terminal or PowerShell and type the line below. It installs Node if needed. Then close it, open a new one, and type openclaw --version.",
           code: [
-            "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard",
+            "& ([scriptblock]::Create((iwr -useb https://openclaw.ai/install.ps1))) -NoOnboard",
           ],
         },
-        ...IRON_UBU,
+        ...GH_WIN_1,
+        ...GH_WIN_2,
+        ...IRON_WIN,
       ],
     },
     mac: {
