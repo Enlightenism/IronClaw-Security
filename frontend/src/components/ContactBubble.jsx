@@ -20,9 +20,9 @@ const ContactBubble = () => {
           src={KNIGHT_LOGO_SRC}
           alt=""
           aria-hidden="true"
-          className="contact-bubble-knight h-14 w-14 sm:h-16 sm:w-16"
+          className="contact-bubble-knight h-16 w-16 sm:h-[72px] sm:w-[72px]"
         />
-        <span className="metal-gold-text inline-block text-[11px] leading-none sm:text-xs">
+        <span className="metal-gold-text inline-block text-[13px] leading-none sm:text-sm">
           CONTACT
         </span>
       </button>

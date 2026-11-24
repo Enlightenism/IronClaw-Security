@@ -175,8 +175,8 @@ svg {
 }
 
 .footer-brand-logo {
-    width: 3.5rem;
-    height: 3.5rem;
+    width: 4.25rem;
+    height: 4.25rem;
     object-fit: contain;
     border-radius: 0.5rem;
     display: block;
@@ -185,8 +185,8 @@ svg {
 
 @media (min-width: 640px) {
     .footer-brand-logo {
-        width: 4rem;
-        height: 4rem;
+        width: 4.5rem;
+        height: 4.5rem;
     }
 }
 

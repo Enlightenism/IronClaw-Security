@@ -626,12 +626,12 @@ const Dashboard = () => {
         >
           <h3
             id="footer-resources-title"
-            className="font-tech text-xs font-bold uppercase tracking-[0.2em] text-white"
+            className="font-tech text-sm font-bold uppercase tracking-[0.2em] text-white sm:text-base"
           >
             Free Resources For Learning{" "}
             <span className="metal-gold-text">Cyber Security</span>
           </h3>
-          <ul className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs">
+          <ul className="flex flex-wrap items-center justify-center gap-x-5 gap-y-3 text-base sm:text-lg">
             {FOOTER_RESOURCE_LINKS.map((resource, i) => (
               <li key={resource.href}>
                 <a
@@ -639,7 +639,7 @@ const Dashboard = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                   data-testid={`footer-resource-link-${i}`}
-                  className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+                  className="text-white transition hover:text-[#FFD700]"
                 >
                   {resource.label}
                 </a>
@@ -653,21 +653,21 @@ const Dashboard = () => {
             alt="IronClaw-Security"
             className="footer-brand-logo"
           />
-          <span className="font-tech text-sm font-bold tracking-tight">
+          <span className="font-tech text-base font-bold tracking-tight sm:text-lg">
             IRONCLAW<span className="metal-gold-text">-SECURITY</span>
           </span>
         </div>
-        <div className="flex flex-col items-center gap-2 text-xs sm:flex-row sm:gap-6">
+        <div className="flex flex-col items-center gap-2 text-sm sm:flex-row sm:gap-6 sm:text-base">
           <Link
             to="/privacy"
-            className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+            className="text-white transition hover:text-[#FFD700]"
           >
             Privacy Policy
           </Link>
           <span className="hidden text-white/15 sm:inline">|</span>
           <Link
             to="/terms"
-            className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+            className="text-white transition hover:text-[#FFD700]"
           >
             Terms of Service
           </Link>
@@ -676,18 +676,18 @@ const Dashboard = () => {
             type="button"
             onClick={() => setContactOpen(true)}
             data-testid="footer-contact-link"
-            className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+            className="text-white transition hover:text-[#FFD700]"
           >
             CONTACT
           </button>
         </div>
         <ContactModal open={contactOpen} onOpenChange={setContactOpen} />
-        <p className="max-w-2xl text-[11px] text-[#737373] sm:text-xs">
+        <p className="max-w-2xl text-sm text-white sm:text-base">
           The enforcement layer serious engineers trust with production AI
           systems.
         </p>
         <p
-          className="max-w-4xl font-tech text-[10px] leading-relaxed text-[#737373] sm:text-xs"
+          className="max-w-4xl font-tech text-xs leading-relaxed text-white sm:text-sm"
           data-testid="powered-by"
         >
           <span className="inline-flex flex-wrap items-center justify-center gap-x-1 gap-y-1">

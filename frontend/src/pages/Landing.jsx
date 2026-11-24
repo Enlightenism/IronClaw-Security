@@ -1,23 +1,7 @@
 import { useState, useEffect, lazy, Suspense, useRef } from "react";
 import { motion } from "framer-motion";
 import { useNavigate, Link } from "react-router-dom";
-import {
-  Syringe,
-  ShieldAlert,
-  ScrollText,
-  Workflow,
-  Boxes,
-  Activity,
-  Network,
-  FileSearch,
-  KeyRound,
-  Lock,
-  UserCheck,
-  FileClock,
-  Fingerprint,
-  BrainCircuit,
-  ArrowRight,
-} from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import AuthModal from "@/components/AuthModal";
 import ContactBubble from "@/components/ContactBubble";
 import ContactModal from "@/components/ContactModal";
@@ -32,72 +16,58 @@ const ParticleField = lazy(() => import("@/components/ParticleField"));
 
 const LAYERS = [
   {
-    icon: Syringe,
     title: "Prompt Injection",
     body: "Scans every inbound prompt for injection patterns, jailbreak attempts, and adversarial content before a single LLM call is ever made. The first gate nothing bypasses.",
   },
   {
-    icon: ShieldAlert,
     title: "Action Guard",
     body: "A pre-execution gate that evaluates every proposed agent action against risk rules, returning only allow or block verdicts before the action can run.",
   },
   {
-    icon: ScrollText,
     title: "Action Policy Enforcement",
     body: "Applies named policy rules — allow-lists, deny-lists, and hard capability constraints — to every tool call and agent decision at the policy layer. No exceptions.",
   },
   {
-    icon: Workflow,
     title: "Action Decision",
     body: "Synthesizes the guard verdict and policy verdict into a single final executable decision, complete with a full reasoning trace captured for audit.",
   },
   {
-    icon: Boxes,
     title: "Sandboxed Execution",
     body: "Executes risky tool calls and code payloads inside an isolated runtime boundary. The detonation service stress-tests payloads in a contained environment before anything reaches production.",
   },
   {
-    icon: Activity,
     title: "Heuristics & Behavioral Baseline",
     body: "Detects anomalous agent behavior by comparing live activity against learned baselines, flagging statistical deviations as threats in real time — before they escalate.",
   },
   {
-    icon: Network,
     title: "Attack Correlation",
     body: "Cross-correlates signals from every layer and across sessions to expose coordinated multi-step attacks, chained injections, and lateral movement patterns.",
   },
   {
-    icon: FileSearch,
     title: "File Inspection + Malware",
     body: "Inspects all file inputs and outputs for malicious payloads, embedded scripts, and malware signatures before they are ever processed or returned to your system.",
   },
   {
-    icon: KeyRound,
     title: "Secrets Detection & Redaction",
     body: "Detects credentials, API keys, and sensitive tokens across prompts, responses, and tool outputs — redacting them before leakage and vaulting them securely.",
   },
   {
-    icon: Lock,
     title: "Full Block",
     body: "Every agent return is scanned instantly in a sandbox, separate from the user machine. Any information returning with the agent that is even slightly suspicious is terminated.",
   },
   {
-    icon: UserCheck,
     title: "Malicious Install Skills Blocked",
     body: "Install IronClaw-Security before using any other install skill, and that skill will be scanned before installed. One of the major issues for coding platforms today.",
   },
   {
-    icon: FileClock,
     title: "Audit Log + Incident Store",
     body: "An immutable, timestamped audit trail of every verdict, action, and policy decision. Incidents are persisted for post-hoc investigation and compliance.",
   },
   {
-    icon: Fingerprint,
     title: "Access Control, Auth & Org Isolation",
     body: "Enforces API-level authentication, role-based permissions, and hard tenant isolation — so no org can read, influence, or pollute another org's security context.",
   },
   {
-    icon: BrainCircuit,
     title: "AI Brain",
     body: "An AI brain analyzes every agent return isolated inside the sandbox, working in lockstep with the security system to ensure NOTHING reaches your computer or phone.",
   },
@@ -533,7 +503,6 @@ const Landing = () => {
 
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {LAYERS.map((f, i) => {
-                const Icon = f.icon;
                 return (
                   <motion.div
                     key={f.title}
@@ -543,17 +512,9 @@ const Landing = () => {
                     whileInView="show"
                     viewport={{ once: true, margin: "-40px" }}
                     onMouseMove={onCardMove}
-                    className="feature-card rounded-2xl p-6"
+                    className="feature-card flex h-full min-h-[220px] flex-col items-center justify-center rounded-2xl p-6 text-center"
                     data-testid={`feature-card-${i}`}
                   >
-                    <div className="mb-4 flex items-center justify-between">
-                      <div className="metal-gold-icon flex h-11 w-11 items-center justify-center rounded-xl">
-                        <Icon className="text-[#FFD700]" size={20} />
-                      </div>
-                      <span className="layer-tag font-tech text-xs font-semibold tracking-widest text-white/30">
-                        L{i + 1}
-                      </span>
-                    </div>
                     <h3 className="mb-2 text-base font-semibold tracking-tight">
                       <span className="metal-gold-text">Layer {i + 1}</span>
                       <span className="text-white"> — {f.title}</span>
@@ -630,10 +591,10 @@ const Landing = () => {
               viewport={{ once: true, margin: "-80px" }}
               className="mb-10 text-center"
             >
-              <div className="mb-3 inline-block rounded-full border border-[#FFD700]/30 bg-[#C9A84C]/10 px-4 py-1 font-tech text-xs uppercase tracking-[0.3em] text-[#FFD700]">
+              <div className="mb-3 inline-block rounded-full border border-[#FFD700]/30 bg-[#C9A84C]/10 px-4 py-1 font-tech text-sm uppercase tracking-[0.3em] text-[#FFD700]">
                 Platform Coverage
               </div>
-              <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+              <h2 className="text-4xl font-semibold tracking-tight sm:text-5xl">
                 Platforms Protected By{" "}
                 <span className="metal-gold-text">Gen 1 IronClaw-Security</span>
               </h2>
@@ -651,23 +612,23 @@ const Landing = () => {
                   className="list-none py-3 text-left"
                 >
                   <div className="mb-2 flex items-center gap-3">
-                    <span className="font-tech text-[10px] uppercase tracking-[0.28em] text-[#FFD700]">
+                    <span className="font-tech text-xs uppercase tracking-[0.28em] text-[#FFD700] sm:text-sm">
                       Protected
                     </span>
-                    <h3 className="text-2xl font-semibold tracking-tight text-white">
+                    <h3 className="text-3xl font-semibold tracking-tight text-white sm:text-3xl">
                       <span className="metal-gold-text">{platform.name}</span>
                     </h3>
                   </div>
 
-                  <ul className="space-y-3 text-base leading-relaxed text-[#E5E4E2] sm:text-[15px]">
+                  <ul className="space-y-3 text-lg leading-relaxed text-white sm:text-[18px]">
                     <li className="border-l border-[#FFD700]/30 pl-4">
-                      <span className="mb-1 block font-tech text-[10px] uppercase tracking-[0.26em] text-[#BFC1C2]">
+                      <span className="mb-1 block font-tech text-xs uppercase tracking-[0.26em] text-[#FFFFFF] sm:text-sm">
                         How it works
                       </span>
                       <span>{platform.howItWorks}</span>
                     </li>
                     <li className="border-l border-[#FFD700]/30 pl-4">
-                      <span className="mb-1 block font-tech text-[10px] uppercase tracking-[0.26em] text-[#BFC1C2]">
+                      <span className="mb-1 block font-tech text-xs uppercase tracking-[0.26em] text-[#FFFFFF] sm:text-sm">
                         Why it&apos;s vulnerable
                       </span>
                       <ul className="space-y-2">
@@ -726,12 +687,12 @@ const Landing = () => {
               >
                 <h3
                   id="footer-resources-title"
-                  className="font-tech text-xs font-bold uppercase tracking-[0.2em] text-white"
+                  className="font-tech text-sm font-bold uppercase tracking-[0.2em] text-white sm:text-base"
                 >
                   Free Resources For Learning{" "}
                   <span className="metal-gold-text">Cyber Security</span>
                 </h3>
-                <ul className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs">
+                <ul className="flex flex-wrap items-center justify-center gap-x-5 gap-y-3 text-base sm:text-lg">
                   {FOOTER_RESOURCE_LINKS.map((resource, i) => (
                     <li key={resource.href}>
                       <a
@@ -739,7 +700,7 @@ const Landing = () => {
                         target="_blank"
                         rel="noopener noreferrer"
                         data-testid={`footer-resource-link-${i}`}
-                        className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+                        className="text-white transition hover:text-[#FFD700]"
                       >
                         {resource.label}
                       </a>
@@ -753,15 +714,15 @@ const Landing = () => {
                   alt="IronClaw-Security"
                   className="footer-brand-logo"
                 />
-                <span className="font-tech text-sm font-bold tracking-tight">
+                <span className="font-tech text-base font-bold tracking-tight sm:text-lg">
                   IRONCLAW<span className="metal-gold-text">-SECURITY</span>
                 </span>
               </div>
-              <div className="flex flex-col items-center gap-2 text-xs sm:flex-row sm:gap-6">
+              <div className="flex flex-col items-center gap-2 text-sm sm:flex-row sm:gap-6 sm:text-base">
                 <Link
                   to="/privacy"
                   data-testid="footer-privacy-link"
-                  className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+                  className="text-white transition hover:text-[#FFD700]"
                 >
                   Privacy Policy
                 </Link>
@@ -769,7 +730,7 @@ const Landing = () => {
                 <Link
                   to="/terms"
                   data-testid="footer-terms-link"
-                  className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+                  className="text-white transition hover:text-[#FFD700]"
                 >
                   Terms of Service
                 </Link>
@@ -778,18 +739,18 @@ const Landing = () => {
                   type="button"
                   onClick={() => setContactOpen(true)}
                   data-testid="footer-contact-link"
-                  className="text-[#BFC1C2] transition hover:text-[#FFD700]"
+                  className="text-white transition hover:text-[#FFD700]"
                 >
                   CONTACT
                 </button>
               </div>
               <ContactModal open={contactOpen} onOpenChange={setContactOpen} />
-              <p className="max-w-2xl text-[11px] text-[#737373] sm:text-xs">
+              <p className="max-w-2xl text-sm text-white sm:text-base">
                 The enforcement layer serious engineers trust with production AI
                 systems.
               </p>
               <p
-                className="max-w-4xl font-tech text-[10px] leading-relaxed text-[#737373] sm:text-xs"
+                className="max-w-4xl font-tech text-xs leading-relaxed text-white sm:text-sm"
                 data-testid="powered-by"
               >
                 <span className="inline-flex flex-wrap items-center justify-center gap-x-1 gap-y-1">
