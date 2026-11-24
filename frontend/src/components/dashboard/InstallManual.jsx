@@ -138,15 +138,7 @@ const MANUAL_STEPS = {
           text: "Open Windows Terminal or PowerShell and type the line below. Wait for the cursor to return. Then close it, open a new one, and type claude --version.",
           code: ["irm https://claude.ai/install.ps1 | iex"],
         },
-        {
-          text: "Open Windows Terminal or PowerShell. Paste the Install Skill Command from this platform's card and press Enter. Wait for it to finish, which can take a few minutes.",
-        },
-        {
-          text: "Paste the Installer Bootstrap Command from this platform's card and press Enter.",
-        },
-        {
-          text: "The last line says shared skill installed. If you see 'not recognized,' close the terminal, open a new one, and try again.",
-        },
+        ...IRON_WIN,
         ...CLAUDE_RESTART,
       ],
     },
@@ -209,9 +201,7 @@ const MANUAL_STEPS = {
       intro: "Use Terminal.",
       steps: [
         ...UBU_SETUP,
-        {
-          text: "Go to cursor.com, download the Linux version, and install it.",
-        },
+        { text: "Go to cursor.com and install Cursor." },
         ...GH_UBU_1,
         ...GH_UBU_2,
         ...IRON_UBU,
@@ -414,7 +404,7 @@ const MANUAL_STEPS = {
   },
   openclaw: {
     windows: {
-      intro: "Use Windows Terminal or PowerShell, then Ubuntu.",
+      intro: "Use PowerShell as Administrator, then Ubuntu.",
       steps: [
         {
           text: "Open PowerShell as Administrator. Type the line below, press Enter, and restart when asked.",
@@ -499,10 +489,6 @@ export default function InstallManual({ program, platformTitle, onClose }) {
     ["Mac", selected.mac],
     ["Ubuntu", selected.ubuntu],
   ];
-
-  if (program === "openclaw") {
-    sections[0][0] = "Windows (runs inside Ubuntu)";
-  }
 
   return (
     <div
