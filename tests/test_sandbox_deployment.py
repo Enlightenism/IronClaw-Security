@@ -41,3 +41,14 @@ def test_render_blueprint_pins_supported_runtime_and_external_broker() -> None:
     assert "key: SANDBOX_BROKER_TOKEN" in render
     assert "sync: false" in render
     assert "SANDBOX_BROKER_STARTUP_GRACE_SECONDS" in render
+
+
+def test_deployment_python_and_healthcheck_configuration_is_compatible() -> None:
+    python_version = (PROJECT_ROOT / ".python-version").read_text(encoding="utf-8").strip()
+    dockerfile = (PROJECT_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    render = (PROJECT_ROOT / "render.yaml").read_text(encoding="utf-8")
+
+    assert python_version == "3.12.10"
+    assert "python:3.12-slim" in dockerfile
+    assert "/health/readiness" in dockerfile
+    assert "healthCheckPath: /health/readiness" in render
