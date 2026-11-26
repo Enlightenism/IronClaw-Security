@@ -6,8 +6,6 @@ from app.config import RISK_THRESHOLD_BLOCK_MIN
 if TYPE_CHECKING:
     from app.orchestrator.claude_sandbox_executor import SandboxRunner
 
-QUARANTINE_TARGET_TYPES = {"skill", "archive", "local_path"}
-HIGH_RISK_SANDBOX_TARGET_TYPES = {"github_repo"}
 SANDBOX_SCAN_TIMEOUT_SECONDS = 30
 
 
@@ -22,43 +20,13 @@ class SandboxDecision:
 
 
 def evaluate_sandbox(target_type: str, route_mode: str, requires_sandbox: bool) -> SandboxDecision:
-    if not requires_sandbox or route_mode != "sandbox":
-        return SandboxDecision(
-            enforced=False,
-            verdict_override=None,
-            summary_suffix="",
-            quarantine_reason=None,
-            review_status="none",
-            untrusted=False,
-        )
-
-    if target_type in QUARANTINE_TARGET_TYPES:
-        return SandboxDecision(
-            enforced=True,
-            verdict_override="block",
-            summary_suffix=" Blocked because this target requires sandbox handling.",
-            quarantine_reason=f"{target_type} requires sandbox handling",
-            review_status="none",
-            untrusted=True,
-        )
-
-    if target_type in HIGH_RISK_SANDBOX_TARGET_TYPES:
-        return SandboxDecision(
-            enforced=True,
-            verdict_override="block",
-            summary_suffix=" Blocked because repository scanning requires an isolated sandbox that is not configured.",
-            quarantine_reason="github_repo sandbox scanner unavailable",
-            review_status="none",
-            untrusted=True,
-        )
-
     return SandboxDecision(
-        enforced=False,
-        verdict_override=None,
-        summary_suffix="",
+        enforced=True,
+        verdict_override="block",
+        summary_suffix=f" Target type {target_type} requires isolated sandbox release.",
         quarantine_reason=None,
         review_status="none",
-        untrusted=False,
+        untrusted=True,
     )
 
 
@@ -79,8 +47,23 @@ def run_sandbox_scan(target_type: str, target_value: str, runner: "SandboxRunner
     except Exception:
         return "block"
 
-    if isinstance(result, dict) and result.get("verdict") == "allow":
-        return "allow"
+    if isinstance(result, dict):
+        reasons = result.get("reasons")
+        risk_score = result.get("risk_score")
+        released_text = result.get("released_text")
+        if (
+            result.get("verdict") == "allow"
+            and result.get("status") == "completed"
+            and result.get("executor") == "docker"
+            and result.get("untrusted") is False
+            and isinstance(risk_score, int)
+            and not isinstance(risk_score, bool)
+            and 0 <= risk_score <= 29
+            and isinstance(reasons, list)
+            and not reasons
+            and isinstance(released_text, str)
+        ):
+            return "allow"
     return "block"
 
 

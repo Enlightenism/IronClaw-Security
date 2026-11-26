@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from fastapi import Depends, FastAPI
 from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
 from app.core.security import get_allowed_origins, install_security_middleware
@@ -407,7 +408,20 @@ def _install_core_routes(app: FastAPI) -> None:
         return {"status": "ok"}
 
     @app.get("/health/readiness", tags=["system"])
-    def health_readiness() -> dict[str, str]:
+    def health_readiness() -> Any:
+        readiness = _sandbox_release_readiness()
+        if not readiness["ready"] and settings.environment.strip().lower() == "production":
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "not_ready",
+                    "reason": readiness["reason"],
+                },
+            )
+        if not readiness["ready"]:
+            return {
+                "status": "ok",
+            }
         return {"status": "ok"}
 
     @app.get("/system/status", tags=["system"])
@@ -613,6 +627,53 @@ def _stop_remediation_scheduler() -> None:
         _log.error("main.lifespan: remediation_scheduler failed to stop: %s", exc)
 
 
+def _sandbox_release_readiness() -> dict[str, Any]:
+    try:
+        from app.services.sandbox_broker_client import SandboxBrokerClient
+
+        broker = SandboxBrokerClient().health()
+    except Exception as exc:
+        return {
+            "ready": False,
+            "reason": "sandbox_readiness_check_failed",
+            "details": {"error": repr(exc)},
+        }
+
+    if not broker.get("reachable"):
+        return {
+            "ready": False,
+            "reason": broker.get("reason") or "broker_unreachable",
+            "details": broker,
+        }
+
+    if broker.get("scanner_image") != "ready":
+        return {
+            "ready": False,
+            "reason": "sandbox_scanner_image_not_ready",
+            "details": broker,
+        }
+
+    if broker.get("prompt_guard_model") != "ready":
+        return {
+            "ready": False,
+            "reason": "prompt_guard_model_not_ready",
+            "details": broker,
+        }
+
+    if broker.get("policy_snapshot") != "ready":
+        return {
+            "ready": False,
+            "reason": "sandbox_policy_snapshot_not_ready",
+            "details": broker,
+        }
+
+    return {
+        "ready": True,
+        "reason": None,
+        "details": broker,
+    }
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pipeline = None
@@ -634,6 +695,20 @@ async def lifespan(app: FastAPI):
     )
 
     _log.info("main.lifespan: startup begin")
+
+    settings = get_settings()
+    sandbox_readiness = _sandbox_release_readiness()
+    app.state.sandbox_release_ready = bool(sandbox_readiness["ready"])
+    app.state.sandbox_release_readiness = sandbox_readiness
+    if not sandbox_readiness["ready"]:
+        if settings.environment.strip().lower() == "production":
+            raise RuntimeError(f"Production startup blocked: sandbox release gate is not ready ({sandbox_readiness['reason']}).")
+        _log.warning(
+            "main.lifespan: sandbox release gate not ready outside production: %s",
+            sandbox_readiness["reason"],
+        )
+    else:
+        _log.info("main.lifespan: sandbox release gate ready")
 
     _initialize_scan_history_repository()
     await _initialize_policy_rules()

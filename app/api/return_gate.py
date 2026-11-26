@@ -1,4 +1,4 @@
-"""Return gate routes: audit-only scan for post-run observers and replacement transform for blocked returns."""
+"""Return gate release route for post-run output isolation."""
 
 from __future__ import annotations
 
@@ -55,19 +55,11 @@ class ReturnGateRequest(BaseModel):
         return self
 
 
-class ReturnGateScanResponse(BaseModel):
-    verdict: str
-    sandbox_id: str
-    stage: str
-    reasons: list[str]
-    risk_score: int
-    audit_only: bool = True
-
-
 class ReturnGateTransformResponse(BaseModel):
     verdict: str
     sandbox_id: str
     replacement: str | None
+    released_text: str | None
     reasons: list[str]
 
 
@@ -97,18 +89,6 @@ def _decide(request: ReturnGateRequest, auth_ctx: AuthContext | InstallKeyAuthCo
     )
 
 
-@router.post("/scan", response_model=ReturnGateScanResponse)
-def scan_return_output(request: ReturnGateRequest, auth_ctx: AuthContext | InstallKeyAuthContext = Depends(require_runtime_auth_context)) -> ReturnGateScanResponse:
-    decision = _decide(request, auth_ctx)
-    return ReturnGateScanResponse(
-        verdict=decision.verdict,
-        sandbox_id=decision.sandbox_id,
-        stage=decision.stage,
-        reasons=decision.reasons,
-        risk_score=decision.risk_score,
-    )
-
-
 @router.post("/transform", response_model=ReturnGateTransformResponse)
 def transform_return_output(request: ReturnGateRequest, auth_ctx: AuthContext | InstallKeyAuthContext = Depends(require_runtime_auth_context)) -> ReturnGateTransformResponse:
     decision = _decide(request, auth_ctx)
@@ -116,5 +96,6 @@ def transform_return_output(request: ReturnGateRequest, auth_ctx: AuthContext | 
         verdict=decision.verdict,
         sandbox_id=decision.sandbox_id,
         replacement=BLOCKED_REPLACEMENT_TEXT if decision.blocked else None,
+        released_text=decision.released_text if decision.verdict == "allow" else None,
         reasons=decision.reasons,
     )

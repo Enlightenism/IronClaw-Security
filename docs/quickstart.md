@@ -96,8 +96,10 @@ print(result.scan_id)  # UUID for audit trail
 | `allow` | Proceed normally |
 | `block` | Do not proceed; investigate the reason |
 
-Blocked items may be isolated for operational review, but quarantine is not a
-separate verdict.
+For agent returns, the original output enters a fresh isolated sandbox
+immediately. It remains isolated while the security system evaluates it; no
+original output is released unless the sandbox verdict is `allow`. Quarantine,
+incident handling, and human review never authorize release.
 
 ---
 

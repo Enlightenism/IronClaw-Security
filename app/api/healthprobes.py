@@ -60,11 +60,24 @@ def _uptime_seconds() -> int:
 
 def _readiness_checks() -> list[ComponentStatus]:
     pipeline_ok = get_action_execute_pipeline() is not None
+    try:
+        from app.services.sandbox_broker_client import SandboxBrokerClient
+
+        broker = SandboxBrokerClient().health()
+        sandbox_ok = broker.get("reachable") is True and broker.get("scanner_image") == "ready" and broker.get("prompt_guard_model") == "ready" and broker.get("policy_snapshot") == "ready"
+    except Exception:
+        broker = {"reason": "sandbox_health_check_failed"}
+        sandbox_ok = False
     return [
         ComponentStatus(
             name="action_execute_pipeline",
             status="ok" if pipeline_ok else "unavailable",
             details={"initialized": pipeline_ok},
+        ),
+        ComponentStatus(
+            name="sandbox_release_gate",
+            status="ok" if sandbox_ok else "unavailable",
+            details=broker,
         ),
         ComponentStatus(
             name="api_router",

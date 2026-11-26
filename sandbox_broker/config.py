@@ -21,24 +21,34 @@ BROKER_PIDS_LIMIT_ENV = "SANDBOX_BROKER_PIDS_LIMIT"
 BROKER_TMPFS_SIZE_ENV = "SANDBOX_BROKER_TMPFS_SIZE"
 BROKER_MAX_REQUEST_BYTES_ENV = "SANDBOX_BROKER_MAX_REQUEST_BYTES"
 BROKER_MAX_OUTPUT_BYTES_ENV = "SANDBOX_BROKER_MAX_OUTPUT_BYTES"
+BROKER_SCANNER_IMAGE_VERSION_ENV = "SANDBOX_SCANNER_IMAGE_VERSION"
+BROKER_SCANNER_IMAGE_MIN_VERSION_ENV = "SANDBOX_SCANNER_IMAGE_MIN_VERSION"
+BROKER_PROMPT_GUARD_MODEL_VERSION_ENV = "SANDBOX_PROMPT_GUARD_MODEL_VERSION"
+BROKER_PROMPT_GUARD_MODEL_MIN_VERSION_ENV = "SANDBOX_PROMPT_GUARD_MODEL_MIN_VERSION"
 
 DEFAULT_BIND_HOST = "127.0.0.1"
 DEFAULT_PORT = 8088
 DEFAULT_IMAGE = "ironclaw-sandbox-scanner:1"
 DEFAULT_DOCKER_BINARY = "docker"
-DEFAULT_TIMEOUT_SECONDS = 8.0
-DEFAULT_MAX_TIMEOUT_SECONDS = 30.0
-DEFAULT_MEMORY = "256m"
-DEFAULT_CPUS = "0.5"
-DEFAULT_PIDS_LIMIT = 64
-DEFAULT_TMPFS_SIZE = "32m"
+DEFAULT_TIMEOUT_SECONDS = 30.0
+DEFAULT_MAX_TIMEOUT_SECONDS = 60.0
+DEFAULT_MEMORY = "1g"
+DEFAULT_CPUS = "1.0"
+DEFAULT_PIDS_LIMIT = 128
+DEFAULT_TMPFS_SIZE = "64m"
 DEFAULT_MAX_REQUEST_BYTES = 2_097_152
 DEFAULT_MAX_OUTPUT_BYTES = 65_536
 CONTAINER_USER = "65532:65532"
+DEFAULT_SCANNER_IMAGE_VERSION = "1"
+DEFAULT_SCANNER_IMAGE_MIN_VERSION = "1"
+DEFAULT_PROMPT_GUARD_MODEL_VERSION = "86m"
+DEFAULT_PROMPT_GUARD_MODEL_MIN_VERSION = "86m"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 ALLOWED_ACTIONS = frozenset({"scan"})
 _SIZE_PATTERN = re.compile(r"[1-9][0-9]*[bBkKmMgG]?")
 _CPU_PATTERN = re.compile(r"[0-9]+(\.[0-9]+)?")
+_SCANNER_VERSION_PATTERN = re.compile(r"[0-9]+(?:\.[0-9]+)*")
+_MODEL_VERSION_PATTERN = re.compile(r"[1-9][0-9]*m")
 
 
 @dataclass(frozen=True)
@@ -58,6 +68,10 @@ class BrokerConfig:
     max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
     allowed_actions: frozenset[str] = ALLOWED_ACTIONS
+    scanner_image_version: str = DEFAULT_SCANNER_IMAGE_VERSION
+    scanner_image_min_version: str = DEFAULT_SCANNER_IMAGE_MIN_VERSION
+    prompt_guard_model_version: str = DEFAULT_PROMPT_GUARD_MODEL_VERSION
+    prompt_guard_model_min_version: str = DEFAULT_PROMPT_GUARD_MODEL_MIN_VERSION
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> BrokerConfig:
@@ -75,6 +89,40 @@ class BrokerConfig:
         if timeout_seconds > max_timeout_seconds:
             raise RuntimeError(f"{BROKER_TIMEOUT_ENV} must not exceed {BROKER_MAX_TIMEOUT_ENV}.")
 
+        scanner_image_version = _read_version(
+            env,
+            BROKER_SCANNER_IMAGE_VERSION_ENV,
+            DEFAULT_SCANNER_IMAGE_VERSION,
+            _SCANNER_VERSION_PATTERN,
+            "scanner image",
+        )
+        scanner_image_min_version = _read_version(
+            env,
+            BROKER_SCANNER_IMAGE_MIN_VERSION_ENV,
+            DEFAULT_SCANNER_IMAGE_MIN_VERSION,
+            _SCANNER_VERSION_PATTERN,
+            "minimum scanner image",
+        )
+        if _version_tuple(scanner_image_version) < _version_tuple(scanner_image_min_version):
+            raise RuntimeError(f"{BROKER_SCANNER_IMAGE_VERSION_ENV} must not be lower than {BROKER_SCANNER_IMAGE_MIN_VERSION_ENV}")
+
+        prompt_guard_model_version = _read_version(
+            env,
+            BROKER_PROMPT_GUARD_MODEL_VERSION_ENV,
+            DEFAULT_PROMPT_GUARD_MODEL_VERSION,
+            _MODEL_VERSION_PATTERN,
+            "Prompt Guard model",
+        )
+        prompt_guard_model_min_version = _read_version(
+            env,
+            BROKER_PROMPT_GUARD_MODEL_MIN_VERSION_ENV,
+            DEFAULT_PROMPT_GUARD_MODEL_MIN_VERSION,
+            _MODEL_VERSION_PATTERN,
+            "minimum Prompt Guard model",
+        )
+        if _model_parameter_count(prompt_guard_model_version) < _model_parameter_count(prompt_guard_model_min_version):
+            raise RuntimeError(f"{BROKER_PROMPT_GUARD_MODEL_VERSION_ENV} must not be lower than {BROKER_PROMPT_GUARD_MODEL_MIN_VERSION_ENV}")
+
         return cls(
             token=token,
             bind_host=bind_host,
@@ -89,6 +137,10 @@ class BrokerConfig:
             tmpfs_size=_read_pattern(env, BROKER_TMPFS_SIZE_ENV, DEFAULT_TMPFS_SIZE, _SIZE_PATTERN),
             max_request_bytes=_read_int(env, BROKER_MAX_REQUEST_BYTES_ENV, DEFAULT_MAX_REQUEST_BYTES, 1024, 16_777_216),
             max_output_bytes=_read_int(env, BROKER_MAX_OUTPUT_BYTES_ENV, DEFAULT_MAX_OUTPUT_BYTES, 1024, 1_048_576),
+            scanner_image_version=scanner_image_version,
+            scanner_image_min_version=scanner_image_min_version,
+            prompt_guard_model_version=prompt_guard_model_version,
+            prompt_guard_model_min_version=prompt_guard_model_min_version,
         )
 
 
@@ -125,3 +177,29 @@ def _read_pattern(env: Mapping[str, str], name: str, default: str, pattern: re.P
     if pattern.fullmatch(raw) is None:
         raise RuntimeError(f"{name} has an invalid format.")
     return raw
+
+
+def _read_version(
+    env: Mapping[str, str],
+    name: str,
+    default: str,
+    pattern: re.Pattern[str],
+    description: str,
+) -> str:
+    raw = env.get(name, "").strip()
+    if not raw:
+        return default
+    if pattern.fullmatch(raw) is None:
+        raise RuntimeError(f"{name} has an invalid {description} version.")
+    return raw
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+def _model_parameter_count(version: str) -> int:
+    match = re.fullmatch(r"([1-9][0-9]*)m", version, re.IGNORECASE)
+    if match is None:
+        raise RuntimeError("invalid Prompt Guard model version")
+    return int(match.group(1))

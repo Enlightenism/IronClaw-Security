@@ -18,27 +18,32 @@ Use this shared security workflow when planning or performing actions with an AI
 
 ## Platform coverage
 
-- **Enforce:** the gate can block a tool call or install command before it runs.
-- **Replace:** the gate can substitute the tool result the model sees.
-- **Audit:** the gate records the decision but cannot change the result.
+- **Front gate:** every agent output enters a fresh isolated sandbox before the
+  security system evaluates it.
+- **Release:** no original output reaches the platform or user until the sandbox
+  verdict is `allow`.
+- **Fail closed:** timeout, broker failure, malformed responses, missing model
+  or policy snapshots, and scanner failure withhold the original output.
+- **Replace or suppress:** blocked output is replaced for supported return
+  hooks or suppressed when the platform cannot expose it through a secure path.
 
 | Platform | Install gate | Return path | Notes |
 |---|---|---|---|
-| Claude Code | Enforce (`PreToolUse`, `onFailure: block`, Claude Code v2.1.295 or later; also denies edits to Claude settings and IronClaw package files) | Block with reason (`PostToolUse` `decision: "block"`); the original output is not replaced; failure output warn only (`PostToolUseFailure`) | The installer refuses to redeem a claim on Claude Code older than v2.1.295. See Return-path limits |
-| Copilot CLI | Enforce (`preToolUse`) | Replace (`modifiedResult`, `resultType: "success"`); failure output warn only (`postToolUseFailure`) | Failure warnings cannot replace output |
-| Antigravity CLI | Enforce (`PreToolUse`, stdout `{"decision":"deny","reason":"..."}` hard blocks; no process exit-code contract is stated) | None (`PostToolUse` stdout is `{}`, so result replacement and withholding are not implemented) | Hook path: `~/.gemini/config/hooks.json`; timeout is in seconds |
-| Cursor | Enforce | Replace for local MCP tools (`updated_mcp_tool_output`); built-in tools and HTTP MCP audit only; failure output audit only | Built-in and HTTP MCP results are not replaceable; an event that cannot be parsed is replaced with the blocked notice |
-| Goose | Enforce (PreToolUse, `on_failure: block`) | None (`PostToolUse` is observation-only) | Results cannot be withheld or replaced |
-| Hermes | Enforce (`pre_tool_call`) | Replace (`transform_tool_result`) | Installed as a plugin; one gate call per tool result |
-| OpenClaw | Enforce (`before_tool_call`) | Replace (`tool_result_persist`, synchronous) | Withholds results that fail the scan; see Return-path limits |
+| Claude Code | Enforce (`PreToolUse`, `onFailure: block`) | Transform through `/return-gate/transform` before platform release; use the strongest supported block/replacement contract | Claude output requires a replacement or withholding contract with no passthrough |
+| Copilot CLI | Enforce (`preToolUse`) | Replace (`modifiedResult`, `resultType: "success"`) after sandbox allow | Malformed or failed output gates are fail closed |
+| Antigravity CLI | Enforce (`PreToolUse`) | Return enforcement requires a post-output withholding or replacement contract; otherwise use a controlled proxy | Never claim the platform hook is sufficient when the host provides no replacement path |
+| Cursor | Enforce | Replace supported local MCP output; use `/transform` for every other supported return path | Unsupported built-in or HTTP MCP delivery requires a proxy or must be withheld |
+| Goose | Enforce (PreToolUse, `on_failure: block`) | No post-result hook guarantee; route returns through a proxy/service wrapper | A pre-tool-only hook cannot guarantee universal output isolation |
+| Hermes | Enforce (`pre_tool_call`) | Replace (`transform_tool_result`) only after isolated sandbox allow | Timeout or malformed response is suppressed |
+| OpenClaw | Enforce (`before_tool_call`) | Withhold persistence/context delivery until `/transform` returns an allow envelope | Timeout or malformed response is withheld |
 
 **Verification status** (what has been checked against platform documentation; confirm the rest on your installed version):
 
 | Platform | Shape | Status |
 |---|---|---|
 | Claude Code | `PreToolUse` `onFailure: block` | Key documented for command and HTTP hooks. The v2.1.295 version gate is not confirmed in the public reference; confirm on your installed version. The installer sets an explicit 30-second `timeout` |
-| Claude Code | `PostToolUse` `onFailure: block` | Key verified (command and HTTP hooks); the effect on a tool that already ran is not described, so treat it as a best-effort block |
-| Claude Code | `PostToolUse` `decision: "block"` with `reason` | Verified against the hooks reference: the reason is added next to the tool result after the tool has run. The original output is not replaced, because `updatedToolOutput` must match each built-in tool's output shape and is not used |
+| Claude Code | `PostToolUse` `onFailure: block` | Sandboxed output must use the release contract; the platform must not be told that a hook is sufficient if it cannot replace or withhold the original result |
+| Claude Code | `PostToolUse` `decision: "block"` with `reason` | A block reason is not evidence that the original output was prevented from reaching the platform; use the strongest available replacement/withholding contract or a proxy |
 | Claude Code | `PostToolUseFailure` `hookSpecificOutput.additionalContext` | Verified: event is documented as showing context next to the tool result |
 | Copilot CLI | `postToolUse` `modifiedResult` (`resultType: "success"`, `textResultForLlm`) | Verified against the Copilot hooks reference. Hook entries use the `bash` and `powershell` keys with `timeoutSec` |
 | Copilot CLI | CLI stdout parsing (one JSON document, progress lines removed) | Partially verified: the reference describes the output fields, not the full stdout framing |
@@ -46,15 +51,15 @@ Use this shared security workflow when planning or performing actions with an AI
 | Antigravity CLI | `PreToolUse` stdout `{"decision":"deny","reason":"..."}` | Verified against the Antigravity hooks reference: `deny` hard blocks execution. Timeout is an integer in seconds (default 30). The reference does not specify a separate process exit-code contract for this deny |
 | Antigravity CLI | `PostToolUse` stdout `{}` | Verified against the Antigravity hooks reference: no result replacement or withholding contract is defined, so return scanning is unenforced |
 | Cursor | `postToolUse` `updated_mcp_tool_output` (local MCP, `MCP:` prefix) | Verified: the field is documented; HTTP MCP results arrive redacted and cannot be replaced |
-| Cursor | Hook failure behavior | Verified: any exit code other than 0 or 2 is fail-open, so a crashed return hook lets the result through |
-| Cursor | Built-in and HTTP MCP results | Not replaceable (context or audit only) |
+| Cursor | Hook failure behavior | Malformed, timed-out, or failed sandbox release is fail closed; unsupported result delivery must be suppressed or proxied |
+| Cursor | Built-in and HTTP MCP results | Not replaceable by the local hook; no universal guarantee should be claimed without a proxy |
 | OpenClaw | `tool_result_persist` event and result fields | Unverified against the plugin SDK in this pass |
 | Hermes | `transform_tool_result` and `pre_tool_call` | Unverified in this pass |
-| Goose | `PostToolUse` return hook | Verified against the Goose hooks docs: the event is observation-only, and a block decision from it is ignored, so returns cannot be withheld or replaced |
+| Goose | `PostToolUse` return hook | Observation-only where available; no universal output isolation should be claimed from a pre-tool-only hook |
 
 **Native-tool limit (Goose, OpenClaw):** these hosts gate only the tool calls that pass through their native hook API. Goose cannot rewrite results. OpenClaw's `tool_result_persist` withholds results synchronously, but tools that bypass the host's hook pipeline are not gated. Use host-level controls for anything outside those hooks.
 
-**Protect every agent:** every tool call is gated, and every tool return is scanned wherever the platform offers a return hook (see Return-path limits). Runtime hooks are written by default for Claude Code, Antigravity CLI, Cursor, Copilot CLI, Goose, and Hermes; pass `--no-enable-runtime-hooks` to skip them. Antigravity CLI return scanning is unenforced because `PostToolUse` only returns `{}`. Goose and Antigravity CLI results cannot be withheld or replaced. The gate applies whether or not the tool reaches outside the local machine. Returns are scanned in full on platforms that support it. Each 25,000-token unit covers as much content as it can, and scanning continues across windows until the returned content is covered. If units run out, the return is blocked.
+**Protect every agent:** agent output enters a fresh isolated sandbox immediately through the mandatory front gate. The complete security scan runs while the output remains isolated. No original output is delivered until the sandbox verdict is `allow`; timeout, unavailable broker, malformed response, missing model/policy, or scanner failure blocks release. Platforms without a replacement or withholding contract require a controlled proxy/service wrapper; hooks on those platforms must not be described as universal enforcement.
 
 **Post-run warning:** post-run hooks cannot undo network calls, file writes, or process runs. Only return replacement changes what the model sees; it does not reverse side effects that already happened. Block install commands and risky actions before they run.
 
@@ -75,24 +80,42 @@ Install commands for other tools or skills, including the npx skills add workflo
 
 ## Return-path limits
 
-Results from these platforms are not verified before the agent sees them. Treat their output as untrusted.
+Every platform-facing release path must wait for the sandbox verdict. A
+platform-specific hook is never considered sufficient for universal isolation
+if it cannot suppress or replace the original result.
 
-- **Cursor:** only local MCP tool results (`MCP:` prefix) can be replaced, through `updated_mcp_tool_output` on `postToolUse`. Built-in tool results (Shell, Read, Write) are recorded after delivery and cannot be replaced, because no replacement is documented. HTTP MCP results are redacted by Cursor (`{"redacted": true}`) and cannot be replaced. Failure output is audit only. An event that cannot be parsed is withheld by replacing its output with the blocked notice. Cursor treats any hook exit code other than 0 or 2 as fail-open, so a crashed return hook lets the result through.
-- **OpenClaw:** `tool_result_persist` runs synchronously and withholds any result that fails the scan. The scan runs in a blocking child process with a 30-second limit. A result that cannot be scanned in that window is withheld, not passed through, so very large results can be blocked. OpenClaw's `after_tool_call` is observation-only and is not used. The persist path needs `pythonPath` in the plugin configuration, which the installer sets. Re-run the installer if it is missing; until then every tool result is withheld.
-- **Goose:** no return enforcement, by design. Results are not scanned or replaced.
-- **Claude Code:** the return hook returns `decision: "block"` with the reason and `additionalContext`. The original tool output has already reached the agent, so this is a warning, not a replacement. The `onFailure: "block"` setting on the PreToolUse gate and the PostToolUse return hook is documented for Claude Code v2.1.295 or later, and the installer refuses to redeem a claim on older versions. `PostToolUseFailure` warns only (`additionalContext`). The reference documents `onFailure` as blocking the action, but it does not describe how that applies to a tool that has already run, so the return-side block is best-effort. The PreToolUse gate also denies Edit, Write, and Bash writes to Claude settings and IronClaw package files. This is a substring speed bump, not a sandbox.
-- **Copilot CLI:** `postToolUse` `modifiedResult` replaces successful output. The `postToolUseFailure` hook warns only, because failure output cannot be replaced. The reference covers the output fields but not the full stdout framing, so the stdout shape is partially verified.
+- **Cursor:** local MCP output uses synchronous `updated_mcp_tool_output`
+  replacement. Built-in and HTTP MCP returns require a replacement/withholding
+  contract or a controlled proxy; unsupported delivery must not be represented
+  as universally enforced.
+- **OpenClaw:** `tool_result_persist` synchronously requires the sandbox allow
+  envelope before persistence or agent context delivery.
+- **Goose:** the present pre-tool-only hook cannot govern post-output delivery.
+  Goose returns require a proxy or service wrapper with a withholding contract.
+- **Claude Code:** use the strongest supported post-output replacement or
+  withholding contract. Do not claim that a block reason or warning alone
+  prevents delivery.
+- **Copilot CLI:** `postToolUse` `modifiedResult` is the supported replacement
+  path. Malformed, timed-out, unavailable, or partial results are withheld.
 
-**Post-run hooks cannot undo actions.** Return scanning runs after a tool has executed. It cannot undo network calls, file writes, or process runs that the tool already made. It only controls what the agent sees next. Use the pre-tool install gate and host-level controls to prevent those actions.
+**Post-run hooks cannot undo actions.** Return isolation does not reverse side
+effects that occurred before the output gate. Pre-tool controls remain
+necessary, but they are separate from the mandatory post-output sandbox release
+gate.
 
-**Return sandbox scope.** The sandbox scanner is a no-network, read-only, regex-based second layer. It is not the AI brain. The in-process scan runs first and includes the AI brain keyword scan. Prompt Guard ML runs only when `GUARD_ENABLED` is true. The sandbox runs only when the scanner image exists. Build it once with `python -m sandbox_broker.build_image`. Until then, returns are blocked with `scanner_image_not_ready`. The host broker scans up to 4 returns at once. If no slot frees within the scan timeout, the broker returns `broker_busy` and the return is blocked.
+**Return sandbox scope.** Agent output enters a fresh no-network, read-only
+Docker sandbox immediately through the broker front gate. Pattern detection,
+Prompt Guard classification, secrets, file/network indicators, and policy
+rules run inside or immediately beside the isolated gate. The sandbox verdict
+is the release authority. Scanner image, model, policy, timeout, malformed
+response, and broker failures all block release.
 
-**Return payload limits.** The return-gate request accepts optional top-level `url` (8,192 chars max), `command` (32,768 chars max), and `file_path` (4,096 chars max) fields. They are merged into the payload, and the top-level value wins over a nested one. Hooks extract these values from the tool input and output where they are present, so network, command, and file-return checks run on every return that carries them. The whole payload is capped at 512 KiB. A `url`, `command`, or `file_path` over its limit returns 422, and a payload over 512 KiB returns 400 (`bad_request`). Both are blocked, so a very long command must be split or reviewed by the operator. Returns are scanned in full with no 200,000-character cap; the scanner windows the content instead.
+**Return payload limits.** The return-gate request accepts optional top-level `url` (8,192 chars max), `command` (32,768 chars max), and `file_path` (4,096 chars max) fields. They are merged into the payload, and the top-level value wins over a nested one. Hooks extract these values from the tool input and output where they are present, so network, command, and file-return checks run on every return that carries them. The whole payload is capped at 512 KiB. A `url`, `command`, or `file_path` over its limit returns 422, and a payload over 512 KiB returns 400 (`bad_request`). Oversized returns are blocked rather than released. Returns are scanned in full with no 200,000-character cap; the scanner windows the content instead.
 **File-return over-block.** The file-return guard blocks reads of script-type files (`.js`, `.ps1`, `.exe`) and paths whose names contain sensitive keywords (for example payload, token, malware, quarantine). Benign reads of those files are blocked too. This is intentional under the block-suspicious policy. Operators who need them must allow them explicitly.
 
 **Guard dependency.** `GUARD_ENABLED` defaults to false. When it is false, the Prompt Guard ML layer does not run and health reports the gate as degraded. The installer does not change it. Enable it after the model files are installed.
 
-**Linux Docker Engine.** The broker binds only to loopback and is not reachable from containers on Linux Docker Engine as configured. Do not relax the loopback rule to work around this. Returns stay blocked until a reviewed deployment is in place.
+**Linux Docker Engine.** The broker binds only to loopback and is not reachable from containers on Linux Docker Engine as configured. Do not relax the loopback rule to work around this. Returns stay blocked until the broker, scanner image, model, and policy snapshot are verified ready.
 
 ## Protect secrets and private data
 - Never print, copy into prompts, or transmit API keys, install keys, bearer tokens, passwords, private configuration, or sensitive user data.

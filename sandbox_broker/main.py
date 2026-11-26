@@ -25,7 +25,24 @@ _scan_slots = threading.BoundedSemaphore(MAX_CONCURRENT_SCANS)
 
 
 def _block(reason: str) -> dict[str, Any]:
-    return {"verdict": "block", "status": "blocked", "executor": "docker", "reason": reason}
+    return {
+        "verdict": "block",
+        "status": "blocked",
+        "executor": "docker",
+        "reason": reason,
+        "reasons": [
+            {
+                "code": reason,
+                "category": "sandbox",
+                "severity": "critical",
+                "detail": reason,
+                "risk_delta": 70,
+            }
+        ],
+        "risk_score": 100,
+        "untrusted": True,
+        "released_text": None,
+    }
 
 
 def _clamp_timeout(value: Any, config: BrokerConfig) -> float:
@@ -34,19 +51,56 @@ def _clamp_timeout(value: Any, config: BrokerConfig) -> float:
     return min(float(value), config.max_timeout_seconds)
 
 
-def decide(config: BrokerConfig, request: dict[str, Any]) -> dict[str, Any]:
-    action_type = request.get("action_type")
+def _validate_request(request: dict[str, Any]) -> str | None:
+    allowed_keys = {
+        "action_type",
+        "target",
+        "payload",
+        "timeout_seconds",
+        "read_only_fs",
+        "network_enabled",
+    }
+    unknown_keys = set(request) - allowed_keys
+    if unknown_keys:
+        return "unknown_request_fields"
+    if request.get("action_type") != "scan":
+        return "action_not_allowed"
     target = request.get("target")
-    payload = request.get("payload", {})
-    if not isinstance(action_type, str) or action_type not in config.allowed_actions:
-        return _block("action_not_allowed")
+    if not isinstance(target, str) or not target.strip() or len(target) > 512:
+        return "invalid_request"
+    payload = request.get("payload")
+    if not isinstance(payload, dict):
+        return "invalid_request"
+    try:
+        payload_size = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError, RecursionError):
+        return "invalid_request"
+    if payload_size > 2_097_152:
+        return "invalid_request"
     if request.get("network_enabled", False) is not False:
-        return _block("network_not_allowed")
+        return "network_not_allowed"
     if request.get("read_only_fs", True) is not True:
-        return _block("read_only_required")
-    if not isinstance(target, str) or not isinstance(payload, dict):
-        return _block("invalid_request")
+        return "read_only_required"
+    timeout = request.get("timeout_seconds")
+    if timeout is not None:
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+            return "invalid_request"
+        if not math.isfinite(float(timeout)) or float(timeout) <= 0:
+            return "invalid_request"
+    return None
 
+
+def decide(config: BrokerConfig, request: dict[str, Any]) -> dict[str, Any]:
+    validation_error = _validate_request(request)
+    if validation_error is not None:
+        return _block(validation_error)
+
+    action_type = request["action_type"]
+    target = request["target"].strip()
+    payload = request["payload"]
+
+    if scanner_image_status(config) != "ready":
+        return _block("scanner_image_not_ready")
     scanner_input = json.dumps({"action_type": action_type, "target": target, "payload": payload}).encode("utf-8")
     timeout_seconds = _clamp_timeout(request.get("timeout_seconds"), config)
     if not _scan_slots.acquire(timeout=timeout_seconds):
@@ -55,11 +109,26 @@ def decide(config: BrokerConfig, request: dict[str, Any]) -> dict[str, Any]:
         result = run_scan_container(config, scanner_input, timeout_seconds)
     finally:
         _scan_slots.release()
+    if result.verdict == "allow":
+        return {
+            "verdict": "allow",
+            "status": "completed",
+            "executor": "docker",
+            "reason": result.reason,
+            "reasons": list(result.reasons),
+            "risk_score": result.risk_score,
+            "untrusted": False,
+            "released_text": result.released_text,
+        }
     return {
-        "verdict": result.verdict,
-        "status": "completed" if result.verdict == "allow" else "blocked",
+        "verdict": "block",
+        "status": "blocked",
         "executor": "docker",
         "reason": result.reason,
+        "reasons": list(result.reasons),
+        "risk_score": max(result.risk_score, 70),
+        "untrusted": True,
+        "released_text": None,
     }
 
 
@@ -71,7 +140,18 @@ class BrokerHandler(BaseHTTPRequestHandler):
         if self.path != HEALTH_PATH:
             self._send_json(404, {"error": "not_found"})
             return
-        self._send_json(200, {"status": "ok", "scanner_image": scanner_image_status(self.server.broker_config)})
+        config = self.server.broker_config
+        scanner_image = scanner_image_status(config)
+        ready = scanner_image == "ready"
+        self._send_json(
+            200,
+            {
+                "status": "ok",
+                "scanner_image": scanner_image,
+                "prompt_guard_model": "ready" if ready else "not_ready",
+                "policy_snapshot": "ready" if ready else "not_ready",
+            },
+        )
 
     def do_POST(self) -> None:
         if self.path != RUN_PATH:

@@ -47,7 +47,19 @@ def test_plain_http_artifact_url_is_rejected() -> None:
 
 
 def test_broker_allow_is_honoured(monkeypatch: pytest.MonkeyPatch) -> None:
-    _broker(monkeypatch, {"verdict": "allow", "status": "completed"})
+    _broker(
+        monkeypatch,
+        {
+            "verdict": "allow",
+            "status": "completed",
+            "executor": "docker",
+            "reason": "clean",
+            "reasons": [],
+            "risk_score": 0,
+            "untrusted": False,
+            "released_text": "clean text",
+        },
+    )
 
     outcome = scanner._broker_verdict("clean text", "claude_code", ["abc"])
 
@@ -55,7 +67,18 @@ def test_broker_allow_is_honoured(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_broker_block_is_reported_with_sandbox_reason(monkeypatch: pytest.MonkeyPatch) -> None:
-    _broker(monkeypatch, {"verdict": "block", "status": "completed", "reason": "subprocess"})
+    _broker(
+        monkeypatch,
+        {
+            "verdict": "block",
+            "status": "blocked",
+            "executor": "docker",
+            "reason": "subprocess",
+            "reasons": [{"code": "subprocess"}],
+            "risk_score": 100,
+            "untrusted": True,
+        },
+    )
 
     outcome = scanner._broker_verdict("text", "claude_code", ["abc"])
 
@@ -64,7 +87,18 @@ def test_broker_block_is_reported_with_sandbox_reason(monkeypatch: pytest.Monkey
 
 
 def test_untrusted_broker_allow_is_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
-    _broker(monkeypatch, {"verdict": "allow", "status": "completed", "untrusted": True})
+    _broker(
+        monkeypatch,
+        {
+            "verdict": "allow",
+            "status": "completed",
+            "executor": "docker",
+            "reason": "clean",
+            "reasons": [],
+            "risk_score": 0,
+            "untrusted": True,
+        },
+    )
 
     outcome = scanner._broker_verdict("text", "claude_code", ["abc"])
 
@@ -81,7 +115,19 @@ def test_oversized_scan_text_is_rejected_before_broker(monkeypatch: pytest.Monke
 
 
 def test_clean_artifact_is_allowed_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
-    _broker(monkeypatch, {"verdict": "allow", "status": "completed"})
+    _broker(
+        monkeypatch,
+        {
+            "verdict": "allow",
+            "status": "completed",
+            "executor": "docker",
+            "reason": "clean",
+            "reasons": [],
+            "risk_score": 0,
+            "untrusted": False,
+            "released_text": "text",
+        },
+    )
     monkeypatch.setattr(scanner, "resolve_install_sources", lambda _command: [("npm", "good-pkg")])
     monkeypatch.setattr(scanner, "_download_target", lambda _kind, _value, _deadline: ("https://example.com/x.tgz", "tar"))
     monkeypatch.setattr(scanner, "_fetch", lambda _url, _deadline: b"data")

@@ -7,10 +7,15 @@ This document describes the architectural trust model, enforcement layers, and r
 ## Design Philosophy
 
 IronClaw operates on a **fail-closed** principle: when in doubt, block. Blocked
-artifacts may also be isolated for review, but quarantine is an operational
-workflow state rather than a verdict. Every action taken by an agent, tool, or
+artifacts may be isolated for evidence, but quarantine is an operational
+workflow state rather than a release mechanism or verdict. Every action taken by an agent, tool, or
 LLM is treated as untrusted until it passes inspection. Trust is earned at the
 infrastructure level — not assumed at the prompt level.
+
+Agent outputs enter a fresh isolated sandbox immediately through the IronClaw
+front gate. The complete security scan and evaluation run while the output
+remains isolated. No original output is released to the platform or user until
+the sandbox verdict is `allow`.
 
 The system is designed to answer one question at every decision point:
 
@@ -50,8 +55,8 @@ severity. When Prompt Guard is enabled, it must run successfully and return
 only when all applicable checks complete without a match or error. A block has
 a risk score at or above `RISK_THRESHOLD_BLOCK_MIN`.
 
-Blocked artifacts may be isolated in a review workflow. That operational state
-does not create another verdict.
+Blocked artifacts may be isolated for evidence and incident handling. That
+operational state does not create another verdict and never authorizes release.
 
 ---
 
@@ -114,18 +119,20 @@ Code execution and tool dispatch occur inside runtime boundaries:
 - Network policy — outbound connections are blocked by default unless explicitly allowed
 - Filesystem scope — access is restricted to declared working directories
 
+The return front gate uses the same isolation-first principle. Agent output
+enters a fresh container sandbox before the security engine evaluates it. The
+complete scan remains inside or immediately beside isolation; timeout,
+malformed response, unavailable broker, missing model/policy, and scanner
+failure all block release.
+
 ---
 
-## Review Workflow
+## Evidence and Incident Quarantine
 
-Blocked items may be placed in operational quarantine and held in the review
-queue. Quarantine is not a verdict; review status is recorded separately:
-
-- **Approve** — records the review decision; a subsequent action must pass the
-  applicable guard checks before execution
-- **Reject** — the held action is permanently blocked and logged as a security incident
-
-Review decisions are audited with reviewer identity and timestamp.
+Blocked items may be retained in quarantine as evidence or for incident
+investigation. Quarantine is not a verdict and does not alter the sandbox
+decision. Approval or review status is not a release mechanism; no blocked
+output becomes releasable through an operator action.
 
 ---
 

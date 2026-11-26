@@ -46,8 +46,16 @@ def liveness_probe() -> HealthProbeResponse:
 def readiness_probe(request: Request) -> JSONResponse | HealthProbeResponse:
     pipeline = get_action_execute_pipeline()
     app_pipeline = getattr(request.app.state, "action_execute_pipeline", None)
+    sandbox_ready = getattr(request.app.state, "sandbox_release_ready", None)
 
-    if pipeline is None or app_pipeline is None:
+    try:
+        from app.core.settings import get_settings
+
+        production = get_settings().environment.strip().lower() == "production"
+    except Exception:
+        production = False
+
+    if pipeline is None or app_pipeline is None or (production and sandbox_ready is False):
         body = HealthProbeResponse(
             status="not_ready",
             service="IronClaw-Security",

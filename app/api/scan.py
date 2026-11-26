@@ -233,8 +233,6 @@ def _run_scan(request: ScanRequest, background_tasks: BackgroundTasks) -> ScanRe
         },
     )
 
-    result = perform_scan(intake.target_type, intake.target_value)
-
     sandbox_decision = evaluate_sandbox(
         intake.target_type,
         intake.route_mode,
@@ -252,8 +250,42 @@ def _run_scan(request: ScanRequest, background_tasks: BackgroundTasks) -> ScanRe
         },
     )
 
-    sandbox_verdict = run_sandbox_scan(intake.target_type, intake.target_value) if sandbox_decision.enforced else "block"
-    result = apply_sandbox_policy(result, sandbox_decision, sandbox_verdict)
+    sandbox_verdict = run_sandbox_scan(
+        intake.target_type,
+        intake.target_value,
+    )
+    if sandbox_verdict != "allow":
+        static_result = perform_scan(intake.target_type, intake.target_value)
+        static_matched = static_result.get("matched_patterns", [])
+        static_failed = static_result.get("failed_checks", [])
+        result = {
+            "scan_id": None,
+            "target_type": intake.target_type,
+            "target_value": intake.target_value,
+            "verdict": "block",
+            "action": "block",
+            "summary": "Blocked by the isolated sandbox front gate before release.",
+            "risk_score": max(
+                int(static_result.get("risk_score", 0)),
+                RISK_THRESHOLD_BLOCK_MIN,
+            ),
+            "matched_patterns": list(static_matched) if isinstance(static_matched, list) else ["sandbox_front_gate"],
+            "risky_files": static_result.get("risky_files", []) if isinstance(static_result.get("risky_files", []), list) else [],
+            "checks_loaded": list(static_result.get("checks_loaded", [])) if isinstance(static_result.get("checks_loaded", []), list) else ["isolated_sandbox"],
+            "failed_checks": list(static_failed) if isinstance(static_failed, list) else ["sandbox_front_gate_blocked"],
+            "quarantine_reason": None,
+            "review_status": "none",
+            "untrusted": True,
+        }
+        if "sandbox_front_gate_blocked" not in result["failed_checks"]:
+            result["failed_checks"].append("sandbox_front_gate_blocked")
+    else:
+        result = perform_scan(intake.target_type, intake.target_value)
+        result = apply_sandbox_policy(
+            result,
+            sandbox_decision,
+            sandbox_verdict,
+        )
     result = _coerce_result_scalars(result)
     result["client_id"] = request.client_id
 

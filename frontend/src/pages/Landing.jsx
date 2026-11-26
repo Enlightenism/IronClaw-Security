@@ -7,7 +7,9 @@ import ContactBubble from "@/components/ContactBubble";
 import ContactModal from "@/components/ContactModal";
 import CyberNewsTickers from "@/components/CyberNewsTickers";
 import PackageCarousel from "@/components/PackageCarousel";
+import PlatformTokenCosts from "@/components/PlatformTokenCosts";
 import PlatformsTicker from "@/components/PlatformsTicker";
+import WorkflowRoadmap from "@/components/WorkflowRoadmap";
 import { useAuth } from "@/context/AuthContext";
 import { useCountUp } from "@/hooks/useCountUp";
 import { useLandingCounter } from "@/lib/landingCounters";
@@ -53,7 +55,7 @@ const LAYERS = [
   },
   {
     title: "Full Block",
-    body: "Every agent return is scanned instantly in a sandbox, separate from the user machine. Any information returning with the agent that is even slightly suspicious is terminated.",
+    body: "Every agent output enters a fresh isolated sandbox immediately through the IronClaw front gate. The security system scans and evaluates the output while isolated, and no original output reaches the platform or user until the sandbox verdict is allow.",
   },
   {
     title: "Malicious Install Skills Blocked",
@@ -69,7 +71,7 @@ const LAYERS = [
   },
   {
     title: "AI Brain",
-    body: "An AI brain analyzes every agent return isolated inside the sandbox, working in lockstep with the security system to ensure NOTHING reaches your computer or phone.",
+    body: "The AI brain and security policy evaluate every agent output inside or beside the isolated front-gate sandbox. Timeout, malformed responses, missing policy or model state, and security failures block release.",
   },
 ];
 
@@ -260,7 +262,7 @@ const Landing = () => {
   const [showParticleField, setShowParticleField] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
   const [showBelowFold, setShowBelowFold] = useState(true);
-  const { user } = useAuth();
+  const { user, cookieConsent, saveCookieConsent } = useAuth();
   const navigate = useNavigate();
   const particleFieldPaused = authOpen || !showParticleField;
 
@@ -480,6 +482,8 @@ const Landing = () => {
 
       {showBelowFold ? (
         <>
+          <WorkflowRoadmap />
+
           <section className="relative z-10 mx-auto max-w-7xl bg-transparent px-6 py-20">
             <motion.div
               variants={fadeUp}
@@ -656,6 +660,7 @@ const Landing = () => {
           </section>
 
           <PackageCarousel />
+          <PlatformTokenCosts />
           <section className="relative z-10 mx-auto max-w-4xl bg-transparent px-6 pb-24 pt-10 text-center">
             <motion.div
               variants={fadeUp}
@@ -767,6 +772,62 @@ const Landing = () => {
             </div>
           </footer>
         </>
+      ) : null}
+
+      {cookieConsent === null ? (
+        <aside
+          role="dialog"
+          aria-labelledby="cookie-banner-title"
+          aria-describedby="cookie-banner-description"
+          data-testid="cookie-banner"
+          className="fixed bottom-4 left-1/2 z-[70] w-[calc(100%-2rem)] max-w-4xl -translate-x-1/2 rounded-2xl border border-[#C9A84C]/35 bg-[#090F1A]/95 px-5 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.55)] backdrop-blur-md sm:bottom-6 sm:px-6"
+        >
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="max-w-2xl">
+              <h2
+                id="cookie-banner-title"
+                className="font-tech text-sm font-bold tracking-wide text-[#FFD700] sm:text-base"
+              >
+                Cookie preferences
+              </h2>
+              <p
+                id="cookie-banner-description"
+                className="mt-1 text-sm leading-relaxed text-white/75"
+              >
+                We use only essential cookies that are strictly necessary for
+                this website to work. The only data we store is what&apos;s
+                needed for login, so you can sign in quickly. We don&apos;t use
+                tracking, analytics, or advertising cookies, and we don&apos;t
+                keep any other information about your visits. This is for
+                security reasons, we do not save any info other than login.{" "}
+                <Link
+                  to="/privacy"
+                  className="text-[#FFD700] underline decoration-[#FFD700]/40 underline-offset-2 transition hover:text-white"
+                >
+                  Privacy Policy
+                </Link>
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-3">
+              <button
+                type="button"
+                onClick={() => saveCookieConsent("denied")}
+                data-testid="cookie-deny-btn"
+                className="min-w-24 rounded-lg border border-white/20 px-4 py-2.5 text-sm font-semibold text-white/90 transition hover:border-white/45 hover:bg-white/5"
+              >
+                Deny
+              </button>
+              <button
+                type="button"
+                onClick={() => saveCookieConsent("accepted")}
+                data-testid="cookie-accept-btn"
+                className="btn-shimmer min-w-24 rounded-lg bg-gradient-to-r from-[#C9A84C] to-[#FFD700] px-4 py-2.5 text-sm font-semibold text-black transition hover:shadow-[0_0_22px_rgba(255,215,0,0.35)]"
+              >
+                Accept
+              </button>
+            </div>
+          </div>
+        </aside>
       ) : null}
 
       <AuthModal

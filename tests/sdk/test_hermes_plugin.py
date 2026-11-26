@@ -13,7 +13,12 @@ from ironclaw_sdk.runtime_hooks import GENERIC_BLOCK_REASON
 
 class _GateRecorder:
     def __init__(self) -> None:
-        self.response: Any = {"verdict": "allow", "reasons": []}
+        self.response: Any = {
+            "verdict": "allow",
+            "released_text": "clean output",
+            "replacement": None,
+            "reasons": [],
+        }
         self.error: Exception | None = None
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
 
@@ -96,7 +101,12 @@ def test_pre_tool_call_blocks_when_classifier_fails(monkeypatch: pytest.MonkeyPa
 
 
 def test_transform_allow_returns_none(gate: _GateRecorder) -> None:
-    gate.response = {"verdict": "allow", "replacement": None, "reasons": []}
+    gate.response = {
+        "verdict": "allow",
+        "released_text": "clean output",
+        "replacement": None,
+        "reasons": [],
+    }
 
     assert hermes_plugin.transform_tool_result(tool_name="web_fetch", result="clean output") is None
 
@@ -105,6 +115,23 @@ def test_transform_allow_returns_none(gate: _GateRecorder) -> None:
     assert program == "hermes"
     assert body["platform"] == "hermes"
     assert body["content"] == "clean output"
+
+
+def test_transform_allow_returns_sanitized_released_text(gate: _GateRecorder) -> None:
+    gate.response = {
+        "verdict": "allow",
+        "released_text": "[REDACTED] safe text",
+        "replacement": None,
+        "reasons": [],
+    }
+
+    assert (
+        hermes_plugin.transform_tool_result(
+            tool_name="web_fetch",
+            result="unsafe text",
+        )
+        == "[REDACTED] safe text"
+    )
 
 
 def test_transform_block_returns_replacement(gate: _GateRecorder) -> None:
@@ -117,6 +144,7 @@ def test_transform_block_returns_replacement(gate: _GateRecorder) -> None:
     "response",
     [
         {"verdict": "block", "replacement": None, "reasons": ["injection"]},
+        {"verdict": "allow"},
         {"verdict": "unknown"},
         [],
         None,
@@ -142,6 +170,12 @@ def test_transform_serializes_structured_results(gate: _GateRecorder) -> None:
 
 def test_large_content_is_forwarded_in_full(gate: _GateRecorder) -> None:
     large = "x" * 1_000_001
+    gate.response = {
+        "verdict": "allow",
+        "released_text": large,
+        "replacement": None,
+        "reasons": [],
+    }
 
     assert hermes_plugin.transform_tool_result(tool_name="web_fetch", result=large) is None
 

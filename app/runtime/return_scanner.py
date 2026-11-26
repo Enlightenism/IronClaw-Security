@@ -1,4 +1,4 @@
-"""In-process return scan: guard checks, the text classifier, and the AI brain. Any suspicion blocks."""
+"""Security gate scanner that runs after a sandbox allows the isolated return."""
 
 from __future__ import annotations
 
@@ -55,7 +55,11 @@ def scan_return(
     target: str,
     client_id: str | None = None,
     session_id: str | None = None,
+    sandbox_allowed: bool = False,
 ) -> ReturnScanResult:
+    if sandbox_allowed is not True:
+        raise RuntimeError("return security scan requires an isolated sandbox allow")
+
     reasons: list[str] = []
     risk_scores: list[int] = []
 

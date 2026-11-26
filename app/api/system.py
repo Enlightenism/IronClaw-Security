@@ -214,6 +214,22 @@ def _probe_history_service() -> ComponentStatus:
 def _build_readiness_checks() -> list[ComponentStatus]:
     checks: list[ComponentStatus] = []
 
+    try:
+        from app.services.sandbox_broker_client import SandboxBrokerClient
+
+        broker = SandboxBrokerClient().health()
+        sandbox_ready = broker.get("reachable") is True and broker.get("scanner_image") == "ready" and broker.get("prompt_guard_model") == "ready" and broker.get("policy_snapshot") == "ready"
+    except Exception as exc:
+        broker = {"reason": "sandbox_health_check_failed", "error": str(exc)}
+        sandbox_ready = False
+    checks.append(
+        _build_component_status(
+            name="sandbox_release_gate",
+            ok=sandbox_ready,
+            details=broker,
+        )
+    )
+
     pipeline = None
     pipeline_close_available = False
     pipeline_ready = False

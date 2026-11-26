@@ -10,6 +10,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def mock_sandbox_allow(monkeypatch):
+    monkeypatch.setattr("app.api.scan.run_sandbox_scan", lambda *_args, **_kwargs: "allow")
+
+
 def _assert_client_error(response, expected_statuses: set[int]) -> None:
     assert response.status_code in expected_statuses, f"Expected one of {sorted(expected_statuses)}, got {response.status_code}: {response.text}"
 

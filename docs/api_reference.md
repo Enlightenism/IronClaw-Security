@@ -26,6 +26,12 @@ Every scan response includes a `verdict` field. Possible values:
 Quarantine is an operational isolation/review state, not a final verdict.
 Historical records may retain legacy verdict values.
 
+Agent outputs enter a fresh isolated sandbox immediately through the IronClaw
+front gate. The security system scans and evaluates the complete output while
+isolated. No original output is released to the platform or user until the
+sandbox verdict is `allow`. Quarantine and human-review status never authorize
+release.
+
 ---
 
 ## Routes
@@ -278,8 +284,9 @@ Query stored telemetry events.
 
 #### `GET /review/`
 
-List items held in the operational review queue. Quarantine describes isolation
-for review; it is not a final verdict.
+List blocked items retained in the evidence and incident quarantine queue.
+Quarantine describes isolation for investigation; it is not a final verdict or
+a release mechanism. Approval or review status never authorizes output release.
 
 **Response `200`**
 ```json
@@ -297,31 +304,6 @@ for review; it is not a final verdict.
   ]
 }
 ```
-
----
-
-#### `POST /review/{review_id}/approve`
-
-Record approval of an item held for operational review. Review status is
-separate from the original scan verdict; re-evaluate an action before execution.
-
-**Response `200`**
-```json
-{ "review_id": "uuid", "status": "approved" }
-```
-
----
-
-#### `POST /review/{review_id}/reject`
-
-Record rejection of an item held for operational review.
-
-**Response `200`**
-```json
-{ "review_id": "uuid", "status": "rejected" }
-```
-
----
 
 ### History
 

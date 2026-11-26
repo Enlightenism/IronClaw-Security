@@ -10,6 +10,11 @@ against — prompt injection, unsafe tool execution, data exfiltration, maliciou
 agent returns, and trust collapse — before they reach your workflow, your files,
 or your machine.
 
+Agent outputs enter a fresh isolated sandbox immediately through the IronClaw
+front gate. The output is scanned and evaluated by the security system while
+isolated. No original output is released to the platform or user until the
+sandbox verdict is `allow`.
+
 While every major AI platform ships powerful capabilities with almost zero
 runtime enforcement, IronClaw sits in front of every agent action, every tool
 call, every inbound return, and every code execution path as a dedicated
@@ -145,8 +150,9 @@ One locked, shipping mission:
     `BENIGN` when enabled.
   - `block` — any suspicious signal, matched rule, malicious classifier result,
     or scan error; denied without release.
-- **Operational isolation** — blocked artifacts may be quarantined for review;
-  quarantine is a workflow state, not a final verdict.
+- **Operational isolation** — blocked artifacts may be quarantined for incident
+  evidence; quarantine is a workflow state, not a release mechanism or final
+  verdict. Quarantine never authorizes release.
 
 ---
 
@@ -202,7 +208,7 @@ Interceptor │ ← Intercepts before user workflow
 └─────────────────────────────────┘ │ ▼ ┌─────────────────────────────────┐ │
 Artifact Normalizer │ ← Canonical runtime artifact contract
 └─────────────────────────────────┘ │ ▼ ┌─────────────────────────────────┐ │
-Sandbox Router │ ← Isolated evaluation boundary
+Fresh Isolated Sandbox │ ← Mandatory front gate; original output is withheld
 └─────────────────────────────────┘ │ ▼ ┌─────────────────────────────────┐ │
 Heuristic + Pattern Engine │ ← Rule-based threat detection
 └─────────────────────────────────┘ │ ▼ ┌─────────────────────────────────┐ │ Local
@@ -213,8 +219,10 @@ Policy Enforcer │ ← Org-level policy rules applied
 Verdict Enforcer │ ← Final decision: allow/block
 └─────────────────────────────────┘ │ ▼ VERDICT
 
-Every single agent output traverses every single layer. There is no bypass path.
-There is no silent pass-through.
+The complete security scan runs inside or immediately beside the isolated
+sandbox. Every agent output traverses this front gate. No original output is
+released to the platform or user unless the sandbox verdict is `allow`. There
+is no bypass path, silent pass-through, or human-review release mechanism.
 
 ---
 
@@ -348,8 +356,10 @@ security control plane for AI-native tooling.
 
 ### 5. Review, quarantine, and evidence handling
 
-- `app/review/` and `app/reviews/` — operator review and decisioning workflows.
-- `app/quarantine/` — quarantine handling and isolated artifact control.
+- `app/review/` and `app/reviews/` — evidence and incident-review workflows.
+  Quarantine never has release authority; only a sandbox `allow` releases
+  output.
+- `app/quarantine/` — quarantine handling for blocked artifact evidence.
 - `app/incidents/` — incident lifecycle tracking and response handling.
 - `app/audit/` — audit trail capture for decisions, actions, and policy
   outcomes.

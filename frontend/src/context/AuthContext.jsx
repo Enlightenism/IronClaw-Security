@@ -12,6 +12,28 @@ import api from "@/lib/api";
 const AuthContext = createContext(null);
 const AUTH_TOKEN_STORAGE_KEY = "ironclaw.auth.token";
 const AUTH_ORG_ID_STORAGE_KEY = "ironclaw.auth.orgId";
+const COOKIE_CONSENT_STORAGE_KEY = "ironclaw.cookie-consent";
+
+const getCookieConsent = () => {
+  try {
+    const consent = localStorage.getItem(COOKIE_CONSENT_STORAGE_KEY);
+    return consent === "accepted" || consent === "denied" ? consent : null;
+  } catch {
+    return null;
+  }
+};
+
+const clearCachedAuth = () => {
+  try {
+    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    localStorage.removeItem(AUTH_ORG_ID_STORAGE_KEY);
+  } catch {
+    // The in-memory auth state is still cleared below.
+  }
+
+  delete api.defaults.headers.common["Authorization"];
+  delete api.defaults.headers.common["X-Org-Id"];
+};
 
 const getOrgIdFromSession = (session) => {
   const user = session?.user;
@@ -35,14 +57,23 @@ const syncAxiosToken = (session) => {
   const accessToken =
     session?.access_token || session?.provider_token || session?.id_token || "";
   const orgId = getOrgIdFromSession(session);
+  const canPersistLogin = getCookieConsent() === "accepted";
 
   if (accessToken) {
     api.defaults.headers.common["Authorization"] = `Bearer ${accessToken}`;
-    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, accessToken);
+    if (canPersistLogin) {
+      localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, accessToken);
+    } else {
+      localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    }
 
     if (orgId) {
       api.defaults.headers.common["X-Org-Id"] = orgId;
-      localStorage.setItem(AUTH_ORG_ID_STORAGE_KEY, orgId);
+      if (canPersistLogin) {
+        localStorage.setItem(AUTH_ORG_ID_STORAGE_KEY, orgId);
+      } else {
+        localStorage.removeItem(AUTH_ORG_ID_STORAGE_KEY);
+      }
     } else {
       delete api.defaults.headers.common["X-Org-Id"];
       localStorage.removeItem(AUTH_ORG_ID_STORAGE_KEY);
@@ -175,7 +206,14 @@ export const ensureFrontEndHasFreshSession = async () => {
 };
 
 export const AuthProvider = ({ children }) => {
+  const [cookieConsent, setCookieConsentState] = useState(getCookieConsent);
+
   const [cachedAuthApplied] = useState(() => {
+    if (getCookieConsent() !== "accepted") {
+      clearCachedAuth();
+      return false;
+    }
+
     const cachedToken = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
     const cachedOrgId = localStorage.getItem(AUTH_ORG_ID_STORAGE_KEY);
 
@@ -285,6 +323,32 @@ export const AuthProvider = ({ children }) => {
     await supabase.auth.signOut();
   }, []);
 
+  const saveCookieConsent = useCallback(
+    async (consent) => {
+      if (consent !== "accepted" && consent !== "denied") return;
+
+      setCookieConsentState(consent);
+
+      try {
+        localStorage.setItem(COOKIE_CONSENT_STORAGE_KEY, consent);
+      } catch {
+        // Keep the choice effective in memory even if storage is unavailable.
+      }
+
+      if (consent === "denied") {
+        clearCachedAuth();
+        setSession(null);
+        setUser(null);
+        setLoading(false);
+        await supabase.auth.signOut();
+        return;
+      }
+
+      syncAxiosToken(session);
+    },
+    [session],
+  );
+
   const refreshUser = useCallback(async () => {
     ensureSharedCounterRegistry();
 
@@ -307,13 +371,25 @@ export const AuthProvider = ({ children }) => {
       user,
       session,
       loading,
+      cookieConsent,
+      saveCookieConsent,
       authenticate,
       register,
       logout,
       refreshUser,
       ensureFrontEndHasFreshSession,
     }),
-    [user, session, loading, authenticate, register, logout, refreshUser],
+    [
+      user,
+      session,
+      loading,
+      cookieConsent,
+      saveCookieConsent,
+      authenticate,
+      register,
+      logout,
+      refreshUser,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

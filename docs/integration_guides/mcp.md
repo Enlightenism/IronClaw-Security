@@ -122,15 +122,8 @@ try:
     result = guarded_tool_call("delete_record", {"id": "user-123"}, "mcp-agent")
 except PermissionError as e:
     print(f"Blocked: {e}")
-    # Operators can inspect the related review record through the review API.
+    # Operators can inspect the retained evidence through the review API.
 ```
 
-Approve via SDK:
-```python
-guard.approve_review("review-uuid")
-```
-
-Reject via SDK:
-```python
-guard.reject_review("review-uuid")
-```
+Review and quarantine status never authorize release. A block remains blocked
+until a fresh sandbox scan produces an `allow` verdict.

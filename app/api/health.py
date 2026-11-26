@@ -123,12 +123,29 @@ def _build_return_gate_component() -> ComponentHealth:
 
     if broker.get("reachable"):
         scanner_image = broker.get("scanner_image", "unknown")
-        if scanner_image == "ready":
-            return ComponentHealth(name="return_gate", status=HealthStatus.ok, details={"broker": "reachable"})
+        prompt_guard_model = broker.get("prompt_guard_model", "not_ready")
+        policy_snapshot = broker.get("policy_snapshot", "not_ready")
+        if scanner_image == "ready" and prompt_guard_model == "ready" and policy_snapshot == "ready":
+            return ComponentHealth(
+                name="return_gate",
+                status=HealthStatus.ok,
+                details={
+                    "broker": "reachable",
+                    "scanner_image": "ready",
+                    "prompt_guard_model": "ready",
+                    "policy_snapshot": "ready",
+                },
+            )
         return ComponentHealth(
             name="return_gate",
             status=HealthStatus.degraded,
-            details={"broker": "reachable", "scanner_image": scanner_image, "reason": "scanner_image_not_ready"},
+            details={
+                "broker": "reachable",
+                "scanner_image": scanner_image,
+                "prompt_guard_model": prompt_guard_model,
+                "policy_snapshot": policy_snapshot,
+                "reason": "sandbox_release_bundle_not_ready",
+            },
         )
     return ComponentHealth(
         name="return_gate",

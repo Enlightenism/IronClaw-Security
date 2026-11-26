@@ -4,9 +4,11 @@ from app.orchestrator.policy_enforcer import (
     PolicyRule,
     enforce_policy,
     evaluate_policy,
+    export_sandbox_policy_snapshot,
     initialize_policy_engine,
     summarize_policy_engine,
 )
+from app.services.rules import export_immutable_sandbox_policy_snapshot
 
 
 def test_initialize_policy_engine_has_default_rules():
@@ -26,6 +28,26 @@ def test_summarize_policy_engine_returns_expected_shape():
     assert summary["quarantine_rules"] == 0
     assert summary["warn_rules"] == 0
     assert summary["allow_rules"] >= 0
+
+
+def test_export_sandbox_policy_snapshot_is_block_only_and_fail_closed():
+    snapshot = export_sandbox_policy_snapshot()
+
+    assert snapshot["fail_closed"] is True
+    assert snapshot["mode"] == "enforce"
+    assert snapshot["requires_review"] is False
+    assert snapshot["rules"]
+    assert all(rule["verdict"] == "block" for rule in snapshot["rules"])
+
+
+def test_immutable_sandbox_rule_snapshot_has_no_database_state():
+    snapshot = export_immutable_sandbox_policy_snapshot()
+    snapshot["rules"].clear()
+
+    fresh = export_immutable_sandbox_policy_snapshot()
+
+    assert snapshot is not fresh
+    assert fresh["rules"]
 
 
 def test_prompt_injection_attempt_is_blocked():
@@ -102,7 +124,7 @@ def test_external_write_is_blocked():
 
     assert decision.verdict == "block"
     assert decision.allow_execution is False
-    assert decision.requires_review is True
+    assert decision.requires_review is False
     assert decision.risk_score >= RISK_THRESHOLD_BLOCK_MIN
 
 
@@ -119,7 +141,7 @@ def test_review_bypass_attempt_is_blocked():
 
     assert decision.verdict == "block"
     assert decision.allow_execution is False
-    assert decision.requires_review is True
+    assert decision.requires_review is False
 
 
 def test_safe_request_is_allowed():

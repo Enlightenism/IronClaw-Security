@@ -91,6 +91,58 @@ def redact_text(value: str) -> str:
     return value
 
 
+def resolve_sandbox_release(
+    decision: Any,
+    *,
+    original_text: str,
+) -> dict[str, Any]:
+    if not isinstance(decision, dict):
+        return {
+            "verdict": "block",
+            "replacement": RETURN_BLOCKED_TEXT,
+            "released_text": None,
+            "reasons": ["malformed_sandbox_release"],
+        }
+
+    verdict = decision.get("verdict")
+    reasons = decision.get("reasons")
+    normalized_reasons = list(reasons) if isinstance(reasons, list) else []
+
+    if verdict == "allow":
+        released_text = decision.get("released_text")
+        if not isinstance(released_text, str):
+            return {
+                "verdict": "block",
+                "replacement": RETURN_BLOCKED_TEXT,
+                "released_text": None,
+                "reasons": ["malformed_allow_release"],
+            }
+        return {
+            "verdict": "allow",
+            "replacement": None,
+            "released_text": released_text,
+            "reasons": normalized_reasons,
+        }
+
+    if verdict == "block":
+        replacement = decision.get("replacement")
+        if not isinstance(replacement, str) or not replacement:
+            replacement = RETURN_BLOCKED_TEXT
+        return {
+            "verdict": "block",
+            "replacement": replacement,
+            "released_text": None,
+            "reasons": normalized_reasons,
+        }
+
+    return {
+        "verdict": "block",
+        "replacement": RETURN_BLOCKED_TEXT,
+        "released_text": None,
+        "reasons": ["invalid_sandbox_release_verdict"],
+    }
+
+
 def _redact_value(key: str | None, value: Any) -> Any:
     if key is not None and _SENSITIVE_FIELD_PATTERN.search(key):
         return REDACTED
@@ -577,12 +629,14 @@ def return_replacement(raw_event: str, program: str, config_file: Path | None) -
             file=sys.stderr,
         )
         return RETURN_BLOCKED_TEXT
-    if isinstance(decision, dict) and decision.get("verdict") == "allow":
-        return None
-    replacement = decision.get("replacement") if isinstance(decision, dict) else None
-    if isinstance(replacement, str) and replacement:
-        return replacement
-    return RETURN_BLOCKED_TEXT
+    original_text = _return_request(raw_event, program).get("content", "")
+    release = resolve_sandbox_release(decision, original_text=str(original_text))
+    if release["verdict"] == "allow":
+        released_text = release["released_text"]
+        if released_text == original_text:
+            return None
+        return str(released_text)
+    return str(release["replacement"] or RETURN_BLOCKED_TEXT)
 
 
 def return_audit(raw_event: str, program: str, config_file: Path | None, failure: bool = False) -> int:
@@ -612,7 +666,7 @@ def failure_warning(raw_event: str, program: str, config_file: Path | None) -> s
 
 
 def cursor_post(raw_event: str, config_file: Path | None) -> int:
-    """Replace local MCP output for Cursor, audit built-in and redacted HTTP MCP output, and withhold unparseable events."""
+    """Replace supported Cursor MCP output and fail closed for unsupported return paths."""
     try:
         event, tool_name, _, _ = _parse_tool_event(raw_event)
         result = _tool_result(event)
@@ -622,7 +676,35 @@ def cursor_post(raw_event: str, config_file: Path | None) -> int:
         return 0
     replaceable = tool_name.startswith("MCP:") and not (isinstance(result, dict) and result.get("redacted") is True)
     if not replaceable:
-        return return_audit(raw_event, "cursor", config_file)
+        try:
+            decision = post_gate(
+                "/return-gate/transform",
+                "cursor",
+                _return_request(raw_event, "cursor"),
+                config_file,
+                RETURN_REQUEST_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            release = {
+                "verdict": "block",
+                "replacement": RETURN_BLOCKED_TEXT,
+                "released_text": None,
+            }
+        else:
+            original_text = _return_request(raw_event, "cursor").get("content", "")
+            release = resolve_sandbox_release(decision, original_text=str(original_text))
+        if release["verdict"] == "allow":
+            return 0
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "decision": "block",
+                    "reason": str(release["replacement"] or RETURN_BLOCKED_TEXT),
+                }
+            )
+            + "\n"
+        )
+        return 0
     replacement = return_replacement(raw_event, "cursor", config_file)
     if replacement is None:
         return 0
@@ -631,10 +713,20 @@ def cursor_post(raw_event: str, config_file: Path | None) -> int:
 
 
 def persist_return(raw_event: str, config_file: Path | None) -> int:
-    """Write an OpenClaw replacement JSON line only when the return gate withholds the result."""
-    replacement = return_replacement(raw_event, "openclaw", config_file)
-    if replacement is not None:
-        sys.stdout.write(json.dumps({"replacement": replacement}) + "\n")
+    """Write the unified sandbox release envelope for OpenClaw persistence."""
+    try:
+        decision = post_gate("/return-gate/transform", "openclaw", _return_request(raw_event, "openclaw"), config_file, RETURN_REQUEST_TIMEOUT_SECONDS)
+    except Exception:
+        envelope = {
+            "verdict": "block",
+            "replacement": RETURN_BLOCKED_TEXT,
+            "released_text": None,
+            "reasons": ["sandbox_release_unavailable"],
+        }
+    else:
+        original_text = _return_request(raw_event, "openclaw").get("content", "")
+        envelope = resolve_sandbox_release(decision, original_text=str(original_text))
+    sys.stdout.write(json.dumps(envelope, ensure_ascii=False) + "\n")
     return 0
 
 

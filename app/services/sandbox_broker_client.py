@@ -18,7 +18,23 @@ BROKER_TOKEN_HEADER = "X-Broker-Token"
 
 
 def broker_block(reason: str) -> dict[str, Any]:
-    return {"verdict": "block", "status": "unavailable", "executor": "docker", "reason": reason, "untrusted": True}
+    return {
+        "verdict": "block",
+        "status": "blocked",
+        "executor": "docker",
+        "reason": reason,
+        "reasons": [
+            {
+                "code": reason,
+                "category": "sandbox",
+                "severity": "critical",
+                "detail": reason,
+            }
+        ],
+        "risk_score": 100,
+        "untrusted": True,
+        "released_text": None,
+    }
 
 
 class SandboxBrokerClient:
@@ -67,7 +83,38 @@ class SandboxBrokerClient:
         except ValueError:
             return broker_block("invalid_response")
 
-        if not isinstance(data, dict) or data.get("verdict") not in {"allow", "block"}:
+        if not isinstance(data, dict):
+            return broker_block("invalid_response")
+        if not isinstance(data.get("reason"), str) or not data["reason"].strip():
+            return broker_block("invalid_response")
+        if data.get("status") not in {"completed", "blocked"}:
+            return broker_block("invalid_response")
+        if data.get("executor") != "docker":
+            return broker_block("invalid_response")
+        risk_score = data.get("risk_score")
+        if isinstance(risk_score, bool) or not isinstance(risk_score, int) or not 0 <= risk_score <= 100:
+            return broker_block("invalid_response")
+        if not isinstance(data.get("reasons"), list):
+            return broker_block("invalid_response")
+
+        verdict = data.get("verdict")
+        untrusted = data.get("untrusted")
+        released_text = data.get("released_text")
+        if verdict == "allow":
+            if data["status"] != "completed" or untrusted is not False or risk_score > 29:
+                return broker_block("invalid_response")
+            if data["reasons"]:
+                return broker_block("invalid_response")
+            if not isinstance(released_text, str):
+                return broker_block("invalid_response")
+        elif verdict == "block":
+            if data["status"] != "blocked" or untrusted is not True or risk_score < 70:
+                return broker_block("invalid_response")
+            if not data["reasons"]:
+                return broker_block("invalid_response")
+            if released_text is not None:
+                return broker_block("invalid_response")
+        else:
             return broker_block("invalid_response")
         return data
 
@@ -85,6 +132,18 @@ class SandboxBrokerClient:
             data = response.json()
         except ValueError:
             data = {}
-        if isinstance(data, dict) and isinstance(data.get("scanner_image"), str):
-            return {"reachable": True, "reason": None, "scanner_image": data["scanner_image"]}
-        return {"reachable": True, "reason": None}
+        if not isinstance(data, dict) or not isinstance(data.get("scanner_image"), str):
+            return {
+                "reachable": True,
+                "reason": None,
+                "scanner_image": "unknown",
+                "prompt_guard_model": "not_ready",
+                "policy_snapshot": "not_ready",
+            }
+        return {
+            "reachable": True,
+            "reason": None,
+            "scanner_image": data["scanner_image"],
+            "prompt_guard_model": data.get("prompt_guard_model", "not_ready"),
+            "policy_snapshot": data.get("policy_snapshot", "not_ready"),
+        }

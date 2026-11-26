@@ -160,9 +160,50 @@ def test_emit_return_antigravity_cli_is_not_registered(capsys: pytest.CaptureFix
     assert capsys.readouterr().out == ""
 
 
-def test_emit_return_cursor_is_audit_only(capsys: pytest.CaptureFixture[str]) -> None:
+def test_emit_return_cursor_uses_cursor_post_contract_not_generic_emit(capsys: pytest.CaptureFixture[str]) -> None:
     assert runtime_hooks._emit_return("cursor", "safe text") == 0
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    ("program", "expected"),
+    [
+        (
+            "claude_code",
+            {
+                "decision": "block",
+                "reason": "[SANDBOX REPLACEMENT]",
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": RETURN_CONTEXT,
+                },
+            },
+        ),
+        (
+            "copilot",
+            {
+                "modifiedResult": {
+                    "resultType": "success",
+                    "textResultForLlm": "[SANDBOX REPLACEMENT]",
+                }
+            },
+        ),
+        ("cursor", None),
+        ("antigravity_cli", None),
+        ("goose", None),
+        ("hermes", None),
+        ("openclaw", None),
+    ],
+)
+def test_every_platform_block_replacement_contract(
+    program: str,
+    expected: dict[str, Any] | None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert runtime_hooks._emit_return(program, "[SANDBOX REPLACEMENT]") == 0
+
+    captured = capsys.readouterr()
+    assert (json.loads(captured.out) if captured.out else None) == expected
 
 
 def test_emit_pre_cursor_allow_writes_permission_json(capsys: pytest.CaptureFixture[str]) -> None:
@@ -188,9 +229,30 @@ def test_emit_return_without_replacement_writes_nothing(capsys: pytest.CaptureFi
 
 
 def test_return_replacement_passes_allowed_output_through(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runtime_hooks, "post_gate", _post_gate_returning({"verdict": "allow"}))
+    raw_event = RAW_EVENT
+    original_text = "file body"
+    monkeypatch.setattr(
+        runtime_hooks,
+        "post_gate",
+        _post_gate_returning(
+            {
+                "verdict": "allow",
+                "released_text": original_text,
+            }
+        ),
+    )
 
-    assert runtime_hooks.return_replacement(RAW_EVENT, "claude_code", None) is None
+    assert runtime_hooks.return_replacement(raw_event, "claude_code", None) is None
+
+
+def test_return_replacement_uses_sanitized_released_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        runtime_hooks,
+        "post_gate",
+        _post_gate_returning({"verdict": "allow", "released_text": "[REDACTED] safe text"}),
+    )
+
+    assert runtime_hooks.return_replacement(RAW_EVENT, "claude_code", None) == "[REDACTED] safe text"
 
 
 def test_return_replacement_returns_gate_replacement(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,12 +283,31 @@ def test_return_replacement_withholds_on_unexpected_error(
     assert "withheld" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "decision",
+    [
+        None,
+        [],
+        {"verdict": "unknown"},
+        {"verdict": "allow"},
+        {"verdict": "allow", "released_text": 42},
+    ],
+)
+def test_malformed_sandbox_release_never_reaches_platform(
+    monkeypatch: pytest.MonkeyPatch,
+    decision: Any,
+) -> None:
+    monkeypatch.setattr(runtime_hooks, "post_gate", _post_gate_returning(decision))
+
+    assert runtime_hooks.return_replacement(RAW_EVENT, "copilot", None) == RETURN_BLOCKED_TEXT
+
+
 def test_return_replacement_forwards_large_output_in_full(monkeypatch: pytest.MonkeyPatch) -> None:
     bodies: list[dict[str, Any]] = []
 
     def recorder(route: str, program: str, body: dict[str, Any], config_file: Any = None, timeout: float | None = None) -> Any:
         bodies.append(body)
-        return {"verdict": "allow"}
+        return {"verdict": "allow", "released_text": body["content"]}
 
     monkeypatch.setattr(runtime_hooks, "post_gate", recorder)
     large = "x" * 1_000_001
@@ -385,7 +466,11 @@ def test_emit_failure_claude_adds_post_tool_use_failure_context(capsys: pytest.C
 
 
 def test_failure_warning_allow_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(runtime_hooks, "post_gate", _post_gate_returning({"verdict": "allow"}))
+    monkeypatch.setattr(
+        runtime_hooks,
+        "post_gate",
+        _post_gate_returning({"verdict": "allow", "released_text": "safe"}),
+    )
 
     assert runtime_hooks.failure_warning(RAW_EVENT, "copilot", None) is None
 
@@ -406,7 +491,7 @@ def test_cursor_replaces_local_mcp_output(monkeypatch: pytest.MonkeyPatch, capsy
     assert json.loads(capsys.readouterr().out) == {"updated_mcp_tool_output": "safe"}
 
 
-def test_cursor_audits_builtin_and_redacted_mcp_without_replacing(
+def test_cursor_scans_builtin_and_redacted_mcp_without_local_replacement(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -421,8 +506,12 @@ def test_cursor_audits_builtin_and_redacted_mcp_without_replacing(
     runtime_hooks.cursor_post(json.dumps({"tool_name": "Shell", "tool_output": "x"}), None)
     runtime_hooks.cursor_post(json.dumps({"tool_name": "MCP:http", "tool_output": {"redacted": True}}), None)
 
-    assert routes == ["/return-gate/scan", "/return-gate/scan"]
-    assert capsys.readouterr().out == ""
+    assert routes == ["/return-gate/transform", "/return-gate/transform"]
+    output_lines = capsys.readouterr().out.strip().splitlines()
+    assert [json.loads(line) for line in output_lines] == [
+        {"decision": "block", "reason": "safe"},
+        {"decision": "block", "reason": "safe"},
+    ]
 
 
 def test_cursor_withholds_unparseable_event_output(capsys: pytest.CaptureFixture[str]) -> None:
@@ -430,17 +519,25 @@ def test_cursor_withholds_unparseable_event_output(capsys: pytest.CaptureFixture
     assert json.loads(capsys.readouterr().out) == {"updated_mcp_tool_output": runtime_hooks.RETURN_BLOCKED_TEXT}
 
 
-def test_persist_writes_replacement_only_when_withheld(
+def test_persist_emits_unified_sandbox_envelope(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(runtime_hooks, "post_gate", _post_gate_returning({"verdict": "allow"}))
+    monkeypatch.setattr(
+        runtime_hooks,
+        "post_gate",
+        _post_gate_returning({"verdict": "allow", "released_text": "file body"}),
+    )
     assert runtime_hooks.persist_return(RAW_EVENT, None) == 0
-    assert capsys.readouterr().out == ""
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["verdict"] == "allow"
+    assert envelope["released_text"] == "file body"
 
     monkeypatch.setattr(runtime_hooks, "post_gate", _post_gate_returning({"verdict": "block"}))
     assert runtime_hooks.persist_return(RAW_EVENT, None) == 0
-    assert json.loads(capsys.readouterr().out) == {"replacement": RETURN_BLOCKED_TEXT}
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["verdict"] == "block"
+    assert envelope["replacement"] == RETURN_BLOCKED_TEXT
 
 
 def test_main_rejects_openclaw_outside_persist_phase() -> None:
@@ -465,4 +562,6 @@ def test_main_persist_reads_stdin_and_withholds(
     monkeypatch.setattr(sys, "stdin", io.StringIO(RAW_EVENT))
 
     assert runtime_hooks.main(["--program", "openclaw", "--phase", "persist"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"replacement": RETURN_BLOCKED_TEXT}
+    envelope = json.loads(capsys.readouterr().out)
+    assert envelope["verdict"] == "block"
+    assert envelope["replacement"] == RETURN_BLOCKED_TEXT

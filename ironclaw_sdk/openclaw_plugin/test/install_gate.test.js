@@ -263,7 +263,14 @@ function silenceErrors(fn) {
 
 test("persist allows a clean tool result without replacing it", async (t) => {
   const configFile = await createRuntimeConfig(t);
-  const { calls, runPython } = recordingRunner("");
+  const { calls, runPython } = recordingRunner(
+    `${JSON.stringify({
+      verdict: "allow",
+      replacement: null,
+      released_text: "hello",
+      reasons: [],
+    })}\n`,
+  );
 
   const result = persistToolResult(
     {
@@ -297,9 +304,42 @@ test("persist allows a clean tool result without replacing it", async (t) => {
   assert.equal(calls[0].input.tool_response, "hello");
 });
 
+test("persist replaces a sanitized tool result with released_text", async (t) => {
+  const configFile = await createRuntimeConfig(t);
+  const { runPython } = recordingRunner(
+    `${JSON.stringify({
+      verdict: "allow",
+      replacement: null,
+      released_text: "[REDACTED] safe text",
+      reasons: [],
+    })}\n`,
+  );
+
+  const result = persistToolResult(
+    {
+      role: "toolResult",
+      toolCallId: "call-sanitized",
+      toolName: "exec",
+      content: [{ type: "text", text: "unsafe text" }],
+    },
+    configFile,
+    PYTHON,
+    runPython,
+  );
+
+  assert.deepEqual(result.message.content, [{ type: "text", text: "[REDACTED] safe text" }]);
+});
+
 test("persist replaces a withheld tool result with the gate replacement", async (t) => {
   const configFile = await createRuntimeConfig(t);
-  const { runPython } = recordingRunner(`${JSON.stringify({ replacement: "[REPLACED]" })}\n`);
+  const { runPython } = recordingRunner(
+    `${JSON.stringify({
+      verdict: "block",
+      replacement: "[REPLACED]",
+      released_text: null,
+      reasons: ["pattern_match"],
+    })}\n`,
+  );
 
   const result = persistToolResult(
     {

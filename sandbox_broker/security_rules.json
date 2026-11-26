@@ -1,0 +1,71 @@
+{
+  "version": "1.0.0",
+  "rules": [
+    {
+      "code": "instruction_override",
+      "category": "prompt_injection",
+      "severity": "critical",
+      "pattern": "\\b(ignore|disregard|forget|bypass|override)\\b.{0,40}\\b(previous|prior|earlier|system|developer|safety|security|guardrails?|instructions?)\\b"
+    },
+    {
+      "code": "system_prompt_exfiltration",
+      "category": "prompt_exfiltration",
+      "severity": "critical",
+      "pattern": "\\b(reveal|print|show|dump|expose|display|list)\\b.{0,60}\\b(system prompt|hidden prompt|developer message|internal instructions?|chain of thought)\\b"
+    },
+    {
+      "code": "download_execute",
+      "category": "execution",
+      "severity": "critical",
+      "pattern": "\\b(curl|wget|invoke-webrequest|iwr|irm)\\b.{0,180}\\|\\s*(sudo\\s+)?(ba|z)?sh\\b"
+    },
+    {
+      "code": "encoded_powershell",
+      "category": "execution",
+      "severity": "critical",
+      "pattern": "powershell(?:\\.exe)?\\s+(?:-enc|-encodedcommand)\\s+[A-Za-z0-9+/=]{20,}"
+    },
+    {
+      "code": "reverse_shell",
+      "category": "execution",
+      "severity": "critical",
+      "pattern": "(nc|ncat|netcat)\\b[^\\n]*\\s-[a-z]*e|/dev/tcp/|bash\\s+-i\\s*>&|mkfifo\\b"
+    },
+    {
+      "code": "powershell_download_execute",
+      "category": "execution",
+      "severity": "critical",
+      "pattern": "\\b(IEX|invoke-expression)\\b.{0,180}\\b(DownloadString|DownloadFile|iwr|irm|invoke-webrequest|invoke-restmethod)\\b"
+    },
+    {
+      "code": "certutil_download",
+      "category": "execution",
+      "severity": "critical",
+      "pattern": "\\bcertutil\\b.{0,180}(?:-urlcache|-decode)"
+    },
+    {
+      "code": "python_code_execution",
+      "category": "execution",
+      "severity": "high",
+      "pattern": "\\b(eval|exec|__import__|os\\.system|subprocess|socket\\.socket)\\s*(\\(|\\.)"
+    },
+    {
+      "code": "credential_exfiltration",
+      "category": "exfiltration",
+      "severity": "critical",
+      "pattern": "\\b(send|upload|exfiltrate|forward|export|transmit)\\b.{0,60}\\b(secret|credential|password|token|api key|private key|\\.env)\\b"
+    },
+    {
+      "code": "upload_payload",
+      "category": "exfiltration",
+      "severity": "critical",
+      "pattern": "\\b(curl|wget)\\b.{0,180}(?:-d\\s*@|--data(?:-binary|-raw)?\\s*@|-F\\s*\\S*@|--post-file|--upload-file)"
+    },
+    {
+      "code": "hidden_instructions",
+      "category": "prompt_injection",
+      "severity": "high",
+      "pattern": "<\\|im_(start|end)\\|>|<\\|(system|user|assistant)\\|>|\\[/?INST\\]|\\bzero[- ]width\\b"
+    }
+  ]
+}

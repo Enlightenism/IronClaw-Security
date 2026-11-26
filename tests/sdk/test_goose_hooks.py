@@ -58,6 +58,12 @@ def test_merged_config_blocks_on_failure_in_pre_tool_use_only() -> None:
     assert goose_hooks.HOOK_MARKER in entry["command"]
 
 
+def test_goose_manifest_marks_return_enforcement_unavailable() -> None:
+    manifest = goose_hooks.plugin_manifest()
+
+    assert manifest["return_enforcement"] == "unsupported"
+
+
 def test_merge_is_idempotent() -> None:
     once = goose_hooks.merge_goose_hooks({})
     twice = goose_hooks.merge_goose_hooks(once)

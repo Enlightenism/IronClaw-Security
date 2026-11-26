@@ -36,6 +36,19 @@ client = IronclawClient(
 
 ---
 
+## Agent Output Release Contract
+
+Agent outputs enter a fresh isolated sandbox immediately through the IronClaw
+front gate. The security system scans and evaluates the complete output while
+it remains isolated. No original output is released to the platform or user
+until the sandbox verdict is `allow`.
+
+Timeout, broker failure, malformed output, missing model or policy snapshots,
+scanner failure, and blocked results suppress the original output. Quarantine,
+incident evidence, and human review have no release authority.
+
+---
+
 ## `client.scan()`
 
 Inspect a single content string and return a verdict.
@@ -132,31 +145,12 @@ records.records  # list[AuditRecord]
 
 ## `client.get_review_queue()`
 
-Retrieve all items currently pending human review.
+Retrieve blocked items retained for evidence or incident investigation.
+Quarantine is not a release mechanism.
 
 ```python
 items = client.get_review_queue()
 # returns list[ReviewItem]
-```
-
----
-
-## `client.approve_review(review_id)`
-
-Approve an item held in the operational review queue.
-
-```python
-client.approve_review("review-uuid")
-```
-
----
-
-## `client.reject_review(review_id)`
-
-Reject an item held in the operational review queue.
-
-```python
-client.reject_review("review-uuid")
 ```
 
 ---

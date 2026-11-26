@@ -382,7 +382,21 @@ def _broker_verdict(text: str, platform: str, digests: list[str]) -> ScanOutcome
         raise InstallScanError("artifact_too_large_to_scan")
     payload = {"content": text, "install": {"platform": platform, "sha256": digests}}
     data = SandboxBrokerClient().run(SCAN_ACTION, f"install:{platform}", payload, timeout_seconds=BROKER_SCAN_TIMEOUT_SECONDS)
-    if data.get("verdict") == ALLOW_VERDICT and data.get("status") == "completed" and not data.get("untrusted"):
+    risk_score = data.get("risk_score")
+    reasons = data.get("reasons")
+    valid_allow = (
+        data.get("verdict") == ALLOW_VERDICT
+        and data.get("status") == "completed"
+        and data.get("executor") == "docker"
+        and data.get("untrusted") is False
+        and isinstance(data.get("released_text"), str)
+        and isinstance(risk_score, int)
+        and not isinstance(risk_score, bool)
+        and 0 <= risk_score <= 29
+        and isinstance(reasons, list)
+        and not reasons
+    )
+    if valid_allow:
         return ScanOutcome(True, ["third_party_scanned_clean"], digests)
     code = re.sub(r"[^a-z0-9_]", "_", str(data.get("reason") or "blocked").lower())[:64]
     return ScanOutcome(False, [f"sandbox_{code}"], digests)

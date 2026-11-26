@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "fail_closed": true,
+  "allow_max": 29,
+  "block_threshold": 70,
+  "prompt_guard_threshold": 0.5,
+  "prompt_guard_model": "prompt-guard-86m",
+  "forbid_network": true,
+  "forbid_write": true,
+  "forbid_privilege_escalation": true
+}

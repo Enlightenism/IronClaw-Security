@@ -449,6 +449,36 @@ ALL_RULE_GROUPS: list[list[Rule]] = [
 ]
 
 
+IMMUTABLE_SANDBOX_RULE_SNAPSHOT: tuple[tuple[str, str, str, str], ...] = tuple(
+    (
+        rule["id"],
+        rule["pattern"],
+        rule["severity"],
+        rule["category"],
+    )
+    for group in ALL_RULE_GROUPS
+    for rule in group
+)
+
+
+def export_immutable_sandbox_policy_snapshot() -> dict[str, Any]:
+    return {
+        "version": "runtime-immutable-1",
+        "fail_closed": True,
+        "allow_max": 29,
+        "block_min": 70,
+        "rules": [
+            {
+                "id": rule_id,
+                "pattern": pattern,
+                "severity": severity,
+                "category": category,
+            }
+            for rule_id, pattern, severity, category in IMMUTABLE_SANDBOX_RULE_SNAPSHOT
+        ],
+    }
+
+
 def get_all_rule_ids() -> set[str]:
     """Return the set of every rule ID declared in ALL_RULE_GROUPS."""
     ids: set[str] = set()

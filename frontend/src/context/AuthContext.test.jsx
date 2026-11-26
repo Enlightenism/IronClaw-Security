@@ -39,6 +39,8 @@ const TestConsumer = () => {
     user,
     session,
     loading,
+    cookieConsent,
+    saveCookieConsent,
     authenticate,
     register,
     logout,
@@ -86,6 +88,7 @@ const TestConsumer = () => {
   return (
     <div>
       <div data-testid="loading">{String(loading)}</div>
+      <div data-testid="cookie-consent">{cookieConsent ?? "null"}</div>
       <div data-testid="user">{user?.email ?? "null"}</div>
       <div data-testid="session">{session?.access_token ?? "null"}</div>
       <div data-testid="error">{lastError || "none"}</div>
@@ -93,6 +96,10 @@ const TestConsumer = () => {
       <button onClick={handleRegister}>register</button>
       <button onClick={handleLogout}>logout</button>
       <button onClick={handleRefreshUser}>refreshUser</button>
+      <button onClick={() => saveCookieConsent("accepted")}>
+        accept cookies
+      </button>
+      <button onClick={() => saveCookieConsent("denied")}>deny cookies</button>
     </div>
   );
 };
@@ -125,7 +132,9 @@ describe("AuthContext", () => {
     jest.clearAllMocks();
 
     authStateChangeHandler = null;
-    localStorageStore = {};
+    localStorageStore = {
+      "ironclaw.cookie-consent": "accepted",
+    };
 
     api.defaults.headers.common = {};
 
@@ -211,6 +220,49 @@ describe("AuthContext", () => {
     await waitFor(() =>
       expect(supabase.auth.getSession).toHaveBeenCalledTimes(1),
     );
+  });
+
+  it("denied consent clears cached login and signs out", async () => {
+    localStorageStore["ironclaw.cookie-consent"] = "denied";
+    localStorageStore["ironclaw.auth.token"] = "cached-token";
+    localStorageStore["ironclaw.auth.orgId"] = "org-1";
+
+    renderWithProvider();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("cookie-consent")).toHaveTextContent("denied"),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("deny cookies"));
+    });
+
+    expect(localStorageStore["ironclaw.auth.token"]).toBeUndefined();
+    expect(localStorageStore["ironclaw.auth.orgId"]).toBeUndefined();
+    expect(api.defaults.headers.common["Authorization"]).toBeUndefined();
+    expect(api.defaults.headers.common["X-Org-Id"]).toBeUndefined();
+    expect(supabase.auth.signOut).toHaveBeenCalled();
+  });
+
+  it("accepted consent persists the active login token", async () => {
+    localStorageStore["ironclaw.cookie-consent"] = "accepted";
+    const session = makeSession();
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session },
+    });
+
+    renderWithProvider();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("session")).toHaveTextContent("token-123"),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("accept cookies"));
+    });
+
+    expect(localStorageStore["ironclaw.cookie-consent"]).toBe("accepted");
+    expect(localStorageStore["ironclaw.auth.token"]).toBe("token-123");
   });
 
   it("subscribes to auth state changes and updates state from the callback", async () => {

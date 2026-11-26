@@ -56,10 +56,23 @@ def classify_prompt_guard(
 
 @lru_cache(maxsize=1)
 def _load_prompt_guard(model_path: str) -> tuple[Any, Any, Any]:
+    path = resolve_prompt_guard_path(model_path)
+    required_files = (
+        "config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "model.safetensors",
+    )
+    if not path.is_dir():
+        raise RuntimeError(f"Prompt Guard model directory missing: {path}")
+    missing = [filename for filename in required_files if not (path / filename).is_file()]
+    if missing:
+        raise RuntimeError("Prompt Guard model incomplete; missing " + ", ".join(missing))
+
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-    path = resolve_prompt_guard_path(model_path)
     tokenizer = AutoTokenizer.from_pretrained(path, local_files_only=True)
     model = AutoModelForSequenceClassification.from_pretrained(
         path,

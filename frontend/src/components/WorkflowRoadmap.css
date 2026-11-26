@@ -1,0 +1,824 @@
+.workflow-roadmap-section {
+  position: relative;
+  z-index: 10;
+  min-height: 210vh;
+  padding: 4rem 1.25rem 7rem;
+}
+
+.workflow-roadmap-sticky {
+  position: sticky;
+  top: 1.25rem;
+  display: flex;
+  min-height: calc(100vh - 2.5rem);
+  align-items: center;
+  justify-content: center;
+}
+
+.workflow-roadmap-canvas {
+  position: relative;
+  width: min(1180px, 100%);
+  overflow: hidden;
+  border: 1px solid rgba(255, 215, 0, 0.22);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 78% 38%, rgba(56, 189, 248, 0.09), transparent 24rem),
+    radial-gradient(circle at 18% 8%, rgba(255, 215, 0, 0.09), transparent 20rem),
+    linear-gradient(145deg, rgba(14, 16, 18, 0.98), rgba(5, 6, 7, 0.98));
+  box-shadow:
+    0 35px 90px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    0 0 45px rgba(201, 168, 76, 0.06);
+  opacity: 0;
+  transform: translateY(18px) scale(0.985);
+  transition:
+    opacity 700ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.workflow-roadmap-section.is-visible .workflow-roadmap-canvas {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.workflow-roadmap-canvas::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 215, 0, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 215, 0, 0.035) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(to bottom, black 0, transparent 78%);
+}
+
+.workflow-roadmap-heading {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 1.5rem 1.75rem 1.25rem;
+  border-bottom: 1px solid rgba(255, 215, 0, 0.12);
+}
+
+.workflow-roadmap-kicker {
+  display: block;
+  margin-bottom: 0.55rem;
+  color: #ffd700;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.workflow-roadmap-heading h2 {
+  margin: 0;
+  font-size: clamp(1.65rem, 3vw, 2.65rem);
+  line-height: 1;
+  letter-spacing: -0.035em;
+}
+
+.workflow-roadmap-heading p {
+  max-width: 430px;
+  margin: 0;
+  color: #bfc1c2;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  text-align: right;
+}
+
+.workflow-platform-rail {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 0.55rem;
+  padding: 1rem 1.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.workflow-platform {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.42rem;
+  min-height: 62px;
+  color: #dfe0df;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.workflow-platform-logo {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.55));
+  transition:
+    transform 300ms ease,
+    filter 300ms ease;
+}
+
+.workflow-platform:hover .workflow-platform-logo {
+  transform: translateY(-3px) scale(1.06);
+  filter:
+    drop-shadow(0 8px 16px rgba(255, 215, 0, 0.16))
+    drop-shadow(0 0 10px rgba(56, 189, 248, 0.12));
+}
+
+.workflow-stage-track {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  margin: 0 1.75rem;
+  padding: 1.15rem 0 0.75rem;
+}
+
+.workflow-track-base,
+.workflow-track-progress {
+  position: absolute;
+  top: 1.72rem;
+  left: 6.25%;
+  width: 87.5%;
+  height: 2px;
+}
+
+.workflow-track-base {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.workflow-track-progress {
+  left: 6.25%;
+  background: linear-gradient(90deg, #c9a84c, #ffd700, #38bdf8);
+  box-shadow: 0 0 16px rgba(255, 215, 0, 0.38);
+  transition: width 180ms linear;
+}
+
+.workflow-stage-node {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #737373;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.62rem;
+  text-align: center;
+  transition: color 260ms ease;
+}
+
+.workflow-stage-number {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 0.42rem;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 50%;
+  background: #090a0b;
+  transition:
+    border-color 260ms ease,
+    background 260ms ease,
+    color 260ms ease,
+    box-shadow 260ms ease,
+    transform 260ms ease;
+}
+
+.workflow-stage-node.is-complete {
+  color: #c9a84c;
+}
+
+.workflow-stage-node.is-complete .workflow-stage-number {
+  border-color: rgba(201, 168, 76, 0.6);
+  color: #ffd700;
+  background: rgba(201, 168, 76, 0.11);
+}
+
+.workflow-stage-node.is-active {
+  color: #fff;
+}
+
+.workflow-stage-node.is-active .workflow-stage-number {
+  border-color: #ffd700;
+  color: #050607;
+  background: #ffd700;
+  box-shadow:
+    0 0 0 5px rgba(255, 215, 0, 0.07),
+    0 0 24px rgba(255, 215, 0, 0.38);
+  transform: scale(1.08);
+}
+
+.workflow-stage-name {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.workflow-roadmap-grid {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr);
+  gap: 1.25rem;
+  padding: 0.75rem 1.75rem 1.25rem;
+}
+
+.workflow-roadmap-status {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 18px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
+  padding: 1.15rem;
+}
+
+.workflow-status-label {
+  display: block;
+  margin-bottom: 0.45rem;
+  color: #38bdf8;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.workflow-roadmap-status h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.2rem;
+  line-height: 1.15;
+}
+
+.workflow-roadmap-status > p {
+  min-height: 58px;
+  margin: 0.55rem 0 0.8rem;
+  color: #bfc1c2;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.workflow-status-steps {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.workflow-status-step {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  align-items: center;
+  min-height: 26px;
+  color: #686868;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.64rem;
+  border-radius: 7px;
+  transition:
+    color 250ms ease,
+    background 250ms ease;
+}
+
+.workflow-status-step span {
+  text-align: center;
+}
+
+.workflow-status-step strong {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-status-step.is-passed {
+  color: #c9a84c;
+}
+
+.workflow-status-step.is-current {
+  color: #050607;
+  background: linear-gradient(90deg, #c9a84c, #ffd700);
+  box-shadow: 0 0 18px rgba(255, 215, 0, 0.12);
+}
+
+.workflow-sandbox-map {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr) 118px;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.workflow-output-card,
+.workflow-release-card {
+  min-height: 174px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 0.8rem;
+  transition:
+    border-color 300ms ease,
+    opacity 300ms ease,
+    transform 300ms ease,
+    filter 300ms ease,
+    box-shadow 300ms ease;
+}
+
+.workflow-output-card {
+  border-color: rgba(56, 189, 248, 0.24);
+  box-shadow: 0 0 24px rgba(56, 189, 248, 0.055);
+}
+
+.workflow-output-card.is-intercepted {
+  border-color: rgba(255, 215, 0, 0.42);
+  transform: scale(0.96);
+  box-shadow: 0 0 24px rgba(255, 215, 0, 0.09);
+}
+
+.workflow-output-card.is-sealed {
+  opacity: 0.48;
+  filter: grayscale(0.45);
+  transform: scale(0.91);
+}
+
+.workflow-card-kicker {
+  display: block;
+  margin-bottom: 0.45rem;
+  color: #737373;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.55rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.workflow-output-card strong,
+.workflow-release-card strong {
+  display: block;
+  min-height: 48px;
+  color: #e5e4e2;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.workflow-output-lines {
+  display: grid;
+  gap: 0.38rem;
+  margin-top: 0.55rem;
+}
+
+.workflow-output-lines span {
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(229, 228, 226, 0.28), transparent);
+}
+
+.workflow-output-lines span:nth-child(2) {
+  width: 82%;
+}
+
+.workflow-output-lines span:nth-child(3) {
+  width: 58%;
+}
+
+.workflow-sandbox {
+  position: relative;
+  min-height: 174px;
+  overflow: hidden;
+  border: 1px solid rgba(56, 189, 248, 0.16);
+  border-radius: 15px;
+  background:
+    linear-gradient(135deg, rgba(56, 189, 248, 0.055), transparent 38%),
+    rgba(5, 6, 7, 0.86);
+  padding: 0.7rem;
+  transition:
+    border-color 300ms ease,
+    box-shadow 300ms ease,
+    transform 300ms ease;
+}
+
+.workflow-sandbox.is-active {
+  border-color: rgba(255, 215, 0, 0.35);
+  box-shadow:
+    0 0 32px rgba(255, 215, 0, 0.07),
+    inset 0 0 24px rgba(56, 189, 248, 0.035);
+  transform: translateY(-2px);
+}
+
+.workflow-sandbox.is-scanned {
+  border-color: rgba(56, 189, 248, 0.42);
+  box-shadow:
+    0 0 28px rgba(56, 189, 248, 0.08),
+    inset 0 0 22px rgba(56, 189, 248, 0.04);
+}
+
+.workflow-sandbox-header,
+.workflow-sandbox-specs,
+.workflow-verdict-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.workflow-sandbox-header {
+  color: #fff;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.workflow-sandbox-status {
+  color: #38bdf8;
+  font-size: 0.52rem;
+}
+
+.workflow-sandbox-specs {
+  margin-top: 0.48rem;
+  justify-content: flex-start;
+}
+
+.workflow-sandbox-specs span {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  color: #8f9292;
+  padding: 0.22rem 0.38rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.48rem;
+}
+
+.workflow-security-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.28rem;
+  margin-top: 0.48rem;
+}
+
+.workflow-security-item {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 0.32rem;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  color: #777;
+  padding: 0.28rem 0.34rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.48rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    color 220ms ease,
+    border-color 220ms ease,
+    background 220ms ease,
+    box-shadow 220ms ease;
+}
+
+.workflow-security-item.is-active {
+  border-color: rgba(255, 215, 0, 0.28);
+  color: #f5d982;
+  background: rgba(201, 168, 76, 0.08);
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.045);
+}
+
+.workflow-security-mark {
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+
+.workflow-sandbox.is-active .workflow-security-item.is-active .workflow-security-mark {
+  background: #ffd700;
+  box-shadow: 0 0 8px #ffd700;
+}
+
+.workflow-scan-beam {
+  position: absolute;
+  top: 48px;
+  bottom: 50px;
+  left: -12%;
+  width: 12%;
+  opacity: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(56, 189, 248, 0.16),
+    rgba(56, 189, 248, 0.8),
+    transparent
+  );
+  filter: blur(2px);
+  pointer-events: none;
+}
+
+.workflow-sandbox.is-active .workflow-scan-beam {
+  opacity: 1;
+  animation: workflow-scan 2.4s ease-in-out infinite;
+}
+
+@keyframes workflow-scan {
+  0% {
+    left: -12%;
+  }
+  55%,
+  100% {
+    left: 100%;
+  }
+}
+
+.workflow-verdict-row {
+  margin-top: 0.48rem;
+}
+
+.workflow-verdict {
+  width: calc(50% - 0.18rem);
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 0.32rem 0.42rem;
+  font-family: "JetBrains Mono", monospace;
+  transition:
+    border-color 260ms ease,
+    background 260ms ease,
+    box-shadow 260ms ease,
+    color 260ms ease;
+}
+
+.workflow-verdict span {
+  font-size: 0.56rem;
+  font-weight: 800;
+}
+
+.workflow-verdict strong {
+  font-size: 0.48rem;
+  font-weight: 600;
+  opacity: 0.72;
+}
+
+.workflow-verdict-block {
+  color: #a67373;
+  background: rgba(239, 68, 68, 0.025);
+}
+
+.workflow-verdict-block.is-pending {
+  border-color: rgba(248, 113, 113, 0.32);
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.07);
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.08);
+}
+
+.workflow-verdict-allow {
+  color: #777;
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.workflow-verdict-allow.is-released {
+  border-color: rgba(255, 215, 0, 0.54);
+  color: #ffd700;
+  background: rgba(201, 168, 76, 0.11);
+  box-shadow:
+    0 0 18px rgba(255, 215, 0, 0.12),
+    inset 0 0 12px rgba(255, 215, 0, 0.04);
+}
+
+.workflow-release-card {
+  border-color: rgba(255, 215, 0, 0.12);
+  opacity: 0.36;
+  filter: grayscale(0.5);
+}
+
+.workflow-release-card.is-visible {
+  border-color: rgba(255, 215, 0, 0.5);
+  opacity: 1;
+  filter: none;
+  transform: translateX(4px);
+  box-shadow: 0 0 24px rgba(255, 215, 0, 0.11);
+}
+
+.workflow-progress-readout {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 42px 1fr 54px;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 1.75rem;
+  padding: 0.72rem 0 1rem;
+  color: #737373;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.56rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.workflow-progress-readout > div {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.workflow-progress-readout > div span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #c9a84c, #ffd700, #38bdf8);
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.32);
+  transition: width 180ms linear;
+}
+
+@media (max-width: 1020px) {
+  .workflow-roadmap-section {
+    min-height: 180vh;
+  }
+
+  .workflow-roadmap-canvas {
+    max-width: 850px;
+  }
+
+  .workflow-platform-rail {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .workflow-stage-track {
+    margin-right: 1.25rem;
+    margin-left: 1.25rem;
+  }
+
+  .workflow-roadmap-grid {
+    grid-template-columns: 230px minmax(0, 1fr);
+    padding-right: 1.25rem;
+    padding-left: 1.25rem;
+  }
+
+  .workflow-sandbox-map {
+    grid-template-columns: 88px minmax(0, 1fr) 100px;
+  }
+}
+
+@media (max-width: 760px) {
+  .workflow-roadmap-section {
+    min-height: auto;
+    padding: 2.5rem 0.75rem 4rem;
+  }
+
+  .workflow-roadmap-sticky {
+    position: relative;
+    top: auto;
+    min-height: auto;
+  }
+
+  .workflow-roadmap-canvas {
+    border-radius: 20px;
+  }
+
+  .workflow-roadmap-heading {
+    align-items: start;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1.25rem 1rem;
+  }
+
+  .workflow-roadmap-heading p {
+    text-align: left;
+  }
+
+  .workflow-platform-rail {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.35rem;
+    padding: 0.85rem 0.8rem;
+  }
+
+  .workflow-platform {
+    min-height: 58px;
+    font-size: 0.52rem;
+  }
+
+  .workflow-platform-logo {
+    width: 28px;
+    height: 28px;
+  }
+
+  .workflow-stage-track {
+    margin: 0 0.75rem;
+  }
+
+  .workflow-stage-number {
+    width: 28px;
+    height: 28px;
+  }
+
+  .workflow-track-base,
+  .workflow-track-progress {
+    top: 1.58rem;
+  }
+
+  .workflow-stage-name {
+    display: none;
+  }
+
+  .workflow-roadmap-grid {
+    grid-template-columns: 1fr;
+    padding: 0.65rem 0.75rem 0.8rem;
+  }
+
+  .workflow-roadmap-status > p {
+    min-height: 0;
+  }
+
+  .workflow-status-steps {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .workflow-status-step {
+    grid-template-columns: 22px 1fr;
+  }
+
+  .workflow-status-step strong {
+    font-size: 0.56rem;
+  }
+
+  .workflow-sandbox-map {
+    grid-template-columns: 74px minmax(0, 1fr) 82px;
+  }
+
+  .workflow-output-card,
+  .workflow-release-card,
+  .workflow-sandbox {
+    min-height: 165px;
+  }
+
+  .workflow-security-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workflow-progress-readout {
+    margin: 0 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .workflow-platform-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workflow-roadmap-grid {
+    gap: 0.55rem;
+  }
+
+  .workflow-status-steps {
+    display: none;
+  }
+
+  .workflow-sandbox-map {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-output-card,
+  .workflow-release-card {
+    min-height: 92px;
+  }
+
+  .workflow-output-card strong,
+  .workflow-release-card strong {
+    min-height: 28px;
+  }
+
+  .workflow-output-lines {
+    display: none;
+  }
+
+  .workflow-sandbox {
+    min-height: 174px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workflow-roadmap-canvas,
+  .workflow-roadmap-section.is-visible .workflow-roadmap-canvas,
+  .workflow-platform-logo,
+  .workflow-stage-number,
+  .workflow-output-card,
+  .workflow-sandbox,
+  .workflow-release-card {
+    transition: none;
+  }
+
+  .workflow-scan-beam,
+  .workflow-sandbox.is-active .workflow-scan-beam {
+    display: none;
+  }
+}

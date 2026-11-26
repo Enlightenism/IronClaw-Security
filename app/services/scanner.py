@@ -52,6 +52,27 @@ def _build_rule_index() -> dict[str, dict[str, str]]:
     return index
 
 
+def export_sandbox_scanner_rules() -> dict[str, Any]:
+    from app.services.rules import ALL_RULE_GROUPS
+
+    rules = []
+    for group in ALL_RULE_GROUPS:
+        for rule in group:
+            rules.append(
+                {
+                    "code": rule["id"],
+                    "severity": rule["severity"],
+                    "category": rule["category"],
+                    "pattern": rule["pattern"],
+                }
+            )
+    rules.sort(key=lambda item: str(item["code"]))
+    return {
+        "version": "runtime-1",
+        "rules": rules,
+    }
+
+
 # Module-level index — seeded from rules.py at import time.
 # load_builtin_patterns_from_db() merges DB rows on top at startup.
 RULE_INDEX: dict[str, dict[str, str]] = _build_rule_index()

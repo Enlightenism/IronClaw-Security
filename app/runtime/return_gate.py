@@ -1,4 +1,4 @@
-"""Return gate orchestrator: in-process scan, then an isolated sandbox scan through the host broker. Fail closed."""
+"""Sandbox-first return gate orchestrator. Fail closed."""
 
 from __future__ import annotations
 
@@ -8,11 +8,16 @@ import logging
 from typing import Any
 import uuid
 
+from app.config import RISK_THRESHOLD_ALLOW_MAX
+from app.detection.outputsanitizer import build_output_sanitizer
 from app.runtime.return_scanner import ALLOW_VERDICT, BLOCK_VERDICT, scan_return
 from app.schemas.telemetry import TelemetryEventType
 from app.services.actionexecuteservice import ActionExecutionRequest, get_action_execute_service
 from app.services.audit_store import record_gate_audit_event
+from app.services.detonationservice import build_detonation_service
+from app.services.malwareservice import build_malware_service
 from app.services.sandbox_broker_client import SandboxBrokerClient
+from app.services.secretsredaction import build_secrets_redaction_service
 from app.services.telemetry import append_telemetry_event
 from app.supabaseclient import TOKENS_PER_UNIT
 
@@ -26,8 +31,7 @@ RETURN_CHARS_PER_TOKEN = 4
 RETURN_WINDOW_CHARS = TOKENS_PER_UNIT * RETURN_CHARS_PER_TOKEN
 # Overlap keeps a pattern that straddles a window boundary whole in at least one window.
 RETURN_WINDOW_OVERLAP_CHARS = 4_000
-STAGE_SCAN_ERROR = "scan_error"
-STAGE_INPROCESS = "inprocess"
+STAGE_SECURITY_GATE = "security_gate"
 STAGE_SANDBOX = "sandbox"
 STAGE_METERING = "metering"
 FAIL_CLOSED_RISK_SCORE = 100
@@ -40,6 +44,7 @@ class ReturnGateDecision:
     stage: str
     reasons: list[str] = field(default_factory=list)
     risk_score: int = 0
+    released_text: str | None = None
 
     @property
     def blocked(self) -> bool:
@@ -54,10 +59,41 @@ def _block(sandbox_id: str, stage: str, reason: str) -> ReturnGateDecision:
     return ReturnGateDecision(BLOCK_VERDICT, sandbox_id, stage, [reason], FAIL_CLOSED_RISK_SCORE)
 
 
-def _broker_decision(data: Mapping[str, Any], sandbox_id: str) -> ReturnGateDecision:
-    if data.get("verdict") == ALLOW_VERDICT and data.get("status") == "completed" and not data.get("untrusted"):
-        return ReturnGateDecision(ALLOW_VERDICT, sandbox_id, STAGE_SANDBOX)
-    return _block(sandbox_id, STAGE_SANDBOX, str(data.get("reason") or "sandbox_blocked"))
+def _broker_decision(data: Any, sandbox_id: str) -> ReturnGateDecision:
+    if not isinstance(data, Mapping):
+        return _block(sandbox_id, STAGE_SANDBOX, "invalid_sandbox_response")
+    risk_score = data.get("risk_score")
+    reasons = data.get("reasons")
+    if isinstance(risk_score, bool) or not isinstance(risk_score, int):
+        return _block(sandbox_id, STAGE_SANDBOX, "invalid_sandbox_response")
+    if not isinstance(reasons, list):
+        return _block(sandbox_id, STAGE_SANDBOX, "invalid_sandbox_response")
+    if data.get("verdict") == ALLOW_VERDICT and data.get("status") == "completed" and data.get("executor") == "docker" and data.get("untrusted") is not True:
+        if not 0 <= risk_score <= RISK_THRESHOLD_ALLOW_MAX or reasons:
+            return _block(sandbox_id, STAGE_SANDBOX, "invalid_sandbox_response")
+        released_text = data.get("released_text")
+        if not isinstance(released_text, str):
+            return _block(sandbox_id, STAGE_SANDBOX, "invalid_sandbox_response")
+        return ReturnGateDecision(
+            ALLOW_VERDICT,
+            sandbox_id,
+            STAGE_SANDBOX,
+            released_text=released_text,
+        )
+    if data.get("verdict") not in (ALLOW_VERDICT, BLOCK_VERDICT):
+        return _block(sandbox_id, STAGE_SANDBOX, "invalid_sandbox_response")
+    if data.get("verdict") == ALLOW_VERDICT and (data.get("status") != "completed" or data.get("executor") != "docker" or data.get("untrusted") is True):
+        return _block(sandbox_id, STAGE_SANDBOX, "invalid_sandbox_response")
+    if data.get("verdict") == BLOCK_VERDICT:
+        if data.get("status") != "blocked" or data.get("executor") != "docker" or data.get("untrusted") is not True or risk_score < FAIL_CLOSED_RISK_SCORE or not reasons:
+            return _block(sandbox_id, STAGE_SANDBOX, "invalid_sandbox_response")
+        if data.get("released_text") is not None:
+            return _block(sandbox_id, STAGE_SANDBOX, "invalid_sandbox_response")
+    return _block(
+        sandbox_id,
+        STAGE_SANDBOX,
+        str(data.get("reason") or "sandbox_blocked"),
+    )
 
 
 def split_return_windows(content: str) -> list[str]:
@@ -181,6 +217,15 @@ def run_return_gate(
             target=target,
             broker_client=broker_client,
         )
+    if decision.verdict == ALLOW_VERDICT:
+        decision = ReturnGateDecision(
+            verdict=decision.verdict,
+            sandbox_id=decision.sandbox_id,
+            stage=decision.stage,
+            reasons=list(decision.reasons),
+            risk_score=decision.risk_score,
+            released_text=content,
+        )
 
     _record_decision(
         decision,
@@ -192,6 +237,55 @@ def run_return_gate(
         install_key_id=install_key_id,
     )
     return decision
+
+
+def _sanitize_isolated_return(
+    *,
+    sandbox_id: str,
+    content: str,
+    payload: Mapping[str, Any],
+) -> ReturnGateDecision | None:
+    payload_text = content
+    redaction = build_secrets_redaction_service().redact_text(payload_text)
+    if redaction.findings_detected > 0:
+        return _block(
+            sandbox_id,
+            STAGE_SECURITY_GATE,
+            "secret_redaction_block",
+        )
+
+    malware = build_malware_service().analyze_bytes(
+        payload_text.encode("utf-8", errors="replace"),
+        file_name=(str(payload.get("file_name") or payload.get("file_path") or "") or None),
+    )
+    if malware.verdict == BLOCK_VERDICT:
+        return _block(
+            sandbox_id,
+            STAGE_SECURITY_GATE,
+            "malware_text_assessment",
+        )
+
+    detonation = build_detonation_service().detonate_text(payload_text)
+    if detonation.verdict == BLOCK_VERDICT:
+        return _block(
+            sandbox_id,
+            STAGE_SECURITY_GATE,
+            "detonation_text_assessment",
+        )
+
+    sanitizer = build_output_sanitizer().sanitize(
+        payload_text,
+        context="isolated_agent_output",
+        redact_secrets=True,
+        block_unsafe_commands=True,
+    )
+    if sanitizer.blocked:
+        return _block(
+            sandbox_id,
+            STAGE_SECURITY_GATE,
+            "output_sanitizer_block",
+        )
+    return None
 
 
 def _scan_windows(
@@ -208,22 +302,7 @@ def _scan_windows(
     broker_client: SandboxBrokerClient | None,
 ) -> ReturnGateDecision:
     for index, window in enumerate(windows):
-        try:
-            scan = scan_return(
-                payload,
-                content=window,
-                platform=platform,
-                action_type=action_type,
-                target=target,
-                client_id=client_id,
-                session_id=session_id,
-            )
-        except Exception:
-            logger.exception("return gate in-process scan failed; blocking", extra={"sandbox_id": sandbox_id, "window": index})
-            return _block(sandbox_id, STAGE_SCAN_ERROR, "return_scan_error")
-        if scan.blocked:
-            return ReturnGateDecision(BLOCK_VERDICT, sandbox_id, STAGE_INPROCESS, scan.reasons, scan.risk_score)
-        decision = _sandbox_decision(
+        sandbox_decision = _sandbox_decision(
             sandbox_id,
             platform=platform,
             agent_id=agent_id,
@@ -234,8 +313,38 @@ def _scan_windows(
             window_index=index,
             window_count=len(windows),
         )
-        if decision.blocked:
-            return decision
+        if sandbox_decision.blocked:
+            return sandbox_decision
+
+        try:
+            scan = scan_return(
+                payload,
+                content=window,
+                platform=platform,
+                action_type=action_type,
+                target=target,
+                client_id=client_id,
+                session_id=session_id,
+                sandbox_allowed=True,
+            )
+        except Exception:
+            logger.exception("return gate security scan failed; blocking", extra={"sandbox_id": sandbox_id, "window": index})
+            return _block(sandbox_id, STAGE_SECURITY_GATE, "return_scan_error")
+        if scan.blocked:
+            return ReturnGateDecision(
+                BLOCK_VERDICT,
+                sandbox_id,
+                STAGE_SECURITY_GATE,
+                scan.reasons,
+                scan.risk_score,
+            )
+        isolated_result = _sanitize_isolated_return(
+            sandbox_id=sandbox_id,
+            content=window,
+            payload=payload,
+        )
+        if isolated_result is not None:
+            return isolated_result
     return ReturnGateDecision(ALLOW_VERDICT, sandbox_id, STAGE_SANDBOX)
 
 

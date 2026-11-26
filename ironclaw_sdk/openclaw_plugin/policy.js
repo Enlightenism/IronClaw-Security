@@ -385,11 +385,27 @@ export function persistToolResult(event, configFile, pythonPath, runPython = exe
     if (!output) {
       return undefined;
     }
-    const replacement = JSON.parse(output)?.replacement;
-    if (typeof replacement !== "string" || !replacement) {
-      throw new Error("Unexpected return gate output.");
+    const envelope = JSON.parse(output);
+    if (!envelope || typeof envelope !== "object") {
+      throw new Error("Unexpected sandbox release envelope.");
     }
-    return persistedMessage(message, replacement);
+    if (envelope.verdict === "allow") {
+      if (typeof envelope.released_text !== "string") {
+        throw new Error("Allow response omitted released_text.");
+      }
+      if (envelope.released_text === persistableText(message)) {
+        return undefined;
+      }
+      return persistedMessage(message, envelope.released_text);
+    }
+    if (envelope.verdict === "block") {
+      const replacement =
+        typeof envelope.replacement === "string" && envelope.replacement
+          ? envelope.replacement
+          : RETURN_BLOCKED_TEXT;
+      return persistedMessage(message, replacement);
+    }
+    throw new Error("Unexpected sandbox release verdict.");
   } catch (error) {
     const errorName = error instanceof Error ? error.name : "UnknownError";
     console.error(`[ironclaw-security] Return gate failed (${errorName}); the tool output was withheld.`);

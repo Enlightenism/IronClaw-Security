@@ -9,9 +9,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+ARG PROMPT_GUARD_MODEL=prompt-guard-86m
+
 # System deps — curl for healthcheck, ca-certificates for TLS
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && apt-get install -y --no-install-recommends curl ca-certificates docker.io \
     && rm -rf /var/lib/apt/lists/* \
     && adduser --disabled-password --gecos "" --home /home/ironclaw ironclaw
 
@@ -30,12 +32,18 @@ RUN python -m pip install --upgrade pip \
 # ── Layer 3: application source ─────────────────────────────────────────────
 # Copied last so dependency layers are not invalidated on code changes.
 COPY . /app
+COPY sandbox_broker ./sandbox_broker
+COPY models/prompt-guard-86m ./models/prompt-guard-86m
 
 # Export OpenAPI schema at build time so the locked schema is present in the image.
 # Failure is non-fatal — an empty placeholder is written so startup does not break.
 RUN python3 scripts/export_openapi.py --output /app/openapi.json \
     && echo "[docker-build] OpenAPI schema exported successfully" \
     || (echo "[docker-build] WARNING: OpenAPI export failed, continuing build" && touch /app/openapi.json)
+RUN test -f /app/models/prompt-guard-86m/config.json \
+    && test -f /app/models/prompt-guard-86m/model.safetensors \
+    && test -f /app/sandbox_broker/security_rules.json \
+    && test -f /app/sandbox_broker/policy_snapshot.json
 
 RUN chown -R ironclaw:ironclaw /app
 
@@ -45,8 +53,8 @@ USER ironclaw
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl --fail --silent http://127.0.0.1:8000/api/health \
-    || curl --fail --silent http://127.0.0.1:8000/api/health/liveness \
+    CMD curl --fail --silent http://127.0.0.1:8000/health/readiness \
+    || curl --fail --silent http://127.0.0.1:8000/health/liveness \
     || exit 1
 
 # No secrets are accepted here. All runtime configuration is injected

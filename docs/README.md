@@ -60,6 +60,11 @@ returns a **verdict**:
 Quarantine is an operational isolation and review state, not a final verdict.
 Historical records may retain legacy verdict labels.
 
+Agent outputs enter a fresh isolated sandbox immediately through the IronClaw
+front gate. The security system scans and evaluates the output while isolated.
+No original output is released to the platform or user until the sandbox verdict
+is `allow`; quarantine and human review never authorize release.
+
 IronClaw covers:
 
 - **Prompt injection detection** — catches adversarial instructions embedded in
@@ -71,8 +76,9 @@ IronClaw covers:
 - **Policy enforcement** — applies configurable rule sets per agent, user, or
   context
 - **Audit logging** — every scan, verdict, and policy decision is persisted
-- **Review workflow** — blocked items may be isolated for human review; the
-  review status is separate from the final verdict
+- **Evidence quarantine** — blocked items may be retained for investigation;
+  quarantine and review status are separate from the final verdict and have no
+  release authority
 - **Telemetry** — real-time event stream for observability pipelines
 - **Sandboxed execution** — runtime boundaries enforced around code and tool
   calls

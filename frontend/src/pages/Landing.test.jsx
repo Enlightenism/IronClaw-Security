@@ -4,6 +4,7 @@ import {
   fireEvent,
   waitFor,
   act,
+  within,
 } from "@testing-library/react";
 import Landing from "@/pages/Landing";
 import { useAuth } from "@/context/AuthContext";
@@ -19,6 +20,7 @@ import { MemoryRouter } from "react-router-dom";
 
 const mockNavigate = jest.fn();
 const mockUseAuth = useAuth;
+const mockSaveCookieConsent = jest.fn();
 
 jest.mock("framer-motion", () => {
   const React = require("react");
@@ -140,7 +142,11 @@ const flushPromises = async () => {
 };
 
 const renderLanding = async (authState = { user: null }) => {
-  mockUseAuth.mockReturnValue(authState);
+  mockUseAuth.mockReturnValue({
+    cookieConsent: null,
+    saveCookieConsent: mockSaveCookieConsent,
+    ...authState,
+  });
 
   let result;
   await act(async () => {
@@ -220,6 +226,7 @@ const freezeTimeAt = (nowMs) => {
 describe("Landing", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockSaveCookieConsent.mockResolvedValue(undefined);
     resetLandingCounters();
 
     useLandingCounter.mockImplementation(
@@ -270,6 +277,39 @@ describe("Landing", () => {
     expect(screen.getByTestId("threat-counter")).toBeInTheDocument();
     expect(screen.getByTestId("user-counter")).toBeInTheDocument();
   }, 20000);
+
+  it("shows the cookie banner until a consent choice is saved", async () => {
+    await renderLanding();
+
+    expect(screen.getByTestId("cookie-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("cookie-accept-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("cookie-deny-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("cookie-banner")).toHaveTextContent(
+      "We use only essential cookies that are strictly necessary",
+    );
+  });
+
+  it("saves accepted cookie consent and dismisses the banner", async () => {
+    await renderLanding();
+
+    fireEvent.click(screen.getByTestId("cookie-accept-btn"));
+
+    expect(mockSaveCookieConsent).toHaveBeenCalledWith("accepted");
+  });
+
+  it("saves denied cookie consent and dismisses the banner", async () => {
+    await renderLanding();
+
+    fireEvent.click(screen.getByTestId("cookie-deny-btn"));
+
+    expect(mockSaveCookieConsent).toHaveBeenCalledWith("denied");
+  });
+
+  it("does not show the cookie banner after consent was already saved", async () => {
+    await renderLanding({ user: null, cookieConsent: "accepted" });
+
+    expect(screen.queryByTestId("cookie-banner")).not.toBeInTheDocument();
+  });
 
   it("shows the server value for each counter key", async () => {
     const nowMs = START_MS + HOUR_MS;
@@ -569,6 +609,53 @@ describe("Landing", () => {
     expect(screen.getByTestId("credits-section")).toBeInTheDocument();
   });
 
+  it("renders platform token costs with logos and model-specific prices", async () => {
+    await renderLanding();
+
+    expect(screen.getByTestId("platform-token-costs")).toHaveTextContent(
+      "What 125 Million Output Tokens Costs on Each Platform",
+    );
+
+    const costRows = [
+      "claude-sonnet",
+      "claude-opus",
+      "cursor",
+      "github-copilot",
+      "google-antigravity",
+      "openclaw-sonnet",
+      "openclaw-hermes",
+      "hermes-sonnet",
+      "hermes-openrouter",
+      "goose-sonnet",
+      "goose-openrouter",
+    ];
+
+    costRows.forEach((id) => {
+      const row = screen.getByTestId(`platform-token-cost-${id}`);
+      expect(row).toBeInTheDocument();
+      expect(row.querySelector("img")).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByTestId("platform-token-cost-claude-sonnet"),
+    ).toHaveTextContent("Claude Code (Sonnet 4.6, API)");
+    expect(
+      screen.getByTestId("platform-token-cost-claude-sonnet"),
+    ).toHaveTextContent("$1,875");
+    expect(
+      screen.getByTestId("platform-token-cost-claude-opus"),
+    ).toHaveTextContent("$3,125");
+    expect(
+      screen.getByTestId("platform-token-cost-google-antigravity"),
+    ).toHaveTextContent("An estimated $469");
+    expect(
+      screen.getByTestId("platform-token-cost-openclaw-hermes"),
+    ).toHaveTextContent("$50");
+    expect(screen.getByTestId("platform-token-costs")).toHaveTextContent(
+      "Open-source agents are free to install",
+    );
+  });
+
   it("cycles the package cards: hold, dissolve, then the next card appears", async () => {
     jest.useFakeTimers();
     await renderLanding();
@@ -733,8 +820,47 @@ describe("Landing", () => {
     expect(screen.getByText(/Full Block/)).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Any information returning with the agent that is even slightly suspicious is terminated/,
+        /Every agent output enters a fresh isolated sandbox immediately through the IronClaw front gate/,
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /no original output reaches the platform or user until the sandbox verdict is allow/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the complete protected-platform return workflow", async () => {
+    await renderLanding();
+
+    const workflow = screen.getByTestId("workflow-roadmap");
+    expect(workflow).toBeInTheDocument();
+    expect(
+      within(workflow).getByRole("heading", {
+        name: /The IronClaw Front Gate/i,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(workflow).getByText("Llama Prompt Guard 2"),
+    ).toBeInTheDocument();
+    expect(within(workflow).getByText("Python rules")).toBeInTheDocument();
+    expect(within(workflow).getByText("Sanitizer")).toBeInTheDocument();
+
+    for (const platform of [
+      "Claude Code",
+      "OpenClaw",
+      "Cursor",
+      "Goose",
+      "Hermes Agent",
+      "Gemini CLI",
+      "GitHub Copilot",
+      "Google Antigravity",
+    ]) {
+      expect(within(workflow).getAllByText(platform).length).toBeGreaterThan(0);
+    }
+
+    for (let stage = 1; stage <= 8; stage += 1) {
+      expect(screen.getByTestId(`workflow-stage-${stage}`)).toBeInTheDocument();
+    }
   });
 });

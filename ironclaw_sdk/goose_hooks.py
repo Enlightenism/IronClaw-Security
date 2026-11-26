@@ -32,7 +32,12 @@ def goose_plugin_dir(home: Path | None = None) -> Path:
 
 
 def plugin_manifest() -> dict[str, str]:
-    return {"name": PLUGIN_NAME, "version": PLUGIN_VERSION, "description": "IronClaw install gate for Goose."}
+    return {
+        "name": PLUGIN_NAME,
+        "version": PLUGIN_VERSION,
+        "description": "IronClaw fail-closed install gate for Goose.",
+        "return_enforcement": "unsupported",
+    }
 
 
 def hook_command() -> str:

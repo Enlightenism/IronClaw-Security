@@ -10,9 +10,14 @@ from app.services.guard_security_brain import (
     GuardSecurityDecision,
     build_guard_security_request,
     evaluate_guard_security_request,
+    export_guard_brain_snapshot,
     summarize_guard_security_decision,
 )
-from app.services.prompt_guard import PromptGuardResult
+from app.services.prompt_guard import (
+    PromptGuardResult,
+    _load_prompt_guard,
+)
+from app.services.scanner import export_sandbox_scanner_rules
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +34,29 @@ def test_guard_security_decision_defaults_to_local_model_name():
     )
 
     assert decision.model_name == "prompt-guard-86m-local"
+
+
+def test_missing_prompt_guard_model_fails_closed(tmp_path) -> None:
+    _load_prompt_guard.cache_clear()
+
+    with pytest.raises(RuntimeError, match="missing|incomplete"):
+        _load_prompt_guard(str(tmp_path))
+
+
+def test_export_guard_brain_snapshot_contains_fail_closed_policy() -> None:
+    snapshot = export_guard_brain_snapshot()
+
+    assert snapshot["model_name"]
+    assert snapshot["allow_max"] == RISK_THRESHOLD_ALLOW_MAX
+    assert snapshot["block_min"] == RISK_THRESHOLD_BLOCK_MIN
+
+
+def test_export_sandbox_scanner_rules_is_complete() -> None:
+    snapshot = export_sandbox_scanner_rules()
+
+    assert snapshot["version"] == "runtime-1"
+    assert snapshot["rules"]
+    assert all(isinstance(rule.get("code"), str) and isinstance(rule.get("pattern"), str) for rule in snapshot["rules"])
 
 
 def test_guard_security_request_requires_action_type_and_target():

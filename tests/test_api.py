@@ -1,8 +1,14 @@
 from fastapi.testclient import TestClient
+import pytest
 
 from app.main import app
 
 client = TestClient(app, headers={"X-API-Key": "test-api-key"})
+
+
+@pytest.fixture(autouse=True)
+def mock_sandbox_allow(monkeypatch):
+    monkeypatch.setattr("app.api.scan.run_sandbox_scan", lambda *_args, **_kwargs: "allow")
 
 
 def test_root():
@@ -58,7 +64,9 @@ def test_scan_rejects_empty_after_normalization():
     assert response.status_code == 400
 
 
-def test_scan_blocks_sandbox_targets():
+def test_scan_blocks_sandbox_targets(monkeypatch):
+    monkeypatch.setattr("app.api.scan.run_sandbox_scan", lambda *_args, **_kwargs: "block")
+
     response = client.post(
         "/scan/",
         json={

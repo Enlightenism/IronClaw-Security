@@ -23,7 +23,13 @@ class _Broker:
 
 
 def test_return_gate_component_ok_when_broker_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
-    payload = {"reachable": True, "reason": None, "scanner_image": "ready"}
+    payload = {
+        "reachable": True,
+        "reason": None,
+        "scanner_image": "ready",
+        "prompt_guard_model": "ready",
+        "policy_snapshot": "ready",
+    }
     monkeypatch.setattr(health_module, "SandboxBrokerClient", lambda: _Broker(payload))
 
     component = health_module._build_return_gate_component()
@@ -50,7 +56,7 @@ def test_return_gate_component_degraded_when_scanner_image_missing(monkeypatch: 
 
     assert component.status == HealthStatus.degraded
     assert component.details["scanner_image"] == "missing"
-    assert component.details["reason"] == "scanner_image_not_ready"
+    assert component.details["reason"] == "sandbox_release_bundle_not_ready"
 
 
 def test_return_gate_component_degraded_when_broker_omits_scanner_image(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -60,7 +66,29 @@ def test_return_gate_component_degraded_when_broker_omits_scanner_image(monkeypa
 
     assert component.status == HealthStatus.degraded
     assert component.details["scanner_image"] == "unknown"
-    assert component.details["reason"] == "scanner_image_not_ready"
+    assert component.details["reason"] == "sandbox_release_bundle_not_ready"
+
+
+def test_return_gate_component_degraded_when_model_or_policy_is_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "reachable": True,
+        "reason": None,
+        "scanner_image": "ready",
+        "prompt_guard_model": "not_ready",
+        "policy_snapshot": "ready",
+    }
+    monkeypatch.setattr(
+        health_module,
+        "SandboxBrokerClient",
+        lambda: _Broker(payload),
+    )
+
+    component = health_module._build_return_gate_component()
+
+    assert component.status == HealthStatus.degraded
+    assert component.details["prompt_guard_model"] == "not_ready"
 
 
 def test_return_gate_component_errors_when_health_check_raises(monkeypatch: pytest.MonkeyPatch) -> None:

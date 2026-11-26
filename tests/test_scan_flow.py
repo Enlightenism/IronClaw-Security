@@ -74,6 +74,11 @@ def mock_prompt_guard(monkeypatch):
     return classifier
 
 
+@pytest.fixture(autouse=True)
+def mock_sandbox_allow(monkeypatch):
+    monkeypatch.setattr("app.api.scan.run_sandbox_scan", lambda *_args, **_kwargs: "allow")
+
+
 client = TestClient(app)
 
 SAFE_PAYLOAD = {"target_type": "prompt", "target_value": "Hello, how are you?"}
@@ -700,7 +705,10 @@ def test_scan_emits_sandbox_evaluated_event():
 
 
 def test_scan_applies_sandbox_policy():
-    with patch("app.api.scan.apply_sandbox_policy", wraps=lambda result, decision, sandbox_verdict="block": result) as mock_policy:
+    with (
+        patch("app.api.scan.run_sandbox_scan", return_value="allow"),
+        patch("app.api.scan.apply_sandbox_policy", wraps=lambda result, decision, sandbox_verdict="block": result) as mock_policy,
+    ):
         resp = client.post("/scan/", json=SAFE_PAYLOAD)
     assert resp.status_code == 200
     mock_policy.assert_called_once()
@@ -735,7 +743,7 @@ def test_sandbox_required_blocks_and_floors_risk():
     assert result["risk_score"] >= scanner.RISK_THRESHOLD_BLOCK_MIN
     assert result["review_status"] == "none"
     assert result["untrusted"] is True
-    assert result["quarantine_reason"] == "skill requires sandbox handling"
+    assert result["quarantine_reason"] is None
 
 
 @pytest.mark.parametrize("legacy_verdict", ["warn", "quarantine"])
@@ -794,7 +802,15 @@ def test_run_sandbox_scan_fails_closed(outcome):
 
 def test_run_sandbox_scan_allows_only_on_allow_verdict():
     runner = MagicMock()
-    runner.run.return_value = {"verdict": "allow"}
+    runner.run.return_value = {
+        "verdict": "allow",
+        "status": "completed",
+        "executor": "docker",
+        "reasons": [],
+        "risk_score": 0,
+        "untrusted": False,
+        "released_text": "released",
+    }
 
     assert sandbox_service.run_sandbox_scan("skill", "/tmp/sample", runner=runner) == "allow"
 

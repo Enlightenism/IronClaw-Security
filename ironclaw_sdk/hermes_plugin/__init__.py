@@ -56,7 +56,11 @@ def transform_tool_result(tool_name: str = "", result: Any = None, args: Any = N
         return BLOCKED_REPLACEMENT_TEXT
     verdict = decision.get("verdict")
     if verdict == "allow":
-        return None
+        released_text = decision.get("released_text")
+        if not isinstance(released_text, str):
+            return BLOCKED_REPLACEMENT_TEXT
+        original_text = body["content"]
+        return None if released_text == original_text else released_text
     replacement = decision.get("replacement")
     if verdict == "block" and isinstance(replacement, str) and replacement:
         return replacement

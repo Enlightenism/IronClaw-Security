@@ -254,22 +254,6 @@ def default_policy_rules() -> list[PolicyRule]:
             risk_level="high",
             tags=("network", "exfiltration"),
         ),
-        PolicyRule(
-            rule_id="unreviewed-agent-escalation",
-            name="Unreviewed Agent Escalation",
-            description="Blocks attempts to escalate privileges or bypass human approval.",
-            action_types=("approval", "tool_call", "message"),
-            content_patterns=(
-                "approve this automatically",
-                "bypass review",
-                "self-approve",
-                "grant admin",
-            ),
-            min_risk_score=60,
-            verdict="block",
-            risk_level="high",
-            tags=("approval", "privilege"),
-        ),
     ]
 
 
@@ -288,8 +272,8 @@ def summarize_policy_engine(engine: PolicyEngine) -> dict[str, Any]:
         "mode": engine.mode,
         "total_rules": len(engine.rules),
         "block_rules": sum(1 for rule in engine.rules if rule.verdict == "block"),
-        "quarantine_rules": sum(1 for rule in engine.rules if rule.verdict == "quarantine"),
-        "warn_rules": sum(1 for rule in engine.rules if rule.verdict == "warn"),
+        "quarantine_rules": 0,
+        "warn_rules": 0,
         "allow_rules": sum(1 for rule in engine.rules if rule.verdict == "allow"),
         "updated_at": engine.updated_at,
     }
@@ -392,7 +376,7 @@ def evaluate_policy(
     if final_verdict == "block":
         final_risk_score = max(final_risk_score, RISK_THRESHOLD_BLOCK_MIN)
         final_risk_level = _derive_risk_level(matched_rules, final_risk_score)
-    requires_review = any(match.risk_level == "high" for match in matched_rules)
+    requires_review = False
     allow_execution = _allow_execution(engine.mode, final_verdict)
     summary = _build_summary(final_verdict, matched_rules, reasons)
 
@@ -435,6 +419,19 @@ def enforce_policy(
         ),
         risk_score=risk_score,
     )
+
+
+def export_sandbox_policy_snapshot(engine: PolicyEngine | None = None) -> dict[str, Any]:
+    active_engine = engine or initialize_policy_engine(mode="enforce")
+    return {
+        "version": "sandbox-policy-1",
+        "fail_closed": True,
+        "allow_max": RISK_THRESHOLD_ALLOW_MAX,
+        "block_min": RISK_THRESHOLD_BLOCK_MIN,
+        "mode": "enforce",
+        "requires_review": False,
+        "rules": [rule.to_dict() for rule in active_engine.rules if rule.verdict == "block"],
+    }
 
 
 def _rule_matches(

@@ -15,6 +15,37 @@
 # exclusively from .env and are intentionally absent here.
 
 services:
+  sandbox-broker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ironclaw-sandbox-broker
+    restart: unless-stopped
+    init: true
+    command: sh -c "python -m sandbox_broker.build_image && python -m sandbox_broker.main"
+    env_file:
+      - .env
+    environment:
+      SANDBOX_BROKER_BIND_HOST: "127.0.0.1"
+      SANDBOX_BROKER_PORT: "8088"
+      SANDBOX_BROKER_IMAGE: "ironclaw-sandbox-scanner:1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl --fail --silent http://127.0.0.1:8088/health || exit 1",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
   ironclaw:
     build:
       context: .
@@ -23,11 +54,11 @@ services:
     restart: unless-stopped
     init: true
 
-    ports:
-      - "8000:8000"
+    network_mode: "service:sandbox-broker"
 
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      sandbox-broker:
+        condition: service_healthy
 
     env_file:
       - .env
@@ -70,23 +101,13 @@ services:
       DEFAULT_REVIEW_STATUS: "not_required"
 
       # -----------------------------------------------------------------------
-      # Host sandbox broker
-      # NOT a compose service: it needs host Docker access, so it runs on the
-      # host with: python -m sandbox_broker.main
-      # It refuses to start unless SANDBOX_BROKER_TOKEN is set in its process
-      # environment. Export the same value from .env in the host shell (the broker
-      # does not read .env). The token is passed to this container via env_file only.
-      # Without it, every return is blocked with broker_unconfigured.
-      # Build the scanner image once before starting the broker:
-      #   python -m sandbox_broker.build_image
-      # Until it exists, /health reports scanner_image=missing and returns are blocked.
-      # The broker binds to 127.0.0.1:8088 and rejects non-loopback bind hosts.
-      # Docker Desktop (Windows/macOS) reaches it via host.docker.internal.
-      # Linux Docker Engine is NOT supported by this layout as-is: host-gateway
-      # resolves to the bridge gateway, which cannot reach a loopback listener.
-      # Do not relax the loopback rule to work around it; that needs a reviewed change.
+      # Sandbox broker
+      # The broker service shares the API container network namespace, so the
+      # broker remains reachable only on loopback inside that namespace.
+      # Docker socket access is limited to the broker service. Production startup
+      # fails closed if the broker, scanner image, model, or policy bundle are unavailable.
       # -----------------------------------------------------------------------
-      SANDBOX_BROKER_URL: "http://host.docker.internal:8088"
+      SANDBOX_BROKER_URL: "http://127.0.0.1:8088"
 
       # -----------------------------------------------------------------------
       # Risk thresholds  (allow_max < quarantine_min <= block_min)
@@ -156,7 +177,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "curl --fail --silent http://127.0.0.1:8000/api/health || curl --fail --silent http://127.0.0.1:8000/api/health/liveness || exit 1",
+          "curl --fail --silent http://127.0.0.1:8000/health/readiness || exit 1",
         ]
       interval: 30s
       timeout: 5s

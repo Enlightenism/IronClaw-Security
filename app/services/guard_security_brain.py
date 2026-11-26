@@ -464,6 +464,17 @@ def evaluate_guard_security_request(
 # ---------------------------------------------------------------------------
 
 
+def export_guard_brain_snapshot() -> dict[str, Any]:
+    return {
+        "model_name": Path(GUARD_MODEL_PATH).name or "prompt-guard-86m",
+        "model_path": str(Path(GUARD_MODEL_PATH).resolve()),
+        "enabled": bool(GUARD_ENABLED),
+        "threshold": float(GUARD_THRESHOLD),
+        "allow_max": int(RISK_THRESHOLD_ALLOW_MAX),
+        "block_min": int(RISK_THRESHOLD_BLOCK_MIN),
+    }
+
+
 def summarize_guard_security_decision(
     decision: GuardSecurityDecision,
 ) -> dict[str, Any]:
