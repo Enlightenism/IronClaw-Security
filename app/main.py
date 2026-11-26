@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from importlib import import_module
 from inspect import isawaitable
 import logging
+import os
 from typing import Any, cast
 
 from fastapi import Depends, FastAPI
@@ -674,6 +676,47 @@ def _sandbox_release_readiness() -> dict[str, Any]:
     }
 
 
+def _sandbox_startup_block_message(readiness: dict[str, Any]) -> str:
+    reason = str(readiness.get("reason") or "sandbox_release_gate_not_ready")
+    if reason == "broker_unconfigured":
+        return "Production startup blocked: sandbox broker is not configured. Set SANDBOX_BROKER_URL and SANDBOX_BROKER_TOKEN to the Docker-capable sandbox broker, then redeploy."
+    if reason == "broker_unreachable":
+        return "Production startup blocked: the configured sandbox broker is unreachable. Verify the private broker URL, broker process, network route, and token."
+    if reason == "sandbox_scanner_image_not_ready":
+        return "Production startup blocked: the sandbox scanner image is missing, incomplete, outdated, or unavailable."
+    if reason == "prompt_guard_model_not_ready":
+        return "Production startup blocked: the Prompt Guard model is missing or incomplete on the sandbox broker."
+    if reason == "sandbox_policy_snapshot_not_ready":
+        return "Production startup blocked: the sandbox security policy snapshot is missing or unavailable."
+    return f"Production startup blocked: sandbox release gate is not ready ({reason})."
+
+
+async def _wait_for_sandbox_release_readiness() -> dict[str, Any]:
+    readiness = _sandbox_release_readiness()
+    if readiness["ready"]:
+        return readiness
+
+    if readiness["reason"] == "broker_unconfigured":
+        return readiness
+
+    try:
+        grace_seconds = float(os.getenv("SANDBOX_BROKER_STARTUP_GRACE_SECONDS", "30"))
+    except (TypeError, ValueError):
+        grace_seconds = 30.0
+    grace_seconds = max(0.0, min(grace_seconds, 300.0))
+    if grace_seconds == 0:
+        return readiness
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + grace_seconds
+    while loop.time() < deadline:
+        await asyncio.sleep(2.0)
+        readiness = _sandbox_release_readiness()
+        if readiness["ready"]:
+            return readiness
+    return readiness
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pipeline = None
@@ -697,12 +740,12 @@ async def lifespan(app: FastAPI):
     _log.info("main.lifespan: startup begin")
 
     settings = get_settings()
-    sandbox_readiness = _sandbox_release_readiness()
+    sandbox_readiness = await _wait_for_sandbox_release_readiness()
     app.state.sandbox_release_ready = bool(sandbox_readiness["ready"])
     app.state.sandbox_release_readiness = sandbox_readiness
     if not sandbox_readiness["ready"]:
         if settings.environment.strip().lower() == "production":
-            raise RuntimeError(f"Production startup blocked: sandbox release gate is not ready ({sandbox_readiness['reason']}).")
+            raise RuntimeError(_sandbox_startup_block_message(sandbox_readiness))
         _log.warning(
             "main.lifespan: sandbox release gate not ready outside production: %s",
             sandbox_readiness["reason"],

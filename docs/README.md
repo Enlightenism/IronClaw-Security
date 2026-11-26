@@ -23,6 +23,7 @@ of modeling it as a single-agent or one-off package.
 | [integration_guides/openai.md](./integration_guides/openai.md) | OpenAI integration guide                                                                       |
 | [integration_guides/guard.md](./integration_guides/guard.md)   | Local Prompt Guard classifier and configuration guide                                          |
 | [integration_guides/mcp.md](./integration_guides/mcp.md)       | MCP-style toolchain integration guide                                                          |
+| [render_deployment.md](./render_deployment.md)                 | Render API deployment with the required external Docker sandbox broker                         |
 
 ---
 

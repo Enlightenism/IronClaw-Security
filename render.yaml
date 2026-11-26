@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: ironclaw-security-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/readiness
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: ENVIRONMENT
+        value: production
+      - key: IRONCLAW_ENV
+        value: production
+      - key: AUTH_REQUIRED
+        value: "true"
+      - key: GUARD_ENABLED
+        value: "true"
+      - key: SANDBOX_BROKER_STARTUP_GRACE_SECONDS
+        value: "60"
+      - key: IRONCLAW_SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SANDBOX_BROKER_URL
+        sync: false
+      - key: SANDBOX_BROKER_TOKEN
+        sync: false
