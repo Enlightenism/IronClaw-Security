@@ -16,13 +16,15 @@ the Render dashboard:
 - `SANDBOX_BROKER_URL`
 - `SANDBOX_BROKER_TOKEN`
 
-Set `SANDBOX_BROKER_URL` to the private broker health/run endpoint. Do not use
-`host.docker.internal` or an unrelated public origin. Set the broker token to
-the same value used by the broker process.
+Set `SANDBOX_BROKER_URL` to the private broker base URL, for example
+`https://broker.internal.example:8443`. Do not include `/health`, `/run`, query
+parameters, credentials, or fragments. Do not use `host.docker.internal` or an
+unrelated public origin. Set the broker token to the same value used by the
+broker process.
 
-The existing Render service must use Docker runtime. Set the dashboard
-`PYTHON_VERSION` to `3.12.10` or remove the stale `3.12.x` value. Do not use
-a wildcard Python version.
+The existing Render service must use Docker runtime. The Docker image pins
+Python 3.12 through `python:3.12-slim`; remove stale dashboard
+`PYTHON_VERSION=3.12.x` settings and do not use a wildcard Python version.
 
 The API remains production-fail-closed:
 

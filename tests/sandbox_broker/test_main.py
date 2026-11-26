@@ -119,3 +119,34 @@ def test_decide_returns_complete_block_contract(
     assert result["reasons"] == ["instruction_override"]
     assert result["risk_score"] == 100
     assert result["untrusted"] is True
+
+
+def test_prompt_guard_model_status_requires_complete_supported_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    model_root = tmp_path / "prompt-guard-86m"
+    model_root.mkdir()
+    for filename in main.REQUIRED_PROMPT_GUARD_FILES:
+        (model_root / filename).write_text("{}", encoding="utf-8")
+    (model_root / "config.json").write_text(
+        '{"model_type":"deberta-v2","architectures":["DebertaV2ForSequenceClassification"]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main, "PROMPT_GUARD_MODEL_ROOT", model_root)
+
+    assert main.prompt_guard_model_status() == "ready"
+
+
+def test_policy_snapshot_status_requires_fail_closed_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    policy_file = tmp_path / "policy_snapshot.json"
+    policy_file.write_text(
+        '{"fail_closed":true,"prompt_guard_model":"prompt-guard-86m","prompt_guard_threshold":0.5,"block_threshold":70}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main, "POLICY_SNAPSHOT_FILE", policy_file)
+
+    assert main.policy_snapshot_status() == "ready"

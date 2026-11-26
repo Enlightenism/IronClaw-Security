@@ -11,6 +11,7 @@ import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
+from pathlib import Path
 import threading
 from typing import Any
 
@@ -22,6 +23,52 @@ RUN_PATH = "/run"
 HEALTH_PATH = "/health"
 MAX_CONCURRENT_SCANS = 4
 _scan_slots = threading.BoundedSemaphore(MAX_CONCURRENT_SCANS)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROMPT_GUARD_MODEL_ROOT = PROJECT_ROOT / "models" / "prompt-guard-86m"
+POLICY_SNAPSHOT_FILE = PROJECT_ROOT / "sandbox_broker" / "policy_snapshot.json"
+REQUIRED_PROMPT_GUARD_FILES = (
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "special_tokens_map.json",
+    "model.safetensors",
+)
+
+
+def prompt_guard_model_status() -> str:
+    if any(not (PROMPT_GUARD_MODEL_ROOT / filename).is_file() for filename in REQUIRED_PROMPT_GUARD_FILES):
+        return "not_ready"
+    try:
+        config = json.loads((PROMPT_GUARD_MODEL_ROOT / "config.json").read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, OSError):
+        return "not_ready"
+    if not isinstance(config, dict):
+        return "not_ready"
+    if config.get("model_type") != "deberta-v2":
+        return "not_ready"
+    if config.get("architectures") != ["DebertaV2ForSequenceClassification"]:
+        return "not_ready"
+    return "ready"
+
+
+def policy_snapshot_status() -> str:
+    try:
+        policy = json.loads(POLICY_SNAPSHOT_FILE.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, OSError):
+        return "not_ready"
+    if not isinstance(policy, dict):
+        return "not_ready"
+    if policy.get("fail_closed") is not True:
+        return "not_ready"
+    if policy.get("prompt_guard_model") != "prompt-guard-86m":
+        return "not_ready"
+    threshold = policy.get("prompt_guard_threshold")
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not 0.0 <= float(threshold) <= 1.0:
+        return "not_ready"
+    block_threshold = policy.get("block_threshold")
+    if isinstance(block_threshold, bool) or not isinstance(block_threshold, int) or not 1 <= block_threshold <= 100:
+        return "not_ready"
+    return "ready"
 
 
 def _block(reason: str) -> dict[str, Any]:
@@ -142,14 +189,15 @@ class BrokerHandler(BaseHTTPRequestHandler):
             return
         config = self.server.broker_config
         scanner_image = scanner_image_status(config)
-        ready = scanner_image == "ready"
+        prompt_guard_model = prompt_guard_model_status()
+        policy_snapshot = policy_snapshot_status()
         self._send_json(
             200,
             {
                 "status": "ok",
                 "scanner_image": scanner_image,
-                "prompt_guard_model": "ready" if ready else "not_ready",
-                "policy_snapshot": "ready" if ready else "not_ready",
+                "prompt_guard_model": prompt_guard_model,
+                "policy_snapshot": policy_snapshot,
             },
         )
 

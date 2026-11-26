@@ -53,7 +53,7 @@ dependencies = [
   "stripe>=7.0.0,<10.0",
   "cryptography>=42.0.8",
   "PyJWT>=2.8.0",
-  "typer[all]>=0.12,<0.16",
+  "typer>=0.12,<0.16",
   "rich>=13.7,<15.0",
   "huggingface_hub>=1.31.0,<3.0"
 ]
@@ -96,7 +96,7 @@ skill = [
 ]
 sdk = [
   "httpx>=0.27,<1.0",
-  "typer[all]>=0.12,<0.16",
+  "typer>=0.12,<0.16",
   "rich>=13.7,<15.0"
 ]
 all = [

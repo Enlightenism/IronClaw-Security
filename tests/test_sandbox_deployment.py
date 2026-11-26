@@ -12,6 +12,25 @@ def test_sandbox_startup_error_names_missing_broker_configuration() -> None:
     assert "SANDBOX_BROKER_TOKEN" in message
 
 
+def test_sandbox_startup_error_names_invalid_broker_url() -> None:
+    from app.main import _sandbox_startup_block_message
+
+    message = _sandbox_startup_block_message({"reason": "broker_url_invalid"})
+
+    assert "SANDBOX_BROKER_URL" in message
+    assert "http://" in message
+    assert "https://" in message
+
+
+def test_sandbox_broker_url_normalization_rejects_untrusted_forms() -> None:
+    from app.services.sandbox_broker_client import normalize_broker_url
+
+    assert normalize_broker_url("https://broker.internal.example:8443") == "https://broker.internal.example:8443"
+    assert normalize_broker_url("ftp://broker.internal.example") is None
+    assert normalize_broker_url("https://user:password@broker.internal.example") is None
+    assert normalize_broker_url("https://broker.internal.example/health?token=secret") is None
+
+
 def test_compose_runs_mandatory_sandbox_broker_service() -> None:
     compose = (PROJECT_ROOT / "compose.yaml").read_text(encoding="utf-8")
 
@@ -36,7 +55,7 @@ def test_render_blueprint_pins_supported_runtime_and_external_broker() -> None:
     assert "runtime: docker" in render
     assert "dockerfilePath: ./Dockerfile" in render
     assert "healthCheckPath: /health/readiness" in render
-    assert 'value: "3.12.10"' in render
+    assert "PYTHON_VERSION" not in render
     assert "key: SANDBOX_BROKER_URL" in render
     assert "key: SANDBOX_BROKER_TOKEN" in render
     assert "sync: false" in render

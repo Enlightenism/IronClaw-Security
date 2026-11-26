@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -15,6 +16,25 @@ BROKER_TIMEOUT_MARGIN_SECONDS = 20.0
 BROKER_CONNECT_TIMEOUT_SECONDS = 2.0
 BROKER_HEALTH_TIMEOUT_SECONDS = 2.0
 BROKER_TOKEN_HEADER = "X-Broker-Token"
+
+
+def normalize_broker_url(value: str) -> str | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip().rstrip("/")
+    if not raw:
+        return None
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.hostname is None:
+        return None
+    if parsed.username is not None or parsed.password is not None:
+        return None
+    if parsed.query or parsed.fragment:
+        return None
+    return raw
 
 
 def broker_block(reason: str) -> dict[str, Any]:
@@ -40,7 +60,9 @@ def broker_block(reason: str) -> dict[str, Any]:
 class SandboxBrokerClient:
     def __init__(self, broker_url: str | None = None, broker_token: str | None = None) -> None:
         url = broker_url or os.environ.get(SANDBOX_BROKER_URL_ENV) or DEFAULT_SANDBOX_BROKER_URL
-        self._broker_url = url.rstrip("/")
+        normalized_url = normalize_broker_url(url)
+        self._broker_url = normalized_url or ""
+        self._broker_url_invalid = normalized_url is None
         self._broker_token = broker_token if broker_token is not None else os.environ.get(SANDBOX_BROKER_TOKEN_ENV, "").strip()
 
     def run(
@@ -53,6 +75,8 @@ class SandboxBrokerClient:
         read_only_fs: bool = True,
         network_enabled: bool = False,
     ) -> dict[str, Any]:
+        if self._broker_url_invalid:
+            return broker_block("broker_url_invalid")
         if not self._broker_token:
             return broker_block("broker_unconfigured")
 
@@ -119,6 +143,8 @@ class SandboxBrokerClient:
         return data
 
     def health(self) -> dict[str, Any]:
+        if self._broker_url_invalid:
+            return {"reachable": False, "reason": "broker_url_invalid"}
         if not self._broker_token:
             return {"reachable": False, "reason": "broker_unconfigured"}
         timeout = httpx.Timeout(BROKER_HEALTH_TIMEOUT_SECONDS, connect=BROKER_CONNECT_TIMEOUT_SECONDS)

@@ -680,6 +680,8 @@ def _sandbox_startup_block_message(readiness: dict[str, Any]) -> str:
     reason = str(readiness.get("reason") or "sandbox_release_gate_not_ready")
     if reason == "broker_unconfigured":
         return "Production startup blocked: sandbox broker is not configured. Set SANDBOX_BROKER_URL and SANDBOX_BROKER_TOKEN to the Docker-capable sandbox broker, then redeploy."
+    if reason == "broker_url_invalid":
+        return "Production startup blocked: SANDBOX_BROKER_URL is invalid. Use an absolute http:// or https:// URL without credentials, query parameters, or fragments."
     if reason == "broker_unreachable":
         return "Production startup blocked: the configured sandbox broker is unreachable. Verify the private broker URL, broker process, network route, and token."
     if reason == "sandbox_scanner_image_not_ready":
